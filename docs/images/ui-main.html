@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>MagPDF 主界面</title>
+<!--
+  方案 8.2 节界面图 ui-main.png 的源文件。修改后在 docs/images 目录下用 PowerShell 重新截图
+  （单独的 user-data-dir 防止已打开的 Edge 接管这次调用，不加时不会生成截图）：
+  Start-Process "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" -Wait -ArgumentList "--headless=new","--disable-gpu","--hide-scrollbars","--no-first-run","--user-data-dir=$env:TEMP\magpdf-edge-shot","--force-device-scale-factor=2","--window-size=1536,960","--screenshot=$PWD\ui-main.png","file:///$($PWD.Path -replace '\\','/')/ui-main.html"
+-->
+<style>
+:root {
+  --shell: #2b2b2b;
+  --panel: #323232;
+  --input: #1e1e1e;
+  --canvas: #1f1f1f;
+  --text: #d6d6d6;
+  --text2: #9a9a9a;
+  --accent: #3d8ee6;
+  --sep: #1e1e1e;
+  --line: #3e3e3e;
+  --ok: #6cc070;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  width: 1536px; height: 960px; overflow: hidden;
+  background: var(--shell); color: var(--text);
+  font: 12px/1.4 "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+}
+svg { display: block; flex: none; }
+i[data-i] { display: inline-flex; font-style: normal; }
+.app { display: grid; grid-template-rows: 28px 36px minmax(0, 1fr) 22px; height: 100%; }
+
+/* 菜单栏 */
+.menubar { display: flex; align-items: center; }
+.logo { width: 18px; height: 18px; margin: 0 6px 0 10px; border-radius: 3px; background: #0e2a47; color: #4aa3ff; font: 700 10px/18px "Segoe UI", sans-serif; text-align: center; }
+.menubar .m { padding: 0 9px; line-height: 28px; }
+.winctl { margin-left: auto; display: flex; height: 100%; }
+.winctl div { width: 46px; display: flex; align-items: center; justify-content: center; }
+
+/* 选项栏 */
+.optbar { display: flex; align-items: center; gap: 8px; padding: 0 10px; background: var(--panel); border-top: 1px solid var(--sep); border-bottom: 1px solid var(--sep); white-space: nowrap; }
+.vsep { width: 1px; height: 20px; background: #4a4a4a; margin: 0 4px; }
+.preset { display: flex; align-items: center; gap: 2px; height: 26px; padding: 0 4px 0 6px; border-radius: 3px; background: var(--input); }
+.ck { display: inline-flex; align-items: center; gap: 6px; }
+.box { width: 13px; height: 13px; border-radius: 2px; border: 1px solid #5c5c5c; background: var(--input); display: inline-flex; align-items: center; justify-content: center; color: #fff; }
+.box.on { background: var(--accent); border-color: var(--accent); }
+.dd { display: inline-flex; align-items: center; justify-content: space-between; gap: 8px; height: 22px; padding: 0 4px 0 8px; background: var(--input); border: 1px solid var(--line); border-radius: 2px; color: var(--text); }
+.dd i[data-i] { color: var(--text2); }
+.ibtn { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border-radius: 3px; color: var(--text); flex: none; }
+.ibtn.sm { width: 22px; height: 22px; color: var(--text2); }
+.ibtn.on { background: #454545; color: var(--text); }
+.num { display: inline-flex; align-items: center; gap: 6px; }
+.num .k { color: var(--text2); }
+.field { display: inline-flex; align-items: center; justify-content: space-between; gap: 6px; height: 22px; padding: 0 6px; min-width: 72px; background: var(--input); border: 1px solid var(--line); border-radius: 2px; }
+.field .u { color: #858585; }
+.optbar .right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+
+/* 主区域 */
+.main { display: grid; grid-template-columns: 40px 240px minmax(0, 1fr) 32px 280px; min-height: 0; }
+
+/* 工具栏 */
+.tools { position: relative; display: flex; flex-direction: column; align-items: center; padding-top: 6px; background: var(--panel); border-right: 1px solid var(--sep); }
+.grip { width: 16px; height: 4px; margin-bottom: 6px; border-top: 1px dotted #6a6a6a; border-bottom: 1px dotted #6a6a6a; }
+.tool { position: relative; width: 30px; height: 30px; margin: 1px 0; display: flex; align-items: center; justify-content: center; border-radius: 3px; color: var(--text); }
+.tool.on { background: #4a4a4a; color: #fff; }
+.tool .more { position: absolute; right: 3px; bottom: 3px; border-left: 4px solid transparent; border-bottom: 4px solid #9a9a9a; }
+.tsep { width: 22px; height: 1px; margin: 5px 0; background: #474747; }
+.swatch { position: absolute; left: 6px; bottom: 16px; width: 28px; height: 28px; }
+.swatch .fill { position: absolute; left: 0; top: 0; width: 18px; height: 18px; background: #111; border: 1px solid #cfcfcf; }
+.swatch .stroke { position: absolute; right: 0; bottom: 0; width: 18px; height: 18px; border: 4px solid #cfcfcf; outline: 1px solid #1a1a1a; outline-offset: -5px; }
+
+/* 组件面板 */
+.comp { display: flex; flex-direction: column; min-height: 0; background: var(--panel); border-right: 1px solid var(--sep); }
+.ptabs { height: 28px; flex: none; display: flex; align-items: stretch; background: var(--shell); border-bottom: 1px solid var(--sep); }
+.ptab { display: flex; align-items: center; padding: 0 12px; color: var(--text2); }
+.ptab.on { background: var(--panel); color: #e6e6e6; }
+.ptabs .tail { margin-left: auto; display: flex; align-items: center; gap: 2px; padding-right: 4px; color: var(--text2); }
+.search { height: 24px; flex: none; display: flex; align-items: center; gap: 6px; padding: 0 8px; background: var(--input); border: 1px solid var(--line); border-radius: 3px; color: #7a7a7a; }
+.comp > .search { margin: 8px; }
+.cats { flex: 1; overflow: hidden; }
+.cat { height: 24px; display: flex; align-items: center; gap: 4px; padding: 0 8px 0 6px; font-weight: 600; }
+.cat .car { color: var(--text2); display: inline-flex; }
+.cat .n { margin-left: auto; color: #7a7a7a; font-weight: 400; }
+.grid { display: grid; grid-template-columns: repeat(3, 72px); gap: 4px; padding: 0 8px 6px; }
+.cell { height: 72px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; background: #2a2a2a; border: 1px solid #3a3a3a; border-radius: 3px; }
+.cell .nm { font-size: 11px; color: #c8c8c8; line-height: 1; }
+
+/* 文档区 */
+.docarea { display: flex; flex-direction: column; min-width: 0; background: var(--canvas); }
+.doctabs { height: 28px; flex: none; display: flex; background: var(--shell); border-bottom: 1px solid var(--sep); }
+.dtab { display: flex; align-items: center; gap: 12px; padding: 0 10px 0 12px; color: var(--text2); border-right: 1px solid var(--sep); }
+.dtab.on { background: #3a3a3a; color: #ececec; }
+.dtab .x { color: #8a8a8a; font-size: 13px; }
+.cv { flex: 1; min-height: 0; display: grid; grid-template-columns: 20px minmax(0, 1fr); grid-template-rows: 20px minmax(0, 1fr); }
+.corner, .rul-h, .rul-v { background: var(--shell); overflow: hidden; }
+.corner { border-right: 1px solid var(--sep); border-bottom: 1px solid var(--sep); }
+.rul-h { border-bottom: 1px solid var(--sep); }
+.rul-v { border-right: 1px solid var(--sep); }
+.viewport { position: relative; overflow: hidden; background: var(--canvas); }
+.vscroll { position: absolute; right: 2px; top: 4px; width: 6px; height: 46%; border-radius: 3px; background: #4d4d4d; }
+
+/* 页面（单位 mm，100% 缩放） */
+.page { position: absolute; width: 210mm; height: 297mm; background: #fff; color: #151515; font-family: Arial, Helvetica, sans-serif; box-shadow: 0 0 0 1px rgba(0, 0, 0, .4), 0 4px 14px rgba(0, 0, 0, .6); }
+.page .a { position: absolute; white-space: nowrap; }
+.lb { font-size: 2.15mm; line-height: 1.2; color: #555; }
+.tx { font-size: 2.65mm; line-height: 4mm; }
+.th { font-size: 2.15mm; font-weight: 700; color: #333; text-align: center; }
+.frame { position: absolute; border: .35mm solid #2a2a2a; }
+.hl { position: absolute; left: 12mm; width: 186mm; border-top: .3mm solid #2a2a2a; }
+.vl { position: absolute; border-left: .3mm solid #2a2a2a; }
+.logo-img { width: 15mm; height: 15mm; border-radius: 1.6mm; background: #1d4f91; color: #fff; font: 700 10mm/15mm Arial, sans-serif; text-align: center; }
+.stamp { padding: 1.3mm 3mm; color: #c62828; font: 900 5.6mm/1 "Arial Black", Arial, sans-serif; letter-spacing: .5mm; border: .6mm solid #c62828; box-shadow: inset 0 0 0 .55mm #fff, inset 0 0 0 .85mm #c62828; transform: rotate(-8deg); mix-blend-mode: multiply; opacity: .9; }
+.bc { position: absolute; }
+.bc #bars svg { width: 100%; height: 12mm; }
+.bc .hrt { position: absolute; left: 0; right: 0; top: 12.7mm; text-align: center; font: 2.9mm/3.2mm Arial, sans-serif; letter-spacing: .45mm; color: #000; }
+.selbox { position: absolute; border: 1px solid var(--accent); }
+.selbox i { position: absolute; width: 7px; height: 7px; background: #fff; border: 1px solid var(--accent); transform: translate(-50%, -50%); }
+
+/* 折叠的面板图标条 */
+.strip { display: flex; flex-direction: column; align-items: center; padding-top: 6px; background: var(--panel); border-left: 1px solid var(--sep); }
+.sbtn { width: 26px; height: 26px; margin: 2px 0; display: flex; align-items: center; justify-content: center; border-radius: 3px; color: #bdbdbd; }
+.ssep { width: 18px; height: 1px; margin: 6px 0; background: #474747; }
+
+/* 右侧停靠面板 */
+.dock { display: flex; flex-direction: column; gap: 4px; min-height: 0; background: var(--shell); border-left: 1px solid var(--sep); }
+.pg { display: flex; flex-direction: column; min-height: 0; background: var(--panel); }
+.pg.props { flex: none; }
+.pg.layers { flex: 1; }
+.pbody { padding: 6px 8px 8px; }
+.ptitle { display: flex; align-items: center; gap: 8px; height: 26px; font-weight: 600; }
+.ptitle .sub { color: var(--text2); font-weight: 400; }
+.badge { margin-left: auto; padding: 0 7px; font-size: 11px; font-weight: 400; line-height: 16px; color: #9cc6f5; border: 1px solid #3d6ea6; border-radius: 9px; }
+.sect { display: flex; align-items: center; gap: 4px; height: 24px; margin-top: 4px; padding-top: 2px; border-top: 1px solid var(--line); color: #bdbdbd; font-size: 11px; font-weight: 600; }
+.sect i[data-i] { color: var(--text2); }
+.row { display: flex; align-items: center; gap: 6px; height: 28px; }
+.row > label { width: 56px; flex: none; color: var(--text2); }
+.row .grow { flex: 1; }
+.row .mono { font-family: Consolas, "Segoe UI", monospace; justify-content: flex-start; }
+.boxed { border: 1px solid var(--line); background: var(--input); font: 11px Consolas, monospace; color: var(--text); width: 30px; height: 22px; border-radius: 2px; }
+.row2 { display: grid; grid-template-columns: 26px 1fr 26px 1fr; align-items: center; gap: 6px; height: 28px; }
+.row2 label { color: var(--text2); }
+.row2 .field { min-width: 0; }
+.okbox { margin-top: 6px; padding: 4px 8px; border-radius: 3px; background: rgba(108, 192, 112, .08); border: 1px solid rgba(108, 192, 112, .25); }
+.ok { display: flex; align-items: center; gap: 6px; height: 20px; color: var(--ok); font-size: 11px; }
+.lfilter { display: flex; align-items: center; gap: 4px; padding: 6px 8px; }
+.lfilter .search { flex: 1; height: 22px; }
+.tbtn { width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; border-radius: 3px; color: var(--text2); font: 600 11px/1 "Segoe UI", sans-serif; }
+.lrow { height: 24px; display: flex; align-items: center; gap: 6px; padding: 0 8px; white-space: nowrap; }
+.lrow.pgrow { gap: 4px; padding-left: 6px; font-weight: 600; }
+.lrow.pgrow i[data-i] { color: var(--text2); }
+.lrow.child { padding-left: 22px; }
+.lrow.on { background: rgba(61, 142, 230, .32); color: #fff; }
+.lrow .eye { color: var(--text2); }
+.lrow.on .eye { color: #dbe9f8; }
+.ty { width: 16px; height: 16px; flex: none; border: 1px solid #6a6a6a; border-radius: 3px; font: 700 9px/14px "Segoe UI", sans-serif; text-align: center; color: #cfcfcf; }
+.ty.c { border-color: var(--accent); color: #8cc0f5; }
+.lrow .lk { margin-left: auto; color: var(--text2); }
+.lfoot { margin-top: auto; height: 28px; display: flex; align-items: center; justify-content: flex-end; gap: 4px; padding: 0 6px; border-top: 1px solid var(--line); }
+
+/* 状态栏 */
+.status { display: flex; align-items: center; background: var(--shell); border-top: 1px solid var(--sep); color: var(--text2); font-size: 11px; }
+.status > div { padding: 0 10px; line-height: 14px; border-right: 1px solid #3a3a3a; }
+.status .zoom { color: var(--text); }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="menubar">
+    <div class="logo">Mg</div>
+    <div class="m">文件</div><div class="m">编辑</div><div class="m">对象</div><div class="m">文字</div>
+    <div class="m">页面</div><div class="m">视图</div><div class="m">窗口</div><div class="m">帮助</div>
+    <div class="winctl"><div><i data-i="min"></i></div><div><i data-i="max"></i></div><div><i data-i="close"></i></div></div>
+  </div>
+
+  <div class="optbar">
+    <div class="preset"><i data-i="select"></i><i data-i="caret" data-s="12"></i></div>
+    <div class="vsep"></div>
+    <span class="ck"><span class="box on"><i data-i="check" data-s="11"></i></span>自动选择：</span>
+    <span class="dd">对象<i data-i="caret" data-s="12"></i></span>
+    <span class="ck"><span class="box on"><i data-i="check" data-s="11"></i></span>显示变换控件</span>
+    <div class="vsep"></div>
+    <span class="ibtn"><i data-i="alL"></i></span><span class="ibtn"><i data-i="alC"></i></span><span class="ibtn"><i data-i="alR"></i></span>
+    <span class="ibtn"><i data-i="alT"></i></span><span class="ibtn"><i data-i="alM"></i></span><span class="ibtn"><i data-i="alB"></i></span>
+    <div class="vsep"></div>
+    <span class="num"><span class="k">X</span><span class="field">120<span class="u">mm</span></span></span>
+    <span class="num"><span class="k">Y</span><span class="field">39.5<span class="u">mm</span></span></span>
+    <span class="num"><span class="k">W</span><span class="field">61.88<span class="u">mm</span></span></span>
+    <span class="num"><span class="k">H</span><span class="field">16<span class="u">mm</span></span></span>
+    <div class="right">
+      <span class="ibtn"><i data-i="search"></i></span>
+      <span class="dd"><i data-i="workspace"></i>货代单证<i data-i="caret" data-s="12"></i></span>
+    </div>
+  </div>
+
+  <div class="main">
+
+    <div class="tools">
+      <div class="grip"></div>
+      <div class="tool on"><i data-i="select"></i></div>
+      <div class="tsep"></div>
+      <div class="tool"><i data-i="text"></i></div>
+      <div class="tool"><i data-i="shape"></i><b class="more"></b></div>
+      <div class="tsep"></div>
+      <div class="tool"><i data-i="eyedrop"></i></div>
+      <div class="tool"><i data-i="crop"></i></div>
+      <div class="tsep"></div>
+      <div class="tool"><i data-i="hand"></i></div>
+      <div class="tool"><i data-i="zoom"></i></div>
+      <div class="swatch"><div class="stroke"></div><div class="fill"></div></div>
+    </div>
+
+    <div class="comp">
+      <div class="ptabs">
+        <div class="ptab on">组件</div>
+        <div class="tail"><span class="ibtn sm on"><i data-i="gridv"></i></span><span class="ibtn sm"><i data-i="listv"></i></span><span class="ibtn sm"><i data-i="collapse"></i></span></div>
+      </div>
+      <div class="search"><i data-i="search"></i>搜索：名称/拼音</div>
+      <div class="cats" id="cats"></div>
+    </div>
+
+    <div class="docarea">
+      <div class="doctabs">
+        <div class="dtab">合同.pdf<span class="x">×</span></div>
+        <div class="dtab on">提单.pdf*<span class="x">×</span></div>
+      </div>
+      <div class="cv">
+        <div class="corner"></div>
+        <div class="rul-h" id="rulH"></div>
+        <div class="rul-v" id="rulV"></div>
+        <div class="viewport" id="vp">
+          <div class="page" id="page">
+            <div class="a logo-img" style="left:12mm;top:13mm">S</div>
+            <div class="a" style="left:30mm;top:13.2mm;font-size:4.2mm;font-weight:700;letter-spacing:.1mm">SAMPLE LOGISTICS CO., LTD.</div>
+            <div class="a" style="left:30mm;top:19mm;font-size:3.3mm;font-family:'Microsoft YaHei',SimHei,sans-serif;color:#222">示例国际物流有限公司</div>
+            <div class="a" style="left:30mm;top:24.4mm;font-size:2.3mm;color:#555">18F, SAMPLE TOWER, 100 EXAMPLE ROAD, SHANGHAI, CHINA</div>
+            <div class="a" style="right:12mm;top:12.2mm;font-size:6.2mm;font-weight:700;letter-spacing:.3mm">BILL OF LADING</div>
+            <div class="a" style="right:12mm;top:20.6mm;font-size:2.15mm;color:#555">FOR COMBINED TRANSPORT OR PORT TO PORT SHIPMENT</div>
+            <div class="a" style="right:12mm;top:24.6mm;font-size:2.6mm;font-weight:700;color:#333">NON-NEGOTIABLE COPY</div>
+
+            <div class="frame" style="left:12mm;top:34mm;width:186mm;height:202mm"></div>
+            <div class="hl" style="top:58mm"></div>
+            <div class="hl" style="top:82mm"></div>
+            <div class="hl" style="top:98mm"></div>
+            <div class="hl" style="top:110mm"></div>
+            <div class="hl" style="top:117mm"></div>
+            <div class="hl" style="top:180mm"></div>
+            <div class="hl" style="top:188mm"></div>
+            <div class="hl" style="top:206mm"></div>
+            <div class="vl" style="left:105mm;top:34mm;height:76mm"></div>
+            <div class="vl" style="left:58.5mm;top:98mm;height:12mm"></div>
+            <div class="vl" style="left:151.5mm;top:98mm;height:12mm"></div>
+            <div class="vl" style="left:50mm;top:110mm;height:70mm"></div>
+            <div class="vl" style="left:80mm;top:110mm;height:70mm"></div>
+            <div class="vl" style="left:102mm;top:110mm;height:70mm"></div>
+            <div class="vl" style="left:158mm;top:110mm;height:70mm"></div>
+            <div class="vl" style="left:179mm;top:110mm;height:70mm"></div>
+            <div class="vl" style="left:105mm;top:188mm;height:48mm"></div>
+            <div class="vl" style="left:151.5mm;top:188mm;height:18mm"></div>
+
+            <div class="a lb" style="left:13.5mm;top:35.3mm">Shipper</div>
+            <div class="a tx" style="left:13.5mm;top:39mm">NINGBO SAMPLE TRADING CO., LTD.<br>NO. 88 SAMPLE ROAD, YINZHOU DISTRICT,<br>NINGBO, ZHEJIANG 315100, CHINA<br>TEL: +86 574 0000 0000</div>
+            <div class="a lb" style="left:106.5mm;top:35.3mm">B/L No.</div>
+
+            <div class="a lb" style="left:13.5mm;top:59.3mm">Consignee</div>
+            <div class="a tx" style="left:13.5mm;top:63mm">SAMPLE IMPORTS LLC<br>1200 EXAMPLE BLVD, SUITE 300<br>ONTARIO, CA 91761, UNITED STATES<br>TEL: +1 909 000 0000</div>
+            <div class="a lb" style="left:106.5mm;top:59.3mm">Delivery Agent</div>
+            <div class="a tx" style="left:106.5mm;top:63mm">SAMPLE AGENCY INC.<br>500 HARBOR DRIVE, LONG BEACH, CA 90802<br>TEL: +1 562 000 0000</div>
+
+            <div class="a lb" style="left:13.5mm;top:83.3mm">Notify Party</div>
+            <div class="a tx" style="left:13.5mm;top:87mm">SAME AS CONSIGNEE</div>
+            <div class="a lb" style="left:106.5mm;top:83.3mm">Place of Receipt</div>
+            <div class="a tx" style="left:106.5mm;top:87mm">NINGBO CY, CHINA</div>
+
+            <div class="a lb" style="left:13.5mm;top:99.2mm">Ocean Vessel / Voy. No.</div>
+            <div class="a tx" style="left:13.5mm;top:103mm">SAMPLE STAR V.2611E</div>
+            <div class="a lb" style="left:60mm;top:99.2mm">Port of Loading</div>
+            <div class="a tx" style="left:60mm;top:103mm">NINGBO, CHINA</div>
+            <div class="a lb" style="left:106.5mm;top:99.2mm">Port of Discharge</div>
+            <div class="a tx" style="left:106.5mm;top:103mm">LOS ANGELES, CA, USA</div>
+            <div class="a lb" style="left:153mm;top:99.2mm">Place of Delivery</div>
+            <div class="a tx" style="left:153mm;top:103mm">ONTARIO, CA, USA</div>
+
+            <div class="a th" style="left:12mm;width:38mm;top:111.9mm">Container No. / Seal No.</div>
+            <div class="a th" style="left:50mm;width:30mm;top:111.9mm">Marks &amp; Nos.</div>
+            <div class="a th" style="left:80mm;width:22mm;top:111.9mm">No. of Pkgs.</div>
+            <div class="a th" style="left:102mm;width:56mm;top:111.9mm">Description of Goods</div>
+            <div class="a th" style="left:158mm;width:21mm;top:111.9mm">Gross Weight</div>
+            <div class="a th" style="left:179mm;width:19mm;top:111.9mm">Measurement</div>
+
+            <div class="a tx" style="left:13.5mm;top:119.5mm">SMPU1234561<br>SEAL: SL260118<br>1 X 40'HQ<br>CY-CY</div>
+            <div class="a tx" style="left:51.5mm;top:119.5mm">SAMPLE<br>ONTARIO<br>C/NO. 1-20<br>MADE IN CHINA</div>
+            <div class="a tx" style="left:81.5mm;top:119.5mm">20<br>CARTONS</div>
+            <div class="a tx" style="left:103.5mm;top:119.5mm">SHIPPER'S LOAD, COUNT AND SEAL<br>SAID TO CONTAIN:<br>LED DESK LAMPS<br>HS CODE: 9405.21<br><br>FREIGHT COLLECT</div>
+            <div class="a tx" style="left:159.5mm;top:119.5mm">260.00<br>KGS</div>
+            <div class="a tx" style="left:180.5mm;top:119.5mm">2.150<br>CBM</div>
+
+            <div class="a stamp" style="left:108mm;top:149mm">TELEX RELEASED</div>
+
+            <div class="a lb" style="left:13.5mm;top:182.6mm">Total Number of Packages (in words):</div>
+            <div class="a tx" style="left:62mm;top:181.9mm;font-weight:700">SAY TOTAL TWENTY (20) CARTONS ONLY.</div>
+
+            <div class="a lb" style="left:13.5mm;top:189.3mm">Freight &amp; Charges</div>
+            <div class="a tx" style="left:13.5mm;top:193mm">FREIGHT COLLECT AS ARRANGED</div>
+            <div class="a lb" style="left:106.5mm;top:189.3mm">Place and Date of Issue</div>
+            <div class="a tx" style="left:106.5mm;top:193mm">NINGBO, NOV. 06, 2026</div>
+            <div class="a lb" style="left:153mm;top:189.3mm">No. of Original B(s)/L</div>
+            <div class="a tx" style="left:153mm;top:193mm">ZERO (0)</div>
+
+            <div class="a lb" style="left:13.5mm;top:207.3mm">Laden on Board the Vessel</div>
+            <div class="a tx" style="left:13.5mm;top:211mm">DATE: NOV. 06, 2026<br>BY: SAMPLE STAR V.2611E</div>
+            <div class="a lb" style="left:106.5mm;top:207.3mm">Signed for the Carrier</div>
+            <div class="a tx" style="left:106.5mm;top:211mm">SAMPLE LOGISTICS CO., LTD.<br>AS CARRIER</div>
+
+            <div class="bc" id="bc" style="left:120mm;top:39.5mm;height:16mm"><div id="bars"></div><div class="hrt">MGSHA26110015</div></div>
+            <div class="selbox" id="sel" style="left:120mm;top:39.5mm;height:16mm">
+              <i style="left:0;top:0"></i><i style="left:50%;top:0"></i><i style="left:100%;top:0"></i>
+              <i style="left:0;top:50%"></i><i style="left:100%;top:50%"></i>
+              <i style="left:0;top:100%"></i><i style="left:50%;top:100%"></i><i style="left:100%;top:100%"></i>
+            </div>
+          </div>
+          <div class="vscroll"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="strip">
+      <span class="sbtn"><i data-i="palette"></i></span>
+      <span class="sbtn"><i data-i="swatches"></i></span>
+      <div class="ssep"></div>
+      <span class="sbtn"><i data-i="nav"></i></span>
+      <span class="sbtn"><i data-i="info"></i></span>
+      <div class="ssep"></div>
+      <span class="sbtn"><i data-i="font"></i></span>
+      <span class="sbtn"><i data-i="scan"></i></span>
+    </div>
+
+    <div class="dock">
+      <div class="pg props">
+        <div class="ptabs">
+          <div class="ptab on">属性</div><div class="ptab">字符</div><div class="ptab">段落</div>
+          <div class="tail"><span class="ibtn sm"><i data-i="menu"></i></span></div>
+        </div>
+        <div class="pbody">
+          <div class="ptitle"><i data-i="barcode"></i>条码<span class="sub">Code 128</span><span class="badge">组件</span></div>
+          <div class="sect"><i data-i="caret" data-s="12"></i>变换</div>
+          <div class="row2"><label>X</label><span class="field">120<span class="u">mm</span></span><label>Y</label><span class="field">39.5<span class="u">mm</span></span></div>
+          <div class="row2"><label>W</label><span class="field">61.88<span class="u">mm</span></span><label>H</label><span class="field">16<span class="u">mm</span></span></div>
+          <div class="row2"><label>旋转</label><span class="field">0<span class="u">°</span></span><label>斜切</label><span class="field">0<span class="u">°</span></span></div>
+          <div class="sect"><i data-i="caret" data-s="12"></i>组件参数</div>
+          <div class="row"><label>码制</label><span class="dd grow">Code 128<i data-i="caret" data-s="12"></i></span></div>
+          <div class="row"><label>内容</label><span class="field grow mono">MGSHA26110015</span><span class="ibtn boxed">{n}</span></div>
+          <div class="row"><label>模块宽度</label><span class="field grow">0.375<span class="u">mm</span></span></div>
+          <div class="row"><label>条高</label><span class="field grow">12<span class="u">mm</span></span></div>
+          <div class="row"><label>静区</label><span class="dd grow">自动（10 倍模块宽度）<i data-i="caret" data-s="12"></i></span></div>
+          <div class="row"><label></label><span class="ck"><span class="box on"><i data-i="check" data-s="11"></i></span>显示可读文字</span></div>
+          <div class="row"><label>打印机</label><span class="dd grow">203 dpi<i data-i="caret" data-s="12"></i></span></div>
+          <div class="okbox">
+            <div class="ok"><i data-i="check" data-s="12"></i>回读验证通过</div>
+            <div class="ok"><i data-i="check" data-s="12"></i>尺寸、静区、颜色检查通过</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="pg layers">
+        <div class="ptabs">
+          <div class="ptab on">图层</div><div class="ptab">页面</div><div class="ptab">历史记录</div>
+          <div class="tail"><span class="ibtn sm"><i data-i="menu"></i></span></div>
+        </div>
+        <div class="lfilter"><span class="search"><i data-i="search"></i>筛选图层</span><span class="tbtn">T</span><span class="tbtn">P</span><span class="tbtn">I</span><span class="tbtn">C</span></div>
+        <div class="lrow pgrow"><i data-i="caret" data-s="12"></i>第 1 页</div>
+        <div class="lrow child on"><i class="eye" data-i="eye"></i><span class="ty c">C</span>Code 128 · MGSHA26110015</div>
+        <div class="lrow child"><i class="eye" data-i="eye"></i><span class="ty c">C</span>文字章 · TELEX RELEASED</div>
+        <div class="lrow child"><i class="eye" data-i="eye"></i><span class="ty c">C</span>大写数量 · SAY TOTAL TWENTY…</div>
+        <div class="lrow child"><i class="eye" data-i="eye"></i><span class="ty">T</span>收货人</div>
+        <div class="lrow child"><i class="eye" data-i="eye"></i><span class="ty">T</span>托运人</div>
+        <div class="lrow child"><i class="eye" data-i="eye"></i><span class="ty">T</span>货物明细</div>
+        <div class="lrow child"><i class="eye" data-i="eye"></i><span class="ty">P</span>路径 23<i class="lk" data-i="lock" data-s="14"></i></div>
+        <div class="lrow child"><i class="eye" data-i="eye"></i><span class="ty">I</span>图像 · Logo<i class="lk" data-i="lock" data-s="14"></i></div>
+        <div class="lrow pgrow"><i data-i="caretR" data-s="12"></i>第 2 页</div>
+        <div class="lfoot"><span class="ibtn sm"><i data-i="group"></i></span><span class="ibtn sm"><i data-i="lock"></i></span><span class="ibtn sm"><i data-i="trash"></i></span></div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="status">
+    <div class="zoom">100%</div>
+    <div>第 1/2 页</div>
+    <div>A4 210×297 mm</div>
+    <div>X 151.3&nbsp;&nbsp;Y 47.6 mm</div>
+    <div>已选 1 个组件（条码）</div>
+  </div>
+
+</div>
+
+<script>
+const PXMM = 96 / 25.4;
+const PAGE_X = 63, PAGE_Y = 24;
+const MODULE_MM = 0.375;
+
+const I = {
+  select: '<path d="M4 1.8v12l3.1-3.1 2.2 4.6 1.9-.9-2.2-4.5h4.3z" fill="currentColor"/>',
+  text: '<path d="M3 3.2h10M8 3.2v9.8M6 13h4" stroke="currentColor" stroke-width="1.5" fill="none"/>',
+  shape: '<rect x="2.5" y="3.5" width="11" height="9" rx="1" stroke="currentColor" stroke-width="1.3" fill="none"/>',
+  eyedrop: '<path d="M3.3 12.7l6.4-6.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M8.3 4.9l2.8 2.8" stroke="currentColor" stroke-width="1.4"/><circle cx="11.9" cy="4.1" r="2.1" fill="currentColor"/>',
+  crop: '<path d="M4.5 1.5v10h10M1.5 4.5h10v10" stroke="currentColor" stroke-width="1.4" fill="none"/>',
+  hand: '<path d="M5.2 8.6V3.8a1 1 0 0 1 2 0v3.7M7.2 7.2V2.9a1 1 0 0 1 2 0v4.3M9.2 7.2V3.6a1 1 0 0 1 2 0v4.2M11.2 8V5.4a1 1 0 0 1 2 0v4.4c0 2.7-1.9 4.7-4.5 4.7h-.6c-1.5 0-2.6-.7-3.4-1.9L2.9 9.8a1 1 0 0 1 1.6-1.1l.7.9" stroke="currentColor" stroke-width="1.1" fill="none" stroke-linecap="round" stroke-linejoin="round"/>',
+  zoom: '<circle cx="6.8" cy="6.8" r="4.3" stroke="currentColor" stroke-width="1.4" fill="none"/><path d="M10 10l3.8 3.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
+  search: '<circle cx="7" cy="7" r="4" stroke="currentColor" stroke-width="1.3" fill="none"/><path d="M10 10l3.5 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>',
+  caret: '<path d="M4.5 6.5L8 10l3.5-3.5" stroke="currentColor" stroke-width="1.3" fill="none"/>',
+  caretR: '<path d="M6.5 4.5L10 8l-3.5 3.5" stroke="currentColor" stroke-width="1.3" fill="none"/>',
+  check: '<path d="M3.5 8.2l2.8 2.8 6-6.2" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>',
+  eye: '<path d="M1.5 8S3.9 4 8 4s6.5 4 6.5 4-2.4 4-6.5 4S1.5 8 1.5 8z" stroke="currentColor" stroke-width="1.1" fill="none"/><circle cx="8" cy="8" r="1.8" fill="currentColor"/>',
+  lock: '<rect x="4" y="7.2" width="8" height="6" rx="1" fill="currentColor"/><path d="M5.7 7.2V5.6a2.3 2.3 0 0 1 4.6 0v1.6" stroke="currentColor" stroke-width="1.2" fill="none"/>',
+  menu: '<path d="M3 5h10M3 8h10M3 11h10" stroke="currentColor" stroke-width="1.2"/>',
+  collapse: '<path d="M8.5 4.5L5 8l3.5 3.5M12.5 4.5L9 8l3.5 3.5" stroke="currentColor" stroke-width="1.2" fill="none"/>',
+  gridv: '<path d="M3 3h4v4H3zM9 3h4v4H9zM3 9h4v4H3zM9 9h4v4H9z" fill="currentColor"/>',
+  listv: '<path d="M3 4h10M3 8h10M3 12h10" stroke="currentColor" stroke-width="1.4"/>',
+  alL: '<path d="M2.5 2v12" stroke="currentColor" stroke-width="1.2"/><path d="M4.5 4h8v3h-8zM4.5 9h5v3h-5z" fill="currentColor" opacity=".75"/>',
+  alC: '<path d="M8 2v12" stroke="currentColor" stroke-width="1.2"/><path d="M3.5 4h9v3h-9zM5 9h6v3H5z" fill="currentColor" opacity=".75"/>',
+  alR: '<path d="M13.5 2v12" stroke="currentColor" stroke-width="1.2"/><path d="M3.5 4h8v3h-8zM6.5 9h5v3h-5z" fill="currentColor" opacity=".75"/>',
+  alT: '<path d="M2 2.5h12" stroke="currentColor" stroke-width="1.2"/><path d="M4 4.5h3v8H4zM9 4.5h3v5H9z" fill="currentColor" opacity=".75"/>',
+  alM: '<path d="M2 8h12" stroke="currentColor" stroke-width="1.2"/><path d="M4 3.5h3v9H4zM9 5h3v6H9z" fill="currentColor" opacity=".75"/>',
+  alB: '<path d="M2 13.5h12" stroke="currentColor" stroke-width="1.2"/><path d="M4 3.5h3v8H4zM9 6.5h3v5H9z" fill="currentColor" opacity=".75"/>',
+  min: '<path d="M3 8h10" stroke="currentColor" stroke-width="1"/>',
+  max: '<rect x="3.5" y="3.5" width="9" height="9" stroke="currentColor" stroke-width="1" fill="none"/>',
+  close: '<path d="M3.5 3.5l9 9M12.5 3.5l-9 9" stroke="currentColor" stroke-width="1"/>',
+  workspace: '<path d="M2.5 3.5h11v9h-11zM6.5 3.5v9" stroke="currentColor" stroke-width="1.1" fill="none"/>',
+  palette: '<circle cx="8" cy="8" r="5.5" stroke="currentColor" stroke-width="1.2" fill="none"/><circle cx="6" cy="6" r="1" fill="currentColor"/><circle cx="10" cy="6" r="1" fill="currentColor"/><circle cx="5.6" cy="9.6" r="1" fill="currentColor"/>',
+  swatches: '<path d="M2.5 2.5H7V7H2.5zM9 2.5h4.5V7H9zM2.5 9H7v4.5H2.5zM9 9h4.5v4.5H9z" stroke="currentColor" stroke-width="1.1" fill="none"/>',
+  nav: '<rect x="1.5" y="3" width="13" height="10" rx="1" stroke="currentColor" stroke-width="1.1" fill="none"/><rect x="5" y="5.5" width="5" height="4" stroke="currentColor" stroke-width="1.3" fill="none"/>',
+  info: '<circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M8 7v4.5" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="4.8" r=".9" fill="currentColor"/>',
+  font: '<text x="8" y="12" text-anchor="middle" font-size="10" font-family="Georgia, serif" fill="currentColor">Aa</text>',
+  scan: '<path d="M2 5V2.5h2.5M11.5 2.5H14V5M14 11v2.5h-2.5M4.5 13.5H2V11" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M5 6h6M5 8h6M5 10h4" stroke="currentColor" stroke-width="1.1"/>',
+  group: '<rect x="2.5" y="3.5" width="11" height="9" rx="1" stroke="currentColor" stroke-width="1.1" fill="none" stroke-dasharray="2 1.5"/>',
+  trash: '<path d="M3.5 4.5h9M6.5 4.5V3h3v1.5M4.5 4.5l.7 9h5.6l.7-9" stroke="currentColor" stroke-width="1.1" fill="none"/>',
+  barcode: '<path d="M2 3v10M4 3v10M5.5 3v10M8 3v10M9.5 3v10M12 3v10M14 3v10" stroke="currentColor" stroke-width="1"/>',
+};
+const icon = (name, size = 16) => `<svg width="${size}" height="${size}" viewBox="0 0 16 16">${I[name]}</svg>`;
+
+// Code 128 码表：值 0–105 各 11 个模块，106 为终止符（13 个模块）
+const C128 = ['212222','222122','222221','121223','121322','131222','122213','122312','132212','221213',
+  '221312','231212','112232','122132','122231','113222','123122','123221','223211','221132',
+  '221231','213212','223112','312131','311222','321122','321221','312212','322112','322211',
+  '212123','212321','232121','111323','131123','131321','112313','132113','132311','211313',
+  '231113','231311','112133','112331','132131','113123','113321','133121','313121','211331',
+  '231131','213113','213311','213131','311123','311321','331121','312113','312311','332111',
+  '314111','221411','431111','111224','111422','121124','121421','141122','141221','112214',
+  '112412','122114','122411','142112','142211','241211','221114','413111','241112','134111',
+  '111242','121142','121241','114212','124112','124211','411212','421112','421211','212141',
+  '214121','412121','111143','111341','131141','114113','114311','411113','411311','113141',
+  '114131','311141','411131','211412','211214','211232','2331112'];
+
+function code128Values(text) {
+  const isDigit = c => c >= '0' && c <= '9';
+  const digitRun = k => { let n = 0; while (k + n < text.length && isDigit(text[k + n])) n++; return n; };
+  const v = [];
+  let set = digitRun(0) >= 4 ? 'C' : 'B';
+  v.push(set === 'C' ? 105 : 104);
+  let i = 0;
+  while (i < text.length) {
+    const run = digitRun(i);
+    if (set === 'C') {
+      if (run >= 2) { v.push(+text.substr(i, 2)); i += 2; continue; }
+      v.push(100); set = 'B';
+    }
+    if (run >= 4 && run % 2 === 0) { v.push(99); set = 'C'; continue; }
+    v.push(text.charCodeAt(i) - 32); i++;
+    if (run >= 5 && run % 2 === 1) { v.push(99); set = 'C'; }
+  }
+  let sum = v[0];
+  for (let k = 1; k < v.length; k++) sum += v[k] * k;
+  v.push(sum % 103, 106);
+  return v;
+}
+
+function code128Svg(text, quiet = 10) {
+  let x = quiet, rects = '';
+  for (const val of code128Values(text)) {
+    const p = C128[val];
+    for (let k = 0; k < p.length; k++) {
+      if (k % 2 === 0) rects += `<rect x="${x}" y="0" width="${p[k]}" height="1"/>`;
+      x += +p[k];
+    }
+  }
+  const modules = x + quiet;
+  return { modules, svg: `<svg viewBox="0 0 ${modules} 1" preserveAspectRatio="none" shape-rendering="crispEdges" fill="#000">${rects}</svg>` };
+}
+
+function rulerSvg(len, origin, vertical) {
+  let d = '', labels = '';
+  const from = Math.ceil(-origin / PXMM), to = Math.floor((len - origin) / PXMM);
+  for (let mm = from; mm <= to; mm++) {
+    const p = Math.round(origin + mm * PXMM) + 0.5;
+    const t = mm % 10 === 0 ? 20 : mm % 5 === 0 ? 8 : 4;
+    d += vertical ? `M${20 - t} ${p}H20` : `M${p} ${20 - t}V20`;
+    if (mm % 10 === 0) labels += vertical
+      ? `<text transform="translate(13 ${p + 3}) rotate(-90)" text-anchor="end">${mm}</text>`
+      : `<text x="${p + 3}" y="9">${mm}</text>`;
+  }
+  return `<svg width="${vertical ? 20 : len}" height="${vertical ? len : 20}"><path d="${d}" stroke="#686868" stroke-width="1" fill="none"/><g fill="#9a9a9a" font-size="9" font-family="Segoe UI, sans-serif">${labels}</g></svg>`;
+}
+
+function rng(seed) {
+  return () => {
+    seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function bars(x0, x1, y0, y1, seed) {
+  const r = rng(seed);
+  let x = x0, s = '';
+  for (;;) {
+    const w = [0.7, 1.2, 1.8][Math.floor(r() * 3)];
+    if (x + w > x1) break;
+    s += `<rect x="${x.toFixed(2)}" y="${y0}" width="${w}" height="${y1 - y0}"/>`;
+    x += w + [0.7, 1.1, 1.6][Math.floor(r() * 3)];
+  }
+  return s;
+}
+function modules(n, x0, y0, m, seed, fixed) {
+  const r = rng(seed);
+  let s = '';
+  for (let row = 0; row < n; row++) for (let col = 0; col < n; col++) {
+    const f = fixed(row, col);
+    if (f === true || (f === null && r() < 0.5)) s += `<rect x="${(x0 + col * m).toFixed(2)}" y="${(y0 + row * m).toFixed(2)}" width="${m}" height="${m}"/>`;
+  }
+  return s;
+}
+function qrFixed(row, col) {
+  for (const [r0, c0] of [[0, 0], [0, 6], [6, 0]]) {
+    const y = row - r0, x = col - c0;
+    if (y >= -1 && y <= 5 && x >= -1 && x <= 5) {
+      if (y < 0 || y > 4 || x < 0 || x > 4) return false;
+      return y === 0 || y === 4 || x === 0 || x === 4 || (y === 2 && x === 2);
+    }
+  }
+  return null;
+}
+function dmFixed(row, col) {
+  if (col === 0 || row === 9) return true;
+  if (row === 0) return col % 2 === 0;
+  if (col === 9) return row % 2 === 1;
+  return null;
+}
+function star(cx, cy, R, r) {
+  let d = '';
+  for (let k = 0; k < 10; k++) {
+    const a = -Math.PI / 2 + k * Math.PI / 5, rr = k % 2 ? r : R;
+    d += (k ? 'L' : 'M') + (cx + rr * Math.cos(a)).toFixed(2) + ' ' + (cy + rr * Math.sin(a)).toFixed(2);
+  }
+  return d + 'Z';
+}
+const card = body => `<rect x="5" y="2.5" width="30" height="23" rx="2" fill="#f2f2f2"/><g fill="#111">${body}</g>`;
+const eanGuards = [7.6, 9.2, 19.2, 20.8, 30.8, 32.4].map(x => `<rect x="${x}" y="5" width="0.8" height="17.5"/>`).join('');
+
+const PV = {
+  text: '<text x="20" y="20.5" text-anchor="middle" font-family="Georgia, serif" font-size="17" fill="#d8d8d8">Aa</text>',
+  date: '<rect x="11" y="4" width="18" height="20" rx="2" fill="none" stroke="#cfcfcf" stroke-width="1.3"/><path d="M11 9.5h18M15 2.5V6M25 2.5V6" stroke="#cfcfcf" stroke-width="1.3"/><text x="20" y="20.5" text-anchor="middle" font-family="Segoe UI" font-weight="700" font-size="9" fill="#d8d8d8">06</text>',
+  serial: '<text x="20" y="18.5" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#d8d8d8">1/N</text>',
+  check: '<rect x="12" y="6" width="16" height="16" rx="2" fill="none" stroke="#cfcfcf" stroke-width="1.3"/><path d="M15.5 14l3 3 6-6.5" fill="none" stroke="#5aa2ee" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
+  image: '<rect x="8" y="5" width="24" height="18" rx="2" fill="none" stroke="#cfcfcf" stroke-width="1.3"/><circle cx="14" cy="10.5" r="2" fill="#cfcfcf"/><path d="M9 21l7-7 4.5 4.5 3.5-3.5 7 6" fill="none" stroke="#cfcfcf" stroke-width="1.3" stroke-linejoin="round"/>',
+  code128: card(bars(8.5, 31.5, 6, 22, 7)),
+  qr: card(modules(11, 10.65, 4.65, 1.7, 3, qrFixed)),
+  gs1: card(bars(8.5, 31.5, 5, 17.5, 19) + '<text x="20" y="23.2" text-anchor="middle" font-family="Arial" font-weight="700" font-size="5">(00)</text>'),
+  ean: card(bars(10.4, 29.6, 5, 19.5, 29) + eanGuards),
+  itf: card('<rect x="8" y="6" width="24" height="16" fill="none" stroke="#111" stroke-width="1.6"/>' + bars(10, 30, 7.6, 20.4, 41)),
+  dm: card(modules(10, 11, 5, 1.8, 5, dmFixed)),
+  seal: `<circle cx="20" cy="14" r="11" fill="none" stroke="#e05656" stroke-width="1.6"/><path d="${star(20, 14, 5, 2)}" fill="#e05656"/>`,
+  sign: '<path d="M6 19c2.5-6 4.5-10 6-9s-1.8 8.5.5 8.5 3.6-9 5.8-9-.6 7.3 1.4 7.3 2.4-3.8 3.6-4.6 1.4 2.6 3.2 2.6 2.6-1.6 4.5-2.4" fill="none" stroke="#d8d8d8" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>',
+  stamp: '<g transform="rotate(-8 20 14)"><rect x="4.5" y="8" width="31" height="12" fill="none" stroke="#e05656" stroke-width="1.3"/><rect x="6.3" y="9.8" width="27.4" height="8.4" fill="none" stroke="#e05656" stroke-width=".6"/><text x="20" y="16.7" text-anchor="middle" font-family="Arial Black, Arial" font-weight="900" font-size="6" fill="#e05656">TELEX</text></g>',
+  container: '<rect x="6" y="7" width="28" height="15" rx="1" fill="none" stroke="#cfcfcf" stroke-width="1.3"/><path d="M10 9.5v10M13.5 9.5v10M17 9.5v10M20.5 9.5v10M24 9.5v10M27.5 9.5v10M31 9.5v10" stroke="#cfcfcf" stroke-width=".8"/>',
+  bl: '<text x="20" y="19" text-anchor="middle" font-family="Segoe UI" font-weight="700" font-size="12" fill="#d8d8d8">B/L</text>',
+  awb: '<text x="20" y="19" text-anchor="middle" font-family="Segoe UI" font-weight="700" font-size="11.5" fill="#d8d8d8">AWB</text>',
+  amount: '<text x="20" y="19.5" text-anchor="middle" font-family="SimSun, Microsoft YaHei, serif" font-size="13" fill="#d8d8d8">壹佰</text>',
+};
+
+const CATS = [
+  { name: '最近使用', items: [['Code 128', 'code128'], ['文字章', 'stamp'], ['大写金额', 'amount']] },
+  { name: '基础', items: [['文本', 'text'], ['日期', 'date'], ['序号', 'serial'], ['勾选框', 'check'], ['图片', 'image']] },
+  { name: '条码', items: [['Code 128', 'code128'], ['QR 码', 'qr'], ['GS1-128', 'gs1'], ['EAN-13', 'ean'], ['ITF-14', 'itf'], ['Data Matrix', 'dm']] },
+  { name: '印章', items: [['印章', 'seal'], ['签名', 'sign'], ['文字章', 'stamp']] },
+  { name: '货代', items: [['箱号', 'container'], ['提单号', 'bl'], ['运单号', 'awb'], ['大写金额', 'amount']] },
+  { name: '标志', count: 9 },
+];
+
+document.getElementById('cats').innerHTML = CATS.map(c => {
+  const head = `<div class="cat"><span class="car">${icon(c.items ? 'caret' : 'caretR', 12)}</span>${c.name}<span class="n">${c.items ? c.items.length : c.count}</span></div>`;
+  if (!c.items) return head;
+  const cells = c.items.map(([name, key]) => `<div class="cell"><svg width="40" height="28" viewBox="0 0 40 28">${PV[key]}</svg><div class="nm">${name}</div></div>`).join('');
+  return head + `<div class="grid">${cells}</div>`;
+}).join('');
+
+document.querySelectorAll('i[data-i]').forEach(el => { el.innerHTML = icon(el.dataset.i, el.dataset.s || 16); });
+
+const page = document.getElementById('page');
+page.style.left = PAGE_X + 'px';
+page.style.top = PAGE_Y + 'px';
+
+const barcode = code128Svg('MGSHA26110015');
+document.getElementById('bars').innerHTML = barcode.svg;
+for (const id of ['bc', 'sel']) document.getElementById(id).style.width = barcode.modules * MODULE_MM + 'mm';
+
+const vp = document.getElementById('vp').getBoundingClientRect();
+document.getElementById('rulH').innerHTML = rulerSvg(vp.width, PAGE_X, false);
+document.getElementById('rulV').innerHTML = rulerSvg(vp.height, PAGE_Y, true);
+
+const badPattern = C128.findIndex((p, i) => [...p].reduce((a, b) => a + +b, 0) !== (i === 106 ? 13 : 11));
+if (C128.length !== 107 || badPattern !== -1) {
+  document.body.insertAdjacentHTML('beforeend', '<div style="position:fixed;left:0;top:0;padding:8px;background:red;color:#fff">Code 128 码表有误</div>');
+}
+</script>
+</body>
+</html>

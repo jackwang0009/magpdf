@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>MagPDF 对话框界面图</title>
+<!--
+  《交互设计》中三张界面图的源文件，网址末尾的 #new、#print、#fill 选择画面。
+  修改后在 docs/images 目录下用 PowerShell 重新截图（窗口尺寸：new 960,600；print 980,640；fill 1280,760）：
+  foreach ($s in @(@("new","960,600","dlg-new.png"), @("print","980,640","dlg-print.png"), @("fill","1280,760","overlay-fill.png"))) {
+    Start-Process "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" -Wait -ArgumentList "--headless=new","--disable-gpu","--hide-scrollbars","--no-first-run","--user-data-dir=$env:TEMP\magpdf-edge-shot","--force-device-scale-factor=2","--window-size=$($s[1])","--screenshot=$PWD\$($s[2])","file:///$($PWD.Path -replace '\\','/')/ui-dialogs.html#$($s[0])"
+  }
+-->
+<style>
+:root {
+  --shell: #2b2b2b; --panel: #323232; --input: #1e1e1e; --canvas: #1f1f1f;
+  --text: #d6d6d6; --text2: #9a9a9a; --accent: #3d8ee6; --sep: #1e1e1e; --line: #3e3e3e;
+  --ok: #6cc070; --warn: #e0a83a; --err: #e05656;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { overflow: hidden; background: var(--panel); color: var(--text); font: 12px/1.4 "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif; }
+svg { display: block; flex: none; }
+.screen { display: none; width: 100%; height: 100%; }
+.screen.on { display: flex; flex-direction: column; }
+
+/* 对话框通用 */
+.titlebar { height: 32px; flex: none; display: flex; align-items: center; padding: 0 6px 0 14px; background: var(--shell); border-bottom: 1px solid var(--sep); font-weight: 600; }
+.titlebar .x { margin-left: auto; width: 32px; height: 26px; display: flex; align-items: center; justify-content: center; color: var(--text2); font-size: 15px; font-weight: 400; }
+.footer { height: 52px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 14px; border-top: 1px solid var(--line); background: var(--panel); }
+.footer .hint { color: var(--text2); }
+.btn { height: 28px; min-width: 76px; padding: 0 14px; display: inline-flex; align-items: center; justify-content: center; border-radius: 3px; border: 1px solid #555; background: #3a3a3a; color: var(--text); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.right { margin-left: auto; display: flex; gap: 8px; }
+.dd, .field { height: 24px; display: inline-flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 8px; background: var(--input); border: 1px solid var(--line); border-radius: 2px; color: var(--text); white-space: nowrap; }
+.dd::after { content: ""; width: 6px; height: 6px; border-right: 1.3px solid var(--text2); border-bottom: 1.3px solid var(--text2); transform: rotate(45deg) translate(-2px, -2px); flex: none; }
+.u { color: #858585; }
+.box { width: 13px; height: 13px; border-radius: 2px; border: 1px solid #5c5c5c; background: var(--input); display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.box.on { background: var(--accent); border-color: var(--accent); }
+.box.on::after { content: ""; width: 6px; height: 3px; border-left: 1.6px solid #fff; border-bottom: 1.6px solid #fff; transform: rotate(-45deg) translate(1px, -1px); }
+.radio { width: 13px; height: 13px; border-radius: 50%; border: 1px solid #5c5c5c; background: var(--input); display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.radio.on { border-color: var(--accent); }
+.radio.on::after { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.ck { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.dim { color: #6f6f6f; }
+.badge { display: inline-block; padding: 0 6px; font-size: 10px; line-height: 16px; border-radius: 8px; color: #fff; background: #8a5cd6; }
+
+/* 新建对话框 */
+#new .body { flex: 1; display: flex; min-height: 0; }
+#new .nav { width: 168px; flex: none; padding: 10px 6px; background: var(--shell); border-right: 1px solid var(--sep); }
+#new .nav div { height: 30px; display: flex; align-items: center; justify-content: space-between; padding: 0 10px; border-radius: 3px; color: var(--text); }
+#new .nav div.on { background: rgba(61, 142, 230, .3); color: #fff; }
+#new .nav .n { color: var(--text2); font-size: 11px; }
+#new .content { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+#new .toolbar { display: flex; gap: 8px; padding: 12px 16px 8px; }
+#new .toolbar .field { width: 300px; justify-content: flex-start; color: #777; }
+#new .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; padding: 6px 16px 16px; }
+.card { border: 1px solid #3a3a3a; border-radius: 4px; background: #2a2a2a; padding: 8px; }
+.card.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.thumb { height: 150px; display: flex; align-items: center; justify-content: center; background: #242424; border-radius: 2px; position: relative; }
+.thumb .tag { position: absolute; top: 6px; right: 6px; }
+.mini { position: relative; background: #fff; color: #111; box-shadow: 0 1px 3px rgba(0, 0, 0, .6); overflow: hidden; font-family: Arial, sans-serif; }
+.card .nm { margin-top: 7px; font-weight: 600; }
+.card .sz { color: var(--text2); font-size: 11px; }
+
+/* 打印对话框 */
+#print .body { flex: 1; display: flex; min-height: 0; }
+#print .settings { width: 410px; flex: none; padding: 12px 16px; display: flex; flex-direction: column; gap: 9px; border-right: 1px solid var(--line); }
+.srow { display: flex; align-items: center; gap: 8px; }
+.srow > label { width: 76px; flex: none; color: var(--text2); }
+.srow .grow { flex: 1; }
+.info { padding: 6px 10px; border-radius: 3px; background: rgba(61, 142, 230, .12); border: 1px solid rgba(61, 142, 230, .35); color: #b9d6f5; }
+.warnbar { padding: 7px 10px; border-radius: 3px; background: rgba(224, 168, 58, .12); border: 1px solid rgba(224, 168, 58, .45); color: #f0cf8c; line-height: 1.5; }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); display: inline-block; margin-right: 4px; }
+.adv { color: var(--text2); display: flex; align-items: center; gap: 6px; padding-top: 4px; border-top: 1px solid var(--line); }
+#print .preview { flex: 1; display: flex; flex-direction: column; background: var(--canvas); min-width: 0; }
+#print .pv { flex: 1; display: flex; align-items: center; justify-content: center; position: relative; }
+#print .pager { display: flex; justify-content: center; gap: 14px; padding: 6px; color: var(--text2); }
+#print .check { margin: 0 14px 12px; padding: 8px 10px; border-radius: 3px; background: rgba(224, 168, 58, .1); border: 1px solid rgba(224, 168, 58, .45); }
+#print .check .t { color: #f0cf8c; font-weight: 600; margin-bottom: 4px; }
+#print .check .item { display: flex; justify-content: space-between; color: var(--text); }
+#print .check a { color: #7fb6f0; text-decoration: none; }
+
+/* 套打填写视图 */
+#fill .menubar { height: 28px; flex: none; display: flex; align-items: center; background: var(--shell); }
+#fill .menubar .m { padding: 0 9px; }
+#fill .logo { width: 18px; height: 18px; margin: 0 6px 0 10px; border-radius: 3px; background: #0e2a47; color: #4aa3ff; font: 700 10px/18px "Segoe UI", sans-serif; text-align: center; }
+#fill .main { flex: 1; display: flex; min-height: 0; }
+#fill .tools { width: 40px; flex: none; background: var(--panel); border-right: 1px solid var(--sep); }
+#fill .doc { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--canvas); }
+#fill .tabs { height: 28px; flex: none; display: flex; background: var(--shell); border-bottom: 1px solid var(--sep); }
+#fill .tabs div { display: flex; align-items: center; padding: 0 14px; background: #3a3a3a; color: #ececec; }
+#fill .notice { margin: 10px 16px 0; padding: 7px 10px; border-radius: 3px; background: rgba(61, 142, 230, .12); border: 1px solid rgba(61, 142, 230, .35); color: #b9d6f5; }
+#fill .stage { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 0; }
+#fill .dock { width: 310px; flex: none; display: flex; flex-direction: column; background: var(--panel); border-left: 1px solid var(--sep); }
+#fill .ptabs { height: 28px; flex: none; display: flex; background: var(--shell); border-bottom: 1px solid var(--sep); }
+#fill .ptabs div { display: flex; align-items: center; padding: 0 14px; color: var(--text2); }
+#fill .ptabs div.on { background: var(--panel); color: #e6e6e6; }
+#fill .flist { flex: 1; overflow: hidden; padding: 6px 10px; }
+.fitem { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 2px 8px; padding: 4px; border-radius: 3px; }
+.fitem .no { width: 20px; height: 18px; border-radius: 9px; background: #474747; color: #ddd; font-size: 10px; display: flex; align-items: center; justify-content: center; }
+.fitem .lab { color: var(--text2); font-size: 11px; align-self: center; }
+.fitem .field { grid-column: 2; width: 100%; height: 22px; display: block; line-height: 20px; overflow: hidden; text-overflow: ellipsis; font-family: Arial, sans-serif; }
+.fitem.cur { background: rgba(61, 142, 230, .18); }
+.fitem.cur .no { background: var(--accent); color: #fff; }
+.fitem.cur .field { border-color: var(--accent); }
+.fitem.bad .field { border-color: var(--err); }
+.fitem .msg { grid-column: 2; color: var(--err); font-size: 11px; }
+#fill .dfoot { padding: 10px; border-top: 1px solid var(--line); display: flex; align-items: center; gap: 8px; }
+#fill .status { height: 22px; flex: none; display: flex; align-items: center; background: var(--shell); border-top: 1px solid var(--sep); color: var(--text2); font-size: 11px; }
+#fill .status div { padding: 0 10px; border-right: 1px solid #3a3a3a; }
+
+/* 空运单底图 */
+.awb { position: relative; zoom: 0.95; width: 500px; height: 647px; background: #fbf8f1; box-shadow: 0 0 0 1px rgba(0, 0, 0, .4), 0 4px 14px rgba(0, 0, 0, .6); font-family: Arial, sans-serif; overflow: hidden; }
+.awb .b { position: absolute; border: 1px solid #d99a9a; }
+.awb .l { position: absolute; font-size: 5.6px; line-height: 1.15; color: #c47c7c; white-space: nowrap; }
+.awb .v { position: absolute; font-size: 8.6px; line-height: 1.3; color: #111; white-space: nowrap; font-weight: 600; }
+.awb .hi { position: absolute; border: 1.5px solid var(--accent); background: rgba(61, 142, 230, .12); }
+.awb .bad { position: absolute; border: 1.5px dashed var(--err); background: rgba(224, 86, 86, .08); }
+</style>
+</head>
+<body>
+
+<!-- 新建 -->
+<div class="screen" id="new">
+  <div class="titlebar">新建<span class="x">✕</span></div>
+  <div class="body">
+    <div class="nav">
+      <div class="on">最近使用<span class="n">8</span></div>
+      <div>内置模板<span class="n">5</span></div>
+      <div>我的模板<span class="n">3</span></div>
+      <div>空白文档</div>
+    </div>
+    <div class="content">
+      <div class="toolbar"><span class="field">搜索模板名称</span><span class="dd">全部分类</span></div>
+      <div class="grid" id="cards"></div>
+    </div>
+  </div>
+  <div class="footer"><span class="hint">双击模板直接新建；新建的是副本，模板本身不会被修改</span><div class="right"><span class="btn">取消</span><span class="btn primary">新建</span></div></div>
+</div>
+
+<!-- 打印 -->
+<div class="screen" id="print">
+  <div class="titlebar">打印<span class="x">✕</span></div>
+  <div class="body">
+    <div class="settings">
+      <div class="srow"><label>打印机</label><span class="dd grow">ZDesigner ZD421-203dpi ZPL</span><span class="btn" style="min-width:56px">属性…</span></div>
+      <div class="srow"><label></label><span><span class="dot"></span>就绪</span></div>
+      <div class="info">标签打印：按打印机分辨率 203 dpi 输出位图，条码检查用的是同一张位图</div>
+      <div class="srow"><label>纸张</label><span class="dd grow">100 × 150 mm</span></div>
+      <div class="srow"><label>范围</label><span class="ck"><span class="radio on"></span>全部（20 页）</span><span class="ck"><span class="radio"></span>当前页</span><span class="ck"><span class="radio"></span>页码</span></div>
+      <div class="srow"><label>份数</label><span class="field" style="width:64px">1</span><span class="ck dim"><span class="box"></span>逐份打印</span></div>
+      <div class="srow"><label>缩放</label><span class="dd grow">适合纸张（98%）</span></div>
+      <div class="warnbar">页面为 4×6 英寸，纸张为 100×150 mm，需要缩小到 98% 才能完整打印。缩放后已重新检查条码。</div>
+      <div class="srow"><label>双面</label><span class="dd grow dim">单面</span></div>
+      <div class="srow"><label>颜色</label><span class="dd grow">黑白</span></div>
+      <div class="srow"><label>批注和表单</label><span class="dd grow">文档和批注</span></div>
+      <div class="adv">▸ 高级：作为图像打印、打印偏移（当前 0, 0 mm）</div>
+    </div>
+    <div class="preview">
+      <div class="pv" id="labelPreview"></div>
+      <div class="pager"><span>‹</span><span>第 3 / 20 页</span><span>›</span></div>
+      <div class="check">
+        <div class="t">打印前条码检查：20 页中有 1 个条码可能扫不出</div>
+        <div class="item"><span>第 3 页 · Code 128：缩放后模块宽度 0.245 mm，按 203 dpi 打印时条宽不均</span><a>定位</a></div>
+      </div>
+    </div>
+  </div>
+  <div class="footer"><span class="hint">打印在后台进行，可以继续编辑</span><div class="right"><span class="btn">取消</span><span class="btn primary">打印</span></div></div>
+</div>
+
+<!-- 套打填写视图 -->
+<div class="screen" id="fill">
+  <div class="menubar"><div class="logo">Mg</div><div class="m">文件</div><div class="m">编辑</div><div class="m">对象</div><div class="m">文字</div><div class="m">页面</div><div class="m">视图</div><div class="m">窗口</div><div class="m">帮助</div></div>
+  <div class="main">
+    <div class="doc">
+      <div class="tabs"><div>空运单套打 - 未命名-1*</div></div>
+      <div class="notice">底图只用于对位，不会打印。打印前请确认这台打印机已校准偏移（打印 › 高级）。</div>
+      <div class="stage"><div class="awb" id="awb"></div></div>
+    </div>
+    <div class="dock">
+      <div class="ptabs"><div class="on">填写</div><div>属性</div></div>
+      <div class="flist" id="flist"></div>
+      <div class="dfoot"><span class="btn primary">打印…</span><span style="color:var(--text2)">Tab 下一项 · Shift+Tab 上一项</span></div>
+    </div>
+  </div>
+  <div class="status"><div>适合页面 77%</div><div>第 1/1 页</div><div>Letter 8.5×11 英寸</div><div>已填 12 项，1 项超出格子</div></div>
+</div>
+
+<script>
+function rng(seed) {
+  return () => {
+    seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function barsSvg(w, h, seed) {
+  const r = rng(seed);
+  let x = 0, s = '';
+  while (x < w) {
+    const bw = [1, 1.6, 2.4][Math.floor(r() * 3)];
+    if (x + bw > w) break;
+    s += `<rect x="${x.toFixed(1)}" y="0" width="${bw}" height="${h}"/>`;
+    x += bw + [1, 1.5, 2.2][Math.floor(r() * 3)];
+  }
+  return `<svg width="${w}" height="${h}" fill="#111" shape-rendering="crispEdges">${s}</svg>`;
+}
+const P = (style, inner) => `<div class="mini" style="${style}">${inner}</div>`;
+const A = (style, inner) => `<div style="position:absolute;${style}">${inner}</div>`;
+const lines = (x, y, w, n, gap, color = '#bbb') => Array.from({ length: n }, (_, i) => A(`left:${x}px;top:${y + i * gap}px;width:${w}px;height:2px;background:${color}`, '')).join('');
+
+const thumbs = {
+  sort: P('width:86px;height:130px', A('left:8px;top:12px;font:900 23px Arial', 'ONT8') + lines(8, 50, 60, 3, 7) + A('left:8px;top:78px', barsSvg(70, 26, 3)) + A('left:8px;top:110px;font:700 9px Arial', 'C/NO. 1/20')),
+  bl: P('width:100px;height:138px;background:#fbf8f1', A('left:6px;top:6px;width:88px;height:126px;border:1px solid #9bb7d9', '') + A('left:6px;top:30px;width:88px;border-top:1px solid #9bb7d9', '') + A('left:50px;top:30px;height:44px;border-left:1px solid #9bb7d9', '') + A('left:6px;top:74px;width:88px;border-top:1px solid #9bb7d9', '') + lines(10, 36, 34, 4, 7, '#333') + lines(10, 82, 70, 5, 8, '#333')),
+  air: P('width:86px;height:130px', A('left:8px;top:8px;font:700 8px Arial', 'SAMPLE AIRLINES') + A('left:8px;top:22px;font:700 10px Arial', '999-1234 5675') + A('left:8px;top:38px', barsSvg(70, 24, 9)) + A('left:8px;top:70px;font:900 30px Arial', 'LAX') + A('left:8px;top:110px;font:700 8px Arial', 'PCS 20 · 3/20')),
+  awb: P('width:104px;height:134px;background:#fbf8f1', A('left:5px;top:5px;width:94px;height:124px;border:1px solid #d99a9a', '') + A('left:5px;top:28px;width:94px;border-top:1px solid #d99a9a', '') + A('left:52px;top:5px;height:56px;border-left:1px solid #d99a9a', '') + A('left:5px;top:61px;width:94px;border-top:1px solid #d99a9a', '') + A('left:5px;top:90px;width:94px;border-top:1px solid #d99a9a', '') + lines(9, 34, 36, 3, 7, '#333') + lines(9, 96, 80, 3, 8, '#333')),
+  main: P('width:110px;height:110px', A('left:0;top:14px;width:110px;text-align:center;font:900 20px Arial', 'SAMPLE') + A('left:0;top:44px;width:110px;text-align:center;font:700 9px Arial', 'LOS ANGELES') + A('left:0;top:58px;width:110px;text-align:center;font:700 8px Arial', 'P.O. NO. 26-0815') + A('left:0;top:74px;width:110px;text-align:center;font:700 9px Arial', 'C/NO. 1/20') + A('left:0;top:92px;width:110px;text-align:center;font:700 7px Arial', 'MADE IN CHINA')),
+  inbound: P('width:110px;height:110px', A('left:10px;top:10px;font:700 8px "Microsoft YaHei"', '进仓编号') + A('left:10px;top:22px;font:900 12px Arial;white-space:nowrap', 'NB2611-0457') + A('left:10px;top:44px', barsSvg(90, 26, 21)) + A('left:10px;top:82px;font:900 14px Arial', '1/20')),
+  side: P('width:110px;height:110px', lines(10, 14, 88, 1, 0, '#111') + A('left:10px;top:22px;font:700 8px/1.7 Arial', 'ITEM NO. A-102<br>QTY 24 PCS<br>G.W. 13.00 KGS<br>N.W. 11.50 KGS<br>MEAS. 60×40×35 CM')),
+  quote: P('width:100px;height:138px', A('left:0;top:0;width:100px;height:22px;background:#1d4f91', '') + A('left:8px;top:6px;color:#fff;font:700 8px Arial', 'QUOTATION') + lines(8, 32, 60, 3, 7) + A('left:8px;top:60px;width:84px;height:56px;border:1px solid #bbb', '') + lines(12, 68, 76, 5, 9, '#ddd')),
+};
+const cards = [
+  ['sort', '分拣标签', '100 × 150 mm', true, ''],
+  ['bl', '提单套打-SAMPLE', 'A4', false, '套打'],
+  ['air', '空运货物标签', '100 × 150 mm', false, ''],
+  ['awb', '空运单套打', 'Letter 8.5 × 11 英寸', false, '套打'],
+  ['main', '箱唛（主唛）', '100 × 100 mm', false, ''],
+  ['inbound', '进仓标签', '100 × 100 mm', false, ''],
+  ['side', '箱唛（侧唛）', '100 × 100 mm', false, ''],
+  ['quote', '报价单', 'A4', false, ''],
+];
+document.getElementById('cards').innerHTML = cards.map(([k, nm, sz, on, tag]) =>
+  `<div class="card${on ? ' on' : ''}"><div class="thumb">${thumbs[k]}${tag ? `<span class="tag badge">${tag}</span>` : ''}</div><div class="nm">${nm}</div><div class="sz">${sz}</div></div>`).join('');
+
+document.getElementById('labelPreview').innerHTML =
+  `<div class="mini" style="width:250px;height:375px">` +
+  A('left:-1px;top:-1px;width:250px;height:375px;border:1px dashed rgba(61,142,230,.6)', '') +
+  A('left:18px;top:20px;font:900 62px Arial;letter-spacing:1px', 'ONT8') +
+  A('left:20px;top:104px;font:700 13px Arial', 'CUSTOMER: SZ-0371') +
+  A('left:20px;top:124px;font:700 13px Arial', 'SEA · FBA15K7X9Y') +
+  A('left:20px;top:156px', barsSvg(210, 70, 11)) +
+  A('left:20px;top:230px;width:210px;text-align:center;font:700 12px Arial;letter-spacing:2px', 'MAG2611060003') +
+  A('left:20px;top:266px;width:210px;height:1px;background:#111', '') +
+  A('left:20px;top:280px;font:900 34px Arial', 'C/NO. 3/20') +
+  A('left:20px;top:330px;font:700 11px Arial', 'NOV. 06, 2026') +
+  A('left:16px;top:150px;width:218px;height:104px;border:2px solid #e0a83a;border-radius:2px', '') +
+  `</div>`;
+
+const awb = document.getElementById('awb');
+const B = (x, y, w, h) => `<div class="b" style="left:${x}px;top:${y}px;width:${w}px;height:${h}px"></div>`;
+const L = (x, y, t) => `<div class="l" style="left:${x}px;top:${y}px">${t}</div>`;
+const V = (x, y, t, extra = '') => `<div class="v" style="left:${x}px;top:${y}px;${extra}">${t}</div>`;
+awb.innerHTML = [
+  L(14, 10, '999'), V(30, 8, '999-1234 5675', 'font-size:11px'), L(330, 10, 'Not Negotiable'), L(330, 18, 'Air Waybill · Issued by SAMPLE AIRLINES'),
+  B(12, 30, 238, 62), L(16, 33, "Shipper's Name and Address"), V(18, 46, 'SAMPLE TRADING CO., LTD.<br>NO. 88 SAMPLE ROAD, NINGBO<br>ZHEJIANG, CHINA'),
+  B(250, 30, 238, 62), L(254, 33, 'Copies 1, 2 and 3 of this Air Waybill are originals and have the same validity'),
+  B(12, 92, 238, 62), L(16, 95, "Consignee's Name and Address"), V(18, 108, 'SAMPLE IMPORTS LLC<br>1200 EXAMPLE BLVD, ONTARIO<br>CA 91761, U.S.A.'),
+  B(250, 92, 238, 62), L(254, 95, 'It is agreed that the goods described herein are accepted in apparent good order and condition…'),
+  B(12, 154, 238, 34), L(16, 157, "Issuing Carrier's Agent Name and City"), V(18, 170, 'SAMPLE LOGISTICS CO., LTD. SHANGHAI'),
+  B(250, 154, 238, 34), L(254, 157, 'Accounting Information'), V(256, 170, 'FREIGHT PREPAID'),
+  B(12, 188, 238, 30), L(16, 191, 'Airport of Departure (Addr. of First Carrier) and Requested Routing'), V(18, 203, 'SHANGHAI (PVG)'),
+  B(250, 188, 120, 30), L(254, 191, 'Airport of Destination'), V(256, 203, 'LOS ANGELES (LAX)'),
+  B(370, 188, 118, 30), L(374, 191, 'Requested Flight/Date'), V(376, 203, 'AS BOOKED'),
+  B(12, 218, 476, 30), L(16, 221, 'Handling Information'), V(18, 233, 'NOTIFY: SAME AS CONSIGNEE'),
+  B(12, 248, 476, 200), L(16, 251, 'No. of Pieces'), L(70, 251, 'Gross Weight'), L(130, 251, 'kg'), L(150, 251, 'Rate Class'), L(200, 251, 'Chargeable Weight'), L(270, 251, 'Rate / Charge'), L(330, 251, 'Total'), L(380, 251, 'Nature and Quantity of Goods'),
+  ...[64, 126, 146, 196, 264, 324, 374].map(x => `<div class="b" style="left:${x}px;top:248px;width:0;height:200px;border-width:0 0 0 1px"></div>`),
+  V(30, 272, '20'), V(74, 272, '260.0'), V(132, 272, 'K'), V(166, 272, 'Q'), V(206, 272, '358.5'), V(274, 272, 'AS AGREED'), V(330, 272, 'AS AGREED'),
+  V(378, 272, 'LED DESK LAMPS, USB<br>CHARGING CABLES AND<br>ADAPTERS · VOL 2.150', 'font-size:6px;line-height:1.35'),
+  B(12, 448, 238, 120), L(16, 451, 'Prepaid'), L(130, 451, 'Collect'), L(16, 470, 'Weight Charge'), L(16, 490, 'Valuation Charge'), L(16, 510, 'Tax'), L(16, 530, 'Total Other Charges Due Carrier'),
+  B(250, 448, 238, 60), L(254, 451, 'Other Charges'),
+  B(250, 508, 238, 60), L(254, 511, 'Signature of Shipper or his Agent'),
+  B(12, 568, 476, 66), L(16, 571, 'Executed on (date)'), L(170, 571, 'at (place)'), L(320, 571, 'Signature of Issuing Carrier or its Agent'),
+  V(18, 588, '06NOV2026'), V(172, 588, 'SHANGHAI'),
+  `<div class="hi" style="left:16px;top:266px;width:46px;height:22px"></div>`,
+  `<div class="bad" style="left:376px;top:266px;width:110px;height:36px"></div>`,
+].join('');
+
+const fields = [
+  ['托运人', 'SAMPLE TRADING CO., LTD. …'], ['收货人', 'SAMPLE IMPORTS LLC …'], ['代理人', 'SAMPLE LOGISTICS CO., LTD. SHANGHAI'],
+  ['始发站', 'SHANGHAI (PVG)'], ['目的站', 'LOS ANGELES (LAX)'], ['航班/日期', 'AS BOOKED'], ['件数', '20', 'cur'],
+  ['毛重', '260.0'], ['计费重量', '358.5'], ['货物品名', 'LED DESK LAMPS, USB CHARGING CAB…', 'bad'], ['签发日期', '06NOV2026'], ['签发地点', 'SHANGHAI'],
+];
+document.getElementById('flist').innerHTML = fields.map(([lab, val, st], i) =>
+  `<div class="fitem${st ? ' ' + st : ''}"><span class="no">${i + 1}</span><span class="lab">${lab}</span><span class="field">${val}</span>${st === 'bad' ? '<span class="msg">已缩到最小字号 6 pt，仍超出格子</span>' : ''}</div>`).join('');
+
+const SIZES = { new: [960, 600], print: [980, 640], fill: [1280, 760] };
+const id = (location.hash || '#new').slice(1);
+document.getElementById(id).classList.add('on');
+document.body.style.width = SIZES[id][0] + 'px';
+document.body.style.height = SIZES[id][1] + 'px';
+</script>
+</body>
+</html>
