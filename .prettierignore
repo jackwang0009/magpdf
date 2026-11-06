@@ -1,0 +1,9 @@
+node_modules/
+dist/
+coverage/
+target/
+third_party/
+docs/
+pnpm-lock.yaml
+Cargo.lock
+*.md

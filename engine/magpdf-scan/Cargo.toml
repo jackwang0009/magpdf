@@ -1,0 +1,16 @@
+[package]
+name = "magpdf-scan"
+description = "扫描件服务：OCR（ONNX Runtime + PP-OCRv5）、版面分析、样式估计、背景修补（方案第 6 节）"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+tracing.workspace = true
+serde.workspace = true
+
+[lints]
+workspace = true

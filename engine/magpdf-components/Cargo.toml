@@ -1,0 +1,16 @@
+[package]
+name = "magpdf-components"
+description = "组件与标签服务：按参数生成组件、条码生成与识别、校验位、批量生成、打印（方案第 10、11 节）"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+tracing.workspace = true
+serde.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,53 @@
+[workspace]
+resolver = "3"
+members = [
+  "engine/pdfium-sys",
+  "engine/magpdf-engine",
+  "engine/magpdf-text",
+  "engine/magpdf-components",
+  "engine/magpdf-scan",
+  "engine/magpdf-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+publish = false
+repository = "https://github.com/jackwang0009/mgpdf"
+
+[workspace.dependencies]
+# 工作区内部
+pdfium-sys = { path = "engine/pdfium-sys" }
+magpdf-engine = { path = "engine/magpdf-engine" }
+magpdf-text = { path = "engine/magpdf-text" }
+magpdf-components = { path = "engine/magpdf-components" }
+magpdf-scan = { path = "engine/magpdf-scan" }
+
+# 通用（《工程规范》4：库用 thiserror，应用层用 anyhow，日志用 tracing）
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive"] }
+png = "0.17"
+
+[workspace.lints.rust]
+missing_debug_implementations = "warn"
+unused_qualifications = "warn"
+
+[workspace.lints.clippy]
+# unsafe 块必须带 // SAFETY: 说明（《工程规范》4）
+undocumented_unsafe_blocks = "deny"
+# 库代码不用 unwrap/expect；测试例外见 clippy.toml
+unwrap_used = "deny"
+expect_used = "deny"
+dbg_macro = "deny"
+todo = "warn"
+
+[profile.release]
+debug = 1
+codegen-units = 1
+lto = "thin"

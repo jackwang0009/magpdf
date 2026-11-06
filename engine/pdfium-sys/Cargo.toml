@@ -1,0 +1,16 @@
+[package]
+name = "pdfium-sys"
+description = "PDFium 与 MAG_* 扩展的 Rust 绑定：原始 FFI（raw）加一层最小的安全封装"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+repository.workspace = true
+links = "pdfium"
+build = "build.rs"
+
+[dependencies]
+thiserror.workspace = true
+
+[lints]
+workspace = true

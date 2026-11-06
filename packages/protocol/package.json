@@ -1,0 +1,14 @@
+{
+  "name": "@magpdf/protocol",
+  "version": "0.1.0",
+  "private": true,
+  "description": "界面与引擎之间的命令、事件和数据类型；TypeScript 类型由 Rust 定义生成（方案 3.1、《接口协议》）",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json"
+  }
+}

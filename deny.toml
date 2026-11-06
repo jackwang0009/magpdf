@@ -1,0 +1,47 @@
+# cargo-deny 配置，依据《工程规范》第 5 节与《开源许可与合规清单》。
+# 运行：cargo deny check
+
+[graph]
+targets = [{ triple = "x86_64-pc-windows-msvc" }]
+all-features = false
+
+[advisories]
+version = 2
+yanked = "deny"
+ignore = []
+
+[licenses]
+version = 2
+confidence-threshold = 0.8
+# 白名单。MPL-2.0 只允许以未修改的独立文件形式使用，由评审人把关（工具无法检查）。
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Zlib",
+  "FTL",
+  "OFL-1.1",
+  "Unicode-3.0",
+  "Unicode-DFS-2016",
+  "MPL-2.0",
+  "CDLA-Permissive-2.0",
+]
+# 工作区自己的 crate 不发布、无许可证字段
+private = { ignore = true }
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# 工作区内部的 path 依赖不写版本号，不算通配
+allow-wildcard-paths = true
+highlight = "all"
+# 禁止进入安装包的许可对应的常见 crate 在 licenses 段已被拒绝；这里放明确不要的依赖
+deny = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

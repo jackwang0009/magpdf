@@ -1,0 +1,17 @@
+[package]
+name = "magpdf-engine"
+description = "引擎进程：命令与撤销、保真校验、命中测试、渲染调度、保存与恢复（方案第 3、4、9 节）"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[dependencies]
+pdfium-sys.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+serde.workspace = true
+
+[lints]
+workspace = true

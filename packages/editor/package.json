@@ -1,0 +1,28 @@
+{
+  "name": "@magpdf/editor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "画布、工具状态机、选择与变换、快捷键、工作区、组件面板（方案 3.1、第 8 节）",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@magpdf/protocol": "workspace:*",
+    "@magpdf/ui": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  }
+}

@@ -1,0 +1,26 @@
+[package]
+name = "magpdf-cli"
+description = "命令行：往返测试、保真校验、批量比对（CI 用，方案 12）"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "magpdf-cli"
+path = "src/main.rs"
+
+[dependencies]
+pdfium-sys.workspace = true
+magpdf-engine.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+png.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

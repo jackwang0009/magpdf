@@ -1,0 +1,28 @@
+# Rust
+/target/
+**/target/
+
+# Node
+node_modules/
+dist/
+.vite/
+coverage/
+*.tsbuildinfo
+
+# PDFium 预编译库：由 scripts/fetch-pdfium-prebuilt.ps1 拉取，不入库
+/third_party/pdfium-prebuilt/
+
+# 模型文件：由 models/ 下的脚本下载，不入库
+/models/**/*.onnx
+/models/**/*.tar
+/models/**/*.zip
+
+# 测试输出
+/tests/out/
+
+# 编辑器与系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log

@@ -1,0 +1,20 @@
+* text=auto eol=lf
+
+# 二进制
+*.pdf binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.ttf binary
+*.otf binary
+*.woff binary
+*.woff2 binary
+*.onnx binary
+*.dll binary
+*.lib binary
+*.exe binary
+
+# 生成的绑定，diff 没有意义
+engine/pdfium-sys/src/bindings.rs linguist-generated=true -diff
