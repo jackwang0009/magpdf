@@ -11,6 +11,12 @@ repository.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 serde.workspace = true
+serde_json.workspace = true
+ort.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+png.workspace = true
 
 [lints]
 workspace = true

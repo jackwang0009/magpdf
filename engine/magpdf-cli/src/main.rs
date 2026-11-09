@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 
 mod image;
+mod ocr;
 mod roundtrip;
 mod text_blocks;
 
@@ -55,6 +56,10 @@ enum Command {
     RoundtripWorker(roundtrip::WorkerArgs),
     /// 文字行/块聚类（V07）：统计、JSON、与标注比对
     TextBlocks(text_blocks::Args),
+    /// 对图片、图片目录或 PDF 页做 OCR（V09）
+    Ocr(ocr::OcrArgs),
+    /// 用 PPOCRLabel 标注评测 OCR 结果：字符准确率、文字行召回率（V09）
+    OcrEval(ocr::OcrEvalArgs),
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -99,6 +104,8 @@ fn main() -> Result<()> {
         Command::Roundtrip(args) => roundtrip::run(&lib, &args),
         Command::RoundtripWorker(args) => roundtrip::run_worker(&lib, &args),
         Command::TextBlocks(args) => text_blocks::run(&lib, args),
+        Command::Ocr(args) => ocr::ocr(&lib, args),
+        Command::OcrEval(args) => ocr::ocr_eval(args),
     }
 }
 

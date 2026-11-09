@@ -35,6 +35,11 @@ clap = { version = "4", features = ["derive"] }
 png = "0.17"
 # 仅测试用：解压 PDF 的 FlateDecode 流（png 已依赖它，不引入新的第三方代码）
 flate2 = "1"
+# OCR（方案 6.5、V09）：ONNX Runtime 绑定以 load-dynamic 方式在运行时加载 models/onnxruntime/onnxruntime.dll，
+# 构建时不下载任何二进制；api-31 对应清单里固定的 ONNX Runtime 1.31.x。
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "load-dynamic", "tracing", "api-31"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+sha2 = "0.10"
 
 [workspace.lints.rust]
 missing_debug_implementations = "warn"

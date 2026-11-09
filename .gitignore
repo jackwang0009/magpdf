@@ -12,10 +12,12 @@ coverage/
 # PDFium 预编译库：由 scripts/fetch-pdfium-prebuilt.ps1 拉取，不入库
 /third_party/pdfium-prebuilt/
 
-# 模型文件：由 models/ 下的脚本下载，不入库
+# 模型文件与 ONNX Runtime：由 models/fetch-models.ps1 按 manifest.json 下载，不入库
 /models/**/*.onnx
 /models/**/*.tar
 /models/**/*.zip
+/models/ocr/
+/models/onnxruntime/
 
 # Python（测试文件库工具）
 __pycache__/
@@ -30,3 +32,6 @@ __pycache__/
 .DS_Store
 Thumbs.db
 *.log
+
+# V09 合成 OCR 样本输出（gen_synthetic.py 生成，不入库）
+/tests/corpus/synthetic-ocr/out/
