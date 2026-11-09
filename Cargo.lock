@@ -452,6 +452,7 @@ dependencies = [
  "pdfium-sys",
  "serde",
  "serde_json",
+ "skrifa",
  "subsetter",
  "thiserror",
  "tracing",
