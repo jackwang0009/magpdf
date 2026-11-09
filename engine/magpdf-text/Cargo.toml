@@ -12,6 +12,8 @@ pdfium-sys.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 serde.workspace = true
+subsetter = "0.2.6"
+harfrust = "0.15.0"
 
 [dev-dependencies]
 serde_json.workspace = true

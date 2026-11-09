@@ -21,7 +21,6 @@ repository = "https://github.com/jackwang0009/mgpdf"
 pdfium-sys = { path = "engine/pdfium-sys" }
 magpdf-engine = { path = "engine/magpdf-engine" }
 magpdf-text = { path = "engine/magpdf-text" }
-magpdf-components = { path = "engine/magpdf-components" }
 magpdf-scan = { path = "engine/magpdf-scan" }
 
 # 通用（《工程规范》4：库用 thiserror，应用层用 anyhow，日志用 tracing）
