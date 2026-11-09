@@ -1,0 +1,154 @@
+# PDFium 分支流水线草案（《工程规范》§7 "PDFium" 行：全量构建、C++ 测试、产出预编译库，60 分钟内）。
+#
+# 这份文件放在 magpdf 主仓库里只是草案；magpdf-pdfium 仓库建好后复制到它的 .github/workflows/build-pdfium.yml。
+# 它在 magpdf-pdfium 的 mag/main 上运行，构建脚本和 args 仍取自 magpdf 主仓库 third_party/pdfium/（单一来源），
+# 所以要把下面的 MAGPDF_REPO / MAGPDF_REF 改成实际的仓库与分支。
+#
+# 产物：pdfium-win-x64-<MAJOR.MINOR.BUILD.PATCH>.zip，内容即 build.ps1 的 dist/（与 pdfium-binaries 布局一致，
+# 含 pdfium.dll.pdb），scripts/fetch-pdfium-prebuilt.ps1 之后可以直接改指向这里的 Release。
+#
+# 耗时估算（V01 报告第 4 节）：本机 9800X3D -j12 全新 ninja 构建 1 分 41 秒，CPU 时间约 20 分钟；
+# windows-latest（4 vCPU）预计 ninja 12–18 分钟，加 gclient sync（无缓存 5–8 分钟）与打包，整体 20–30 分钟。
+name: Build PDFium
+
+on:
+  push:
+    branches: [mag/main]
+    tags: ['v*']            # 例如 v159.0.8138.0-mag.1：打标签即发 Release
+  pull_request:
+    branches: [mag/main]
+  workflow_dispatch:
+
+concurrency:
+  group: build-pdfium-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  MAGPDF_REPO: your-org/magpdf      # TODO: 主仓库
+  MAGPDF_REF: main
+  DEPOT_TOOLS_WIN_TOOLCHAIN: '0'    # 用 runner 自带的 VS 2022，而不是 Google 内部工具链包
+  DEPOT_TOOLS_UPDATE: '0'           # 不要每次 gclient 都自更新 depot_tools（缓存命中时省 1 分钟）
+
+jobs:
+  build:
+    name: Windows x64 Release
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      # PDFium 源码里有大量 testing/resources/*.pdf 被 git 判定为文本，autocrlf=true 会把它们改坏（V01 报告第 5 节）
+      - name: 关闭 autocrlf
+        run: git config --global core.autocrlf false
+
+      - name: 检出 PDFium 分支（本仓库）
+        uses: actions/checkout@v4
+        with:
+          path: pdfium
+          fetch-depth: 1
+
+      - name: 检出构建脚本（magpdf 主仓库 third_party/pdfium）
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.MAGPDF_REPO }}
+          ref: ${{ env.MAGPDF_REF }}
+          path: magpdf
+          sparse-checkout: third_party/pdfium
+          sparse-checkout-cone-mode: true
+
+      - name: 缓存 depot_tools
+        id: cache-depot-tools
+        uses: actions/cache@v4
+        with:
+          path: depot_tools
+          key: depot-tools-${{ runner.os }}-${{ hashFiles('pdfium/DEPS') }}
+          restore-keys: depot-tools-${{ runner.os }}-
+
+      # DEPS 子仓库 + CIPD/GCS 包（clang、gn、ninja、cpython3、test_fonts）。键用 DEPS 哈希，DEPS 没变就整份复用。
+      # 只列完全由 DEPS 管理的目录（见 <Root>/.gclient_entries），不能整个缓存 pdfium/third_party——
+      # 那里混有本仓库自己的文件，恢复缓存会把它们覆盖成旧版本。DEPS 新增的目录只是没缓存，gclient 会照常拉。
+      - name: 缓存 DEPS 依赖
+        uses: actions/cache@v4
+        with:
+          path: |
+            .cipd
+            .gclient_entries
+            .gclient_previous_custom_vars
+            .gclient_previous_sync_commits
+            pdfium/base/allocator/partition_allocator
+            pdfium/build
+            pdfium/buildtools
+            pdfium/third_party/abseil-cpp
+            pdfium/third_party/brotli
+            pdfium/third_party/clang-format/script
+            pdfium/third_party/cpython3
+            pdfium/third_party/depot_tools
+            pdfium/third_party/dragonbox/src
+            pdfium/third_party/fast_float/src
+            pdfium/third_party/freetype/src
+            pdfium/third_party/googletest/src
+            pdfium/third_party/harfbuzz/src
+            pdfium/third_party/highway/src
+            pdfium/third_party/icu
+            pdfium/third_party/libc++/src
+            pdfium/third_party/libc++abi/src
+            pdfium/third_party/libjpeg_turbo
+            pdfium/third_party/libpng
+            pdfium/third_party/libyuv
+            pdfium/third_party/llvm-build
+            pdfium/third_party/llvm-libc/src
+            pdfium/third_party/nasm
+            pdfium/third_party/ninja
+            pdfium/third_party/simdutf
+            pdfium/third_party/test_fonts
+            pdfium/third_party/zlib
+            pdfium/tools/clang
+            pdfium/tools/code_coverage
+            pdfium/tools/memory
+            pdfium/tools/win
+          key: pdfium-deps-${{ runner.os }}-${{ hashFiles('pdfium/DEPS') }}
+          restore-keys: pdfium-deps-${{ runner.os }}-
+
+      - name: 同步 DEPS（gclient sync --no-history）
+        run: >
+          pwsh magpdf/third_party/pdfium/sync.ps1
+          -Root "${{ github.workspace }}"
+          -DepotTools "${{ github.workspace }}\depot_tools"
+          -DepsOnly -NoHistory -Jobs 8
+
+      - name: 构建（Release，共享库 + PDB）
+        run: >
+          pwsh magpdf/third_party/pdfium/build.ps1
+          -Source "${{ github.workspace }}\pdfium"
+          -Jobs $env:NUMBER_OF_PROCESSORS
+
+      - name: C++ 单元测试
+        working-directory: pdfium/out/Release
+        run: ./pdfium_unittests.exe --gtest_brief=1
+
+      - name: 读取版本号
+        id: version
+        run: |
+          $v = @{}; Get-Content pdfium/out/Release/dist/VERSION | ForEach-Object { $k, $val = $_ -split '='; $v[$k] = $val }
+          "version=$($v.MAJOR).$($v.MINOR).$($v.BUILD).$($v.PATCH)" >> $env:GITHUB_OUTPUT
+
+      - name: 打包
+        run: Compress-Archive -Path pdfium/out/Release/dist/* -DestinationPath "pdfium-win-x64-${{ steps.version.outputs.version }}.zip"
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: pdfium-win-x64-${{ steps.version.outputs.version }}
+          path: pdfium-win-x64-*.zip
+          retention-days: 30                      # 《工程规范》§7：主干每日构建保留 30 天
+
+      - name: 发布 Release（仅标签）
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: pdfium-win-x64-*.zip
+          body: |
+            PDFium ${{ steps.version.outputs.version }}（magpdf-pdfium `${{ github.sha }}`），Windows x64 Release，
+            布局与 pdfium-binaries 一致，含调试符号 pdfium.dll.pdb。
+            使用：解压后 `$env:PDFIUM_PREBUILT_DIR = <解压目录>; cargo test --workspace`。

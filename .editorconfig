@@ -14,5 +14,9 @@ indent_size = 4
 [*.md]
 trim_trailing_whitespace = false
 
+# Windows PowerShell 5.1 只有在带 BOM 时才按 UTF-8 读取脚本里的中文
+[*.ps1]
+charset = utf-8-bom
+
 [Makefile]
 indent_style = tab

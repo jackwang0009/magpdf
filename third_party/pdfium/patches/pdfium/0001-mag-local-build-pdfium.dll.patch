@@ -1,0 +1,122 @@
+From 9503125169216e23e138d1bf23ab178a8382a370 Mon Sep 17 00:00:00 2001
+From: jackwang0009 <93422958+jackwang0009@users.noreply.github.com>
+Date: Fri, 6 Nov 2026 23:49:54 +0800
+Subject: [PATCH] =?UTF-8?q?[mag-local]=20build:=20=E4=BB=A5=E5=85=B1?=
+ =?UTF-8?q?=E4=BA=AB=E5=BA=93=E5=BD=A2=E5=BC=8F=E6=9E=84=E5=BB=BA=20pdfium?=
+ =?UTF-8?q?.dll?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Add the pdf_is_shared_lib build argument. When set (and is_component_build is
+false), the "pdfium" target becomes a shared_library that statically links all
+of its dependencies and exports the public FPDF_* API, producing a standalone
+pdfium.dll / pdfium.dll.lib / pdfium.dll.pdb. This is the same shape as the
+pdfium-binaries distribution, but controlled by a gn arg instead of patching
+the target type.
+
+FPDF_EXPORT in public/fpdfview.h additionally honours FPDF_SHARED_LIBRARY,
+which pdfium_public_config defines for this configuration, so that the
+implementation gets dllexport and in-tree consumers get dllimport. Nothing
+changes when pdf_is_shared_lib is false (the default).
+
+MagPDF: needed so that pdfium-sys can switch between the pdfium-binaries
+prebuilt library and our own branch by changing PDFIUM_PREBUILT_DIR only.
+
+Co-authored-by: Cursor <cursoragent@cursor.com>
+---
+ BUILD.gn          | 14 +++++++++++++-
+ pdfium.gni        | 11 +++++++++++
+ public/fpdfview.h |  7 ++++---
+ 3 files changed, 28 insertions(+), 4 deletions(-)
+
+diff --git a/BUILD.gn b/BUILD.gn
+index 6834a5e159..ae7438981c 100644
+--- a/BUILD.gn
++++ b/BUILD.gn
+@@ -140,6 +140,12 @@ config("pdfium_implementation_config") {
+ config("pdfium_public_config") {
+   defines = []
+ 
++  if (pdf_is_shared_lib) {
++    # Makes FPDF_EXPORT expand to dllexport / dllimport (see fpdfview.h) even
++    # though this is not a component build.
++    defines += [ "FPDF_SHARED_LIBRARY" ]
++  }
++
+   if (pdf_enable_brotli) {
+     defines += [ "PDF_ENABLE_BROTLI" ]
+   }
+@@ -229,7 +235,13 @@ group("pdfium_public_headers") {
+   ]
+ }
+ 
+-component("pdfium") {
++if (pdf_is_shared_lib) {
++  pdfium_target_type = "shared_library"
++} else {
++  pdfium_target_type = "component"
++}
++
++target(pdfium_target_type, "pdfium") {
+   output_name = "pdfium"
+   libs = []
+   configs += [ ":pdfium_strict_config" ]
+diff --git a/pdfium.gni b/pdfium.gni
+index 41b3672b18..c7becad0c2 100644
+--- a/pdfium.gni
++++ b/pdfium.gni
+@@ -77,6 +77,11 @@ declare_args() {
+   # Build a complete static library
+   pdf_is_complete_lib = false
+ 
++  # Build the "pdfium" target as a shared library that exports the public API
++  # (FPDF_EXPORT), while everything else stays statically linked into it. This
++  # is the non-component-build way of producing a standalone pdfium.dll / .so.
++  pdf_is_shared_lib = false
++
+   # Enable callgrind for performance profiling
+   enable_callgrind = false
+ 
+@@ -99,6 +104,12 @@ declare_args() {
+ assert(!pdf_is_complete_lib || !is_component_build,
+        "pdf_is_complete_lib=true requires is_component_build=false")
+ 
++assert(!pdf_is_shared_lib || !is_component_build,
++       "pdf_is_shared_lib=true requires is_component_build=false")
++
++assert(!pdf_is_shared_lib || !pdf_is_complete_lib,
++       "pdf_is_shared_lib=true and pdf_is_complete_lib=true are exclusive")
++
+ assert(pdf_use_agg || pdf_use_skia,
+        "At least one of pdf_use_agg or pdf_use_skia must be true")
+ 
+diff --git a/public/fpdfview.h b/public/fpdfview.h
+index fdf2ec4b0e..771363c094 100644
+--- a/public/fpdfview.h
++++ b/public/fpdfview.h
+@@ -197,9 +197,10 @@ typedef int FPDF_ANNOT_APPEARANCEMODE;
+ // Dictionary value types.
+ typedef int FPDF_OBJECT_TYPE;
+ 
+-#if defined(COMPONENT_BUILD)
++#if defined(COMPONENT_BUILD) || defined(FPDF_SHARED_LIBRARY)
+ // FPDF_EXPORT should be consistent with |export| in the pdfium_fuzzer
+-// template in testing/fuzzers/BUILD.gn.
++// template in testing/fuzzers/BUILD.gn. FPDF_SHARED_LIBRARY is defined by
++// the pdf_is_shared_lib build argument.
+ #if defined(WIN32)
+ #if defined(FPDF_IMPLEMENTATION)
+ #define FPDF_EXPORT __declspec(dllexport)
+@@ -215,7 +216,7 @@ typedef int FPDF_OBJECT_TYPE;
+ #endif  // defined(WIN32)
+ #else
+ #define FPDF_EXPORT
+-#endif  // defined(COMPONENT_BUILD)
++#endif  // defined(COMPONENT_BUILD) || defined(FPDF_SHARED_LIBRARY)
+ 
+ #if defined(WIN32) && defined(FPDFSDK_EXPORTS)
+ #define FPDF_CALLCONV __stdcall
+-- 
+2.51.2.windows.1
+

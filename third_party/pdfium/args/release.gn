@@ -1,0 +1,23 @@
+# MagPDF PDFium 分支：Release 构建参数模板（build.ps1 -Config Release 把它写进 <out>/args.gn）。
+# 与 pdfium-binaries 发布的 args.gn 保持一致，另加 pdf_is_shared_lib（mag/main 的 [mag-local] 提交）、
+# 调试符号和本地构建开关。改动后要同步 docs 与 third_party/pdfium/README.md。
+
+pdf_is_standalone = true
+pdf_is_shared_lib = true
+is_component_build = false
+is_debug = false
+pdf_enable_v8 = false
+pdf_enable_xfa = false
+pdf_use_partition_alloc = false
+target_cpu = "x64"
+target_os = "win"
+treat_warnings_as_errors = false
+
+# Release 带行号级调试符号，产出 pdfium.dll.pdb 供分析崩溃转储（工程规范第 7 节）；
+# 要看局部变量用 symbol_level = 2（PDB 约大 3–4 倍，链接更慢）。
+symbol_level = 1
+
+# 本地与 CI 都用 ninja 直连编译器：不走 siso、不走远程执行、不加载 Chrome 的 clang 插件。
+use_siso = false
+use_remoteexec = false
+clang_use_chrome_plugins = false

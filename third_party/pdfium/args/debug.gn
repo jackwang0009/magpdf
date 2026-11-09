@@ -1,0 +1,20 @@
+# MagPDF PDFium 分支：Debug 构建参数模板（build.ps1 -Config Debug）。
+# 开 DCHECK、不优化、完整调试符号；静态链接调试版 CRT（/MTd），pdfium.dll 仍然自包含。
+# 其余与 release.gn 相同。
+
+pdf_is_standalone = true
+pdf_is_shared_lib = true
+is_component_build = false
+is_debug = true
+pdf_enable_v8 = false
+pdf_enable_xfa = false
+pdf_use_partition_alloc = false
+target_cpu = "x64"
+target_os = "win"
+treat_warnings_as_errors = false
+
+symbol_level = 2
+
+use_siso = false
+use_remoteexec = false
+clang_use_chrome_plugins = false

@@ -1,0 +1,62 @@
+diff --git a/config/win/BUILD.gn b/config/win/BUILD.gn
+index 1edf103..b551da3 100644
+--- a/config/win/BUILD.gn
++++ b/config/win/BUILD.gn
+@@ -305,7 +305,9 @@ config("runtime_library") {
+ # manually override this config for their compiles.
+ config("winver") {
+   defines = [
+-    "NTDDI_VERSION=NTDDI_WIN11_BR",
++    # MagPDF: NTDDI_WIN11_BR only exists in Windows SDK 10.0.28000+. PDFium
++    # does not need anything newer than the 10.0.26100 (24H2) SDK level.
++    "NTDDI_VERSION=NTDDI_WIN11_GE",
+ 
+     # We can't say `=_WIN32_WINNT_WIN10` here because some files do
+     # `#if WINVER < 0x0600` without including windows.h before,
+diff --git a/toolchain/win/setup_toolchain.py b/toolchain/win/setup_toolchain.py
+index 34be00a..9e57bd6 100644
+--- a/toolchain/win/setup_toolchain.py
++++ b/toolchain/win/setup_toolchain.py
+@@ -21,7 +21,10 @@ import action_helpers
+ import gn_helpers
+ 
+ SCRIPT_DIR = os.path.dirname(__file__)
+-SDK_VERSION = '10.0.28000.0'
++# MagPDF: allow building against an installed Windows SDK other than the one
++# pinned for Chromium's hermetic toolchain (which is not available with a
++# plain Visual Studio Build Tools install). Keep in sync with vs_toolchain.py.
++SDK_VERSION = os.environ.get('WINDOWS_SDK_VERSION', '10.0.28000.0')
+ MSVC_DIR = re.compile('^.*/VC/Tools/MSVC/[^/]+/include$')
+ WINDOWS_KITS_DIR = re.compile(r'^(.*/Windows Kits/\d+/Include/[^/]+)/.*')
+ 
+diff --git a/vs_toolchain.py b/vs_toolchain.py
+index 869b764..af9dfc5 100755
+--- a/vs_toolchain.py
++++ b/vs_toolchain.py
+@@ -60,7 +60,8 @@ from gn_helpers import ToGNString
+ #   Make sure any version numbers in the documentation match the code.
+ #
+ TOOLCHAIN_HASH = '3bfcb536c8'
+-SDK_VERSION = '10.0.28000.0'
++# MagPDF: see build/toolchain/win/setup_toolchain.py.
++SDK_VERSION = os.environ.get('WINDOWS_SDK_VERSION', '10.0.28000.0')
+ 
+ # Visual Studio versions are listed in descending order of priority.
+ # The first version is assumed by this script to be the one that is packaged,
+@@ -496,6 +497,16 @@ def _CopyDebugger(target_dir, target_cpu):
+     if not win_sdk_dir:
+         return
+ 
++    # MagPDF: the "Debugging Tools for Windows" SDK feature is only needed by
++    # Chromium's own stack symbolization; PDFium does not use dbghelp.dll.
++    # Skip the copy when the feature is not installed instead of failing.
++    if not os.path.isdir(os.path.join(win_sdk_dir, 'Debuggers', target_cpu)):
++        print(
++            'Note: "Debugging Tools for Windows" not found in %s; '
++            'not copying dbghelp.dll.' % win_sdk_dir
++        )
++        return
++
+     # List of debug files that should be copied, the first element of the tuple is
+     # the name of the file and the second indicates if it's optional.
+     debug_files = [
