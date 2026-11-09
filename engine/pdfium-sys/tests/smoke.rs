@@ -3,9 +3,10 @@
 // 测试代码允许 unwrap/expect（《工程规范》4）；集成测试不在 #[cfg(test)] 下，需显式放开。
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use std::io::Read;
 use std::sync::Mutex;
 
-use pdfium_sys::{Document, Library, ObjectKind, RenderOptions, SaveFlags};
+use pdfium_sys::{Document, Library, ObjectKind, RenderOptions, SaveFlags, TextRenderMode};
 
 static SERIAL: Mutex<()> = Mutex::new(());
 
@@ -55,6 +56,54 @@ fn minimal_pdf(content: &str, resources: &str, extra_objects: &[&str]) -> Vec<u8
 }
 
 const BLUE_SQUARE: &str = "0 0 1 rg 20 20 60 60 re f";
+
+/// 取出保存结果里所有流的解码后字节。PDFium 保存时把没有过滤器的流统一 Flate 压缩，
+/// 写成 `stream\r\n…\r\nendstream`；这里按该格式扫描并解压，解压失败的按原样返回。
+fn saved_streams(saved: &[u8]) -> Vec<Vec<u8>> {
+    const OPEN: &[u8] = b"stream\r\n";
+    const CLOSE: &[u8] = b"\r\nendstream";
+    let mut out = Vec::new();
+    let mut pos = 0;
+    while let Some(rel) = saved[pos..].windows(OPEN.len()).position(|w| w == OPEN) {
+        let start = pos + rel;
+        let data_start = start + OPEN.len();
+        let is_endstream = start >= 3 && &saved[start - 3..start] == b"end";
+        if is_endstream {
+            pos = data_start;
+            continue;
+        }
+        let Some(len) = saved[data_start..]
+            .windows(CLOSE.len())
+            .position(|w| w == CLOSE)
+        else {
+            break;
+        };
+        let raw = &saved[data_start..data_start + len];
+        let mut inflated = Vec::new();
+        let decoded = match flate2::read::ZlibDecoder::new(raw).read_to_end(&mut inflated) {
+            Ok(_) => inflated,
+            Err(_) => raw.to_vec(),
+        };
+        out.push(decoded);
+        pos = data_start + len + CLOSE.len();
+    }
+    out
+}
+
+/// 把一个文档的全部对象标记（或不标记）为已修改，重新生成内容流并保存。
+fn regenerate_and_save(lib: &Library, pdf: Vec<u8>, mark: bool) -> Vec<u8> {
+    let doc = Document::load_bytes(lib, pdf, None).expect("load");
+    {
+        let page = doc.page(0).expect("page");
+        if mark {
+            for obj in page.objects() {
+                obj.mark_modified().expect("mark modified");
+            }
+        }
+        page.generate_content().expect("generate content");
+    }
+    doc.save_to_vec(SaveFlags::NO_INCREMENTAL).expect("save")
+}
 
 #[test]
 fn linked_version_is_known() {
@@ -159,5 +208,94 @@ fn text_page_reads_characters() {
         );
         assert!(!info.generated);
         assert_eq!(text.chars().count(), 2);
+    });
+}
+
+/// 往返测试（P0 计划 V02）的前提：`mark_modified` 确实让 `FPDFPage_GenerateContent` 重写内容流。
+/// 对照组不标记任何对象，生成器没有脏对象可写，保存结果里的内容流应与原文逐字节相同；
+/// 实验组标记全部对象后，内容流应换成生成器的写法（以 `q` 开头、`Q` 结尾、每个对象自带 `q…Q`）。
+#[test]
+fn mark_modified_rewrites_content_stream() {
+    with_library(|lib| {
+        let original = minimal_pdf(BLUE_SQUARE, "<< >>", &[]);
+
+        let untouched = saved_streams(&regenerate_and_save(lib, original.clone(), false));
+        assert_eq!(untouched.len(), 1, "只应有一条内容流");
+        assert_eq!(
+            untouched[0],
+            BLUE_SQUARE.as_bytes(),
+            "不标记时内容流应原样保留"
+        );
+
+        let rewritten = saved_streams(&regenerate_and_save(lib, original, true));
+        assert_eq!(rewritten.len(), 1, "只应有一条内容流");
+        let text = String::from_utf8_lossy(&rewritten[0]);
+        assert_ne!(rewritten[0], BLUE_SQUARE.as_bytes(), "标记后内容流应被重写");
+        assert!(text.starts_with("q\n"), "生成器以 q 开头：{text:?}");
+        assert!(text.trim_end().ends_with('Q'), "生成器以 Q 结尾：{text:?}");
+        assert!(
+            text.contains(" rg") && text.contains(" re") && text.contains(" f"),
+            "重写后的流应仍含填色、矩形与填充操作符：{text:?}"
+        );
+    });
+}
+
+#[test]
+fn text_render_mode_and_font_info() {
+    with_library(|lib| {
+        let content = "BT /F1 24 Tf 7 Tr 20 40 Td (Hi) Tj ET 0 0 1 rg 20 20 60 60 re f";
+        let resources = "<< /Font << /F1 5 0 R >> >>";
+        let font = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>";
+        let doc = Document::load_bytes(lib, minimal_pdf(content, resources, &[font]), None)
+            .expect("load");
+        let page = doc.page(0).expect("page");
+        assert_eq!(page.object_count(), 2);
+
+        let text = page.object(0).expect("text object");
+        assert_eq!(text.kind(), ObjectKind::Text);
+        assert_eq!(text.text_render_mode(), Some(TextRenderMode::Clip));
+        assert!(TextRenderMode::Clip.is_clip() && !TextRenderMode::Fill.is_clip());
+        let font = text.font().expect("font");
+        assert!(font.base_name().contains("Helvetica"), "{font:?}");
+        assert_eq!(font.is_embedded(), Some(false));
+        assert!(!font.is_type3(), "{font:?}");
+        assert!(
+            font.font_data_len().is_some_and(|n| n > 0),
+            "未嵌入字体应返回替代字体的数据长度：{font:?}"
+        );
+        assert!(font.flags().is_some());
+
+        let path = page.object(1).expect("path object");
+        assert_eq!(path.text_render_mode(), None);
+        assert!(path.font().is_none());
+    });
+}
+
+#[test]
+fn type3_font_is_detected() {
+    with_library(|lib| {
+        let content = "BT /T3 24 Tf 20 40 Td (a) Tj ET";
+        let resources = "<< /Font << /T3 5 0 R >> >>";
+        let glyph = "1000 0 0 0 1000 1000 d1 0 0 1000 1000 re f";
+        let font = "<< /Type /Font /Subtype /Type3 /FontBBox [0 0 1000 1000] \
+                    /FontMatrix [0.001 0 0 0.001 0 0] /CharProcs 6 0 R \
+                    /Encoding << /Type /Encoding /Differences [97 /square] >> \
+                    /FirstChar 97 /LastChar 97 /Widths [1000] /Resources << >> >>";
+        let char_procs = "<< /square 7 0 R >>";
+        let glyph_stream = format!("<< /Length {} >>\nstream\n{glyph}\nendstream", glyph.len());
+        let pdf = minimal_pdf(content, resources, &[font, char_procs, &glyph_stream]);
+        let doc = Document::load_bytes(lib, pdf, None).expect("load");
+        let page = doc.page(0).expect("page");
+        let text = page.object(0).expect("text object");
+        assert_eq!(text.kind(), ObjectKind::Text);
+        let font = text.font().expect("font");
+        assert_eq!(font.is_embedded(), Some(true), "{font:?}");
+        assert_eq!(font.font_data_len(), Some(0), "{font:?}");
+        assert!(font.is_type3(), "{font:?}");
+        assert_eq!(text.text_render_mode(), Some(TextRenderMode::Fill));
+
+        // Type3 字形确实画出来了：方块落在 (20,40)–(44,64)，位图自顶向下。
+        let bmp = page.render(RenderOptions::default()).expect("render");
+        assert_eq!(bmp.pixel(32, 100 - 52), [0, 0, 0, 255]);
     });
 }

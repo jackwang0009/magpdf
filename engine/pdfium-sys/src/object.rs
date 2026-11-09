@@ -2,8 +2,49 @@ use std::ffi::{c_uint, c_ulong};
 use std::marker::PhantomData;
 
 use crate::error::{Error, Result};
+use crate::font::Font;
 use crate::geom::{Matrix, Rect, Rgba};
 use crate::raw;
+
+/// 文字渲染模式（`Tr` 操作数 0–7）。
+///
+/// 4–7 带裁剪：同一个 `BT…ET` 里的字形合起来作为裁剪区域，方案 2.3 要求这样的文字块整体保留，
+/// 往返测试单独统计含裁剪文字的页面。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TextRenderMode {
+    Fill,
+    Stroke,
+    FillStroke,
+    Invisible,
+    FillClip,
+    StrokeClip,
+    FillStrokeClip,
+    Clip,
+}
+
+impl TextRenderMode {
+    fn from_raw(v: raw::FPDF_TEXT_RENDERMODE) -> Option<Self> {
+        Some(match v {
+            raw::FPDF_TEXTRENDERMODE_FILL => Self::Fill,
+            raw::FPDF_TEXTRENDERMODE_STROKE => Self::Stroke,
+            raw::FPDF_TEXTRENDERMODE_FILL_STROKE => Self::FillStroke,
+            raw::FPDF_TEXTRENDERMODE_INVISIBLE => Self::Invisible,
+            raw::FPDF_TEXTRENDERMODE_FILL_CLIP => Self::FillClip,
+            raw::FPDF_TEXTRENDERMODE_STROKE_CLIP => Self::StrokeClip,
+            raw::FPDF_TEXTRENDERMODE_FILL_STROKE_CLIP => Self::FillStrokeClip,
+            raw::FPDF_TEXTRENDERMODE_CLIP => Self::Clip,
+            _ => return None,
+        })
+    }
+
+    /// 是否把字形加入裁剪路径（模式 4–7）。
+    pub fn is_clip(self) -> bool {
+        matches!(
+            self,
+            Self::FillClip | Self::StrokeClip | Self::FillStrokeClip | Self::Clip
+        )
+    }
+}
 
 /// 页面对象类型，对应 `FPDF_PAGEOBJ_*`。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -184,6 +225,26 @@ impl PageObject<'_> {
     pub fn has_transparency(&self) -> bool {
         // SAFETY: handle 有效。
         unsafe { raw::FPDFPageObj_HasTransparency(self.handle) != 0 }
+    }
+
+    /// 文字对象的渲染模式；非文字对象返回 `None`。
+    pub fn text_render_mode(&self) -> Option<TextRenderMode> {
+        if self.kind() != ObjectKind::Text {
+            return None;
+        }
+        // SAFETY: handle 是有效的文字对象。
+        TextRenderMode::from_raw(unsafe { raw::FPDFTextObj_GetTextRenderMode(self.handle) })
+    }
+
+    /// 文字对象使用的字体；非文字对象或字体缺失时返回 `None`。
+    pub fn font(&self) -> Option<Font<'_>> {
+        if self.kind() != ObjectKind::Text {
+            return None;
+        }
+        // SAFETY: handle 是有效的文字对象；返回的是 PDFium 内部持有的非拥有引用。
+        let font = unsafe { raw::FPDFTextObj_GetFont(self.handle) };
+        // SAFETY: font 非空时归该文字对象所有，寿命由返回值的生命周期约束在本对象之内。
+        (!font.is_null()).then(|| unsafe { Font::from_raw(font) })
     }
 
     /// 所属标记内容的 MCID，没有时返回 `None`。

@@ -12,5 +12,9 @@ build = "build.rs"
 [dependencies]
 thiserror.workspace = true
 
+[dev-dependencies]
+# 测试里解压保存结果中的 FlateDecode 流，核对内容流是否被重写
+flate2.workspace = true
+
 [lints]
 workspace = true

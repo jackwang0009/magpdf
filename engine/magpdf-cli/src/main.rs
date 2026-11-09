@@ -2,13 +2,16 @@
 //! P0 期间在这里增加 `roundtrip`（V02）、`edit-test`（13.2 第 2 项）等子命令。
 #![forbid(unsafe_code)]
 
-use std::fs::File;
-use std::io::BufWriter;
+mod image;
+mod roundtrip;
+
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use pdfium_sys::{Bitmap, Document, Library, ObjectKind, RenderFlags, RenderOptions};
+use pdfium_sys::{Document, Library, ObjectKind, RenderFlags, RenderOptions};
+
+use crate::image::write_png;
 
 #[derive(Parser, Debug)]
 #[command(name = "magpdf-cli", version, about = "MagPDF 引擎命令行")]
@@ -44,6 +47,11 @@ enum Command {
         #[arg(short, long)]
         output: PathBuf,
     },
+    /// 往返测试：每页对象全部标记为已修改、重新生成内容流并保存，渲染比对原件与保存结果（V02）
+    Roundtrip(roundtrip::RoundtripArgs),
+    /// `roundtrip --isolate` 的子进程入口：处理单个文件并把 JSON 结果写到标准输出
+    #[command(hide = true)]
+    RoundtripWorker(roundtrip::WorkerArgs),
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -85,6 +93,8 @@ fn main() -> Result<()> {
             annots,
             output,
         } => render(&lib, &file, page, dpi, annots, &output),
+        Command::Roundtrip(args) => roundtrip::run(&lib, &args),
+        Command::RoundtripWorker(args) => roundtrip::run_worker(&lib, &args),
     }
 }
 
@@ -184,16 +194,5 @@ fn render(
         bmp.width(),
         bmp.height()
     );
-    Ok(())
-}
-
-fn write_png(bmp: &Bitmap, path: &Path) -> Result<()> {
-    let file = File::create(path)?;
-    let mut encoder = png::Encoder::new(BufWriter::new(file), bmp.width(), bmp.height());
-    encoder.set_color(png::ColorType::Rgba);
-    encoder.set_depth(png::BitDepth::Eight);
-    let mut writer = encoder.write_header()?;
-    writer.write_image_data(&bmp.to_rgba())?;
-    writer.finish()?;
     Ok(())
 }

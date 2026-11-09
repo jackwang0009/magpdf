@@ -2,12 +2,15 @@
 //! 分层渲染、保存与恢复。P0 阶段先承载往返测试需要的像素比对与保真判定。
 #![forbid(unsafe_code)]
 
+pub mod roundtrip;
+
 /// 往返测试与保真校验共用的像素比对（方案 2.3、13.2；P0 计划 V02 的判定规则）。
 pub mod compare {
     use pdfium_sys::Bitmap;
+    use serde::{Deserialize, Serialize};
 
     /// 比对参数。默认值即 P0 计划 V02 的判定规则，W1 校准后如有调整在这里改，之后不再动。
-    #[derive(Debug, Clone, Copy, PartialEq)]
+    #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
     pub struct Thresholds {
         /// 任一颜色通道差值超过此值的像素算差异像素（0–255）。
         pub channel_tolerance: u8,
