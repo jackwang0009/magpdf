@@ -5,44 +5,65 @@
 
 export { PROTOCOL_VERSION } from '@magpdf/protocol';
 
-/**
- * 工具标识与快捷键，照抄方案 8.4。
- * v1.0 工具栏只含 `v1_0` 为 true 的项；直接选择（A）、钢笔（P）在 P4，修复画笔（J）在 v1.1。
- */
-export type ToolId =
-  | 'select'
-  | 'direct-select'
-  | 'text'
-  | 'pen'
-  | 'shape'
-  | 'heal'
-  | 'eyedropper'
-  | 'crop'
-  | 'hand'
-  | 'zoom';
+// 几何与单位
+export * from './geometry';
 
-export interface ToolSpec {
-  readonly id: ToolId;
-  readonly key: string;
-  readonly label: string;
-  readonly v1_0: boolean;
-}
+// 界面文字
+export { t, format } from './i18n';
+export type { Strings } from './i18n/zh-CN';
 
-export const tools: readonly ToolSpec[] = [
-  { id: 'select', key: 'V', label: '选择', v1_0: true },
-  { id: 'direct-select', key: 'A', label: '直接选择', v1_0: false },
-  { id: 'text', key: 'T', label: '文字', v1_0: true },
-  { id: 'pen', key: 'P', label: '钢笔', v1_0: false },
-  { id: 'shape', key: 'U', label: '形状', v1_0: true },
-  { id: 'heal', key: 'J', label: '修复画笔', v1_0: false },
-  { id: 'eyedropper', key: 'I', label: '吸管', v1_0: true },
-  { id: 'crop', key: 'C', label: '裁剪', v1_0: true },
-  { id: 'hand', key: 'H', label: '抓手', v1_0: true },
-  { id: 'zoom', key: 'Z', label: '缩放', v1_0: true },
-];
+// 文档模型（P0 模拟数据）
+export * from './document/types';
+export { createMockDocument, seededRandom } from './document/mockDocument';
+export type { MockDocumentOptions } from './document/mockDocument';
+export { code128Bars, code128Values } from './document/code128';
+export { PageLayout } from './document/pageLayout';
+export type { PageLayoutOptions } from './document/pageLayout';
+export { linearHitTester } from './document/hitTest';
+export type { HitTester, MarqueeMode } from './document/hitTest';
 
-/** 按快捷键查工具（不区分大小写）。 */
-export function toolForKey(key: string): ToolSpec | undefined {
-  const upper = key.toUpperCase();
-  return tools.find((t) => t.key === upper);
-}
+// 视图
+export * from './view/viewState';
+
+// 瓦片画布
+export * from './canvas/tiles';
+export * from './canvas/tileProvider';
+export { TileCache } from './canvas/tileCache';
+export type { TileEntry } from './canvas/tileCache';
+export { computeRenderPlan } from './canvas/renderPlan';
+export type { RenderPlan, PagePlacement, TileQuad, TileRequestSpec } from './canvas/renderPlan';
+export { TileScheduler } from './canvas/tileScheduler';
+export { MockTileProvider, drawTile } from './canvas/mockTileProvider';
+export type { MockTileProviderOptions } from './canvas/mockTileProvider';
+export { FrameStats, percentile } from './canvas/frameStats';
+export type { FrameStatsSummary } from './canvas/frameStats';
+export { GlTileRenderer, parseCssColor } from './canvas/glRenderer';
+export { CanvasController } from './canvas/canvasController';
+export type { CanvasControllerOptions } from './canvas/canvasController';
+export { TileCanvas } from './canvas/TileCanvas';
+export { runBenchmark } from './canvas/benchmark';
+export type { BenchmarkResult } from './canvas/benchmark';
+
+// 工具
+export * from './tools/tools';
+export * from './tools/shortcuts';
+export * from './tools/machine';
+export * from './tools/handles';
+export { selectTool, NUDGE_STEP_PT } from './tools/selectTool';
+export type { SelectState } from './tools/selectTool';
+export { handTool } from './tools/handTool';
+export type { HandState } from './tools/handTool';
+export { zoomTool, zoomToScreenRect } from './tools/zoomTool';
+export type { ZoomState } from './tools/zoomTool';
+export { ToolManager } from './tools/toolManager';
+
+// 状态
+export * from './store/editorStore';
+
+// 工作区
+export * from './workspace/workspaceTypes';
+export * from './workspace/workspaces';
+
+// 界面外壳
+export { EditorShell } from './shell/EditorShell';
+export type { EditorShellProps } from './shell/EditorShell';

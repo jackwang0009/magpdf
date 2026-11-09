@@ -35,3 +35,5 @@ Thumbs.db
 
 # V09 合成 OCR 样本输出（gen_synthetic.py 生成，不入库）
 /tests/corpus/synthetic-ocr/out/
+# V12 临时性能测量脚本与截图（本地运行，不入库）
+/.perf/

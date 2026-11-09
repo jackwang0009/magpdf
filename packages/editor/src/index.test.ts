@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { toolForKey, tools } from './index';
+import { toolForKey, tools, v1Tools } from './index';
 
 describe('tools', () => {
   it('快捷键互不重复', () => {
@@ -9,15 +9,7 @@ describe('tools', () => {
   });
 
   it('v1.0 工具栏是方案 8.2 列出的 7 个', () => {
-    expect(tools.filter((t) => t.v1_0).map((t) => t.key)).toEqual([
-      'V',
-      'T',
-      'U',
-      'I',
-      'C',
-      'H',
-      'Z',
-    ]);
+    expect(v1Tools.map((t) => t.key)).toEqual(['V', 'T', 'U', 'I', 'C', 'H', 'Z']);
   });
 
   it('按键查找不区分大小写', () => {

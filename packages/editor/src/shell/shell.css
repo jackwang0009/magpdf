@@ -1,0 +1,777 @@
+/* 外壳样式：颜色和尺寸只引用 @magpdf/ui 的 CSS 变量（--mg-*），不写字面量。 */
+
+.mg-root {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--mg-shell);
+  color: var(--mg-text);
+  font-family: var(--mg-font-family);
+  font-size: var(--mg-font-size);
+  overflow: hidden;
+}
+
+/* ---- 菜单栏 ---- */
+.mg-menubar {
+  height: var(--mg-menu-bar-height);
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 0 0 8px;
+  background: var(--mg-shell);
+  border-bottom: 1px solid var(--mg-separator);
+  user-select: none;
+}
+.mg-logo {
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+  background: var(--mg-accent);
+  color: var(--mg-handle-fill);
+  font-size: var(--mg-font-size-small);
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 4px;
+}
+.mg-menus {
+  display: flex;
+  align-items: center;
+  height: 100%;
+}
+.mg-menu-wrap {
+  position: relative;
+  height: 100%;
+}
+.mg-menu {
+  height: 100%;
+  padding: 0 8px;
+  border: none;
+  background: transparent;
+  color: var(--mg-text);
+  font: inherit;
+  cursor: default;
+}
+.mg-menu.mg-open,
+.mg-menu:hover {
+  background: var(--mg-control-active);
+}
+.mg-menu-popup {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 1000;
+  min-width: 220px;
+  padding: 4px 0;
+  background: var(--mg-panel);
+  border: 1px solid var(--mg-line);
+  box-shadow: 0 6px 18px var(--mg-page-outline);
+}
+.mg-menu-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--mg-row-height);
+  padding: 0 10px 0 4px;
+  border: none;
+  background: transparent;
+  color: var(--mg-text);
+  font: inherit;
+  text-align: left;
+  cursor: default;
+}
+.mg-menu-item:hover:not(:disabled) {
+  background: var(--mg-accent);
+  color: var(--mg-handle-fill);
+}
+.mg-menu-item:disabled {
+  color: var(--mg-text-muted);
+}
+.mg-menu-check {
+  width: 14px;
+  display: flex;
+  justify-content: center;
+}
+.mg-menu-label {
+  flex: 1;
+}
+.mg-menu-key {
+  color: var(--mg-text-muted);
+  font-size: var(--mg-font-size-small);
+}
+.mg-menu-item:hover .mg-menu-key {
+  color: var(--mg-handle-fill);
+}
+.mg-menu-sep {
+  height: 1px;
+  margin: 4px 8px;
+  background: var(--mg-line);
+}
+.mg-title {
+  flex: 1;
+  text-align: center;
+  color: var(--mg-text-muted);
+  font-size: var(--mg-font-size-small);
+}
+.mg-window-buttons {
+  display: flex;
+  height: 100%;
+}
+.mg-window-buttons button {
+  width: 44px;
+  height: 100%;
+  border: none;
+  background: transparent;
+  color: var(--mg-text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+}
+.mg-window-buttons button:hover {
+  background: var(--mg-control-active);
+}
+.mg-window-close:hover {
+  background: var(--mg-accent) !important;
+}
+
+/* ---- 选项栏 ---- */
+.mg-options {
+  height: var(--mg-options-bar-height);
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  background: var(--mg-panel);
+  border-bottom: 1px solid var(--mg-separator);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.mg-fields {
+  display: flex;
+  gap: 4px;
+}
+.mg-hint {
+  color: var(--mg-text-muted);
+  font-size: var(--mg-font-size-small);
+  margin-left: 8px;
+}
+.mg-options-tail {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+
+/* ---- 主体 ---- */
+.mg-body {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+.mg-workbench {
+  position: absolute;
+  inset: 0;
+}
+.mg-dockview {
+  position: absolute;
+  inset: 0;
+}
+
+/* ---- 状态栏 ---- */
+.mg-status {
+  height: var(--mg-status-bar-height);
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  background: var(--mg-shell);
+  border-top: 1px solid var(--mg-separator);
+  color: var(--mg-text-muted);
+  font-size: var(--mg-font-size-small);
+}
+.mg-status-grow {
+  flex: 1;
+}
+.mg-status-sep {
+  width: 1px;
+  height: 12px;
+  background: var(--mg-line);
+}
+.mg-status-btn {
+  border: none;
+  background: transparent;
+  color: var(--mg-text-muted);
+  font: inherit;
+  padding: 0 6px;
+  height: 18px;
+  cursor: default;
+}
+.mg-status-btn:hover,
+.mg-status-btn.mg-on {
+  color: var(--mg-text);
+  background: var(--mg-control-active);
+}
+.mg-status-pointer {
+  font-family: var(--mg-mono-font-family);
+}
+
+/* ---- 工具栏（浮动面板，40px 单列） ---- */
+.mg-toolbar {
+  width: var(--mg-toolbar-width);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 4px 0;
+  gap: 2px;
+  background: var(--mg-shell);
+  border: 1px solid var(--mg-line);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px var(--mg-page-outline);
+  overflow: hidden;
+}
+.mg-tool-slot {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.mg-tool-slot .mg-vsep {
+  margin: 3px 0;
+  width: 24px;
+  height: 1px;
+}
+.mg-tool {
+  width: 32px;
+  height: 28px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--mg-text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+}
+.mg-tool:hover {
+  background: var(--mg-control-active);
+}
+.mg-tool.mg-on {
+  background: var(--mg-tool-active);
+}
+.mg-tool-variant {
+  position: absolute;
+  right: 5px;
+  bottom: 3px;
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-bottom: 4px solid var(--mg-text-muted);
+}
+.mg-swatches {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  margin-top: 8px;
+}
+.mg-swatch {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border-radius: 2px;
+  border: 1px solid var(--mg-handle-fill);
+}
+.mg-swatch-fill {
+  left: 0;
+  top: 0;
+  background: var(--mg-text);
+}
+.mg-swatch-stroke {
+  right: 0;
+  bottom: 0;
+  background: var(--mg-canvas-backdrop);
+  box-shadow: 0 0 0 1px var(--mg-line);
+}
+
+/* ---- 面板内部 ---- */
+.mg-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--mg-panel);
+}
+.mg-panel-toolbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 6px;
+  border-bottom: 1px solid var(--mg-separator);
+}
+.mg-panel-search {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 6px;
+  background: var(--mg-input);
+  border: 1px solid var(--mg-line);
+  border-radius: 2px;
+  color: var(--mg-text-muted);
+  font-size: var(--mg-font-size-small);
+  overflow: hidden;
+}
+.mg-panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--mg-panel-padding);
+}
+.mg-panel-count {
+  color: var(--mg-text-muted);
+  font-size: var(--mg-font-size-small);
+}
+.mg-empty {
+  color: var(--mg-text-muted);
+  font-size: var(--mg-font-size-small);
+  padding: 8px 2px;
+}
+
+/* 组件面板 */
+.mg-comp-group {
+  margin-bottom: 8px;
+}
+.mg-comp-title {
+  margin: 4px 0 6px;
+  font-size: var(--mg-font-size-small);
+  font-weight: 600;
+  color: var(--mg-text-muted);
+}
+.mg-comp-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+}
+.mg-comp-list.mg-comp-list {
+  display: grid;
+}
+.mg-comp-item {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 2px;
+  background: var(--mg-cell-background);
+  border: 1px solid var(--mg-cell-border);
+  border-radius: 3px;
+  color: var(--mg-text);
+  font: inherit;
+  cursor: default;
+}
+.mg-comp-item:hover {
+  border-color: var(--mg-accent);
+}
+.mg-comp-preview {
+  width: 100%;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--mg-text);
+  background: var(--mg-input);
+  border-radius: 2px;
+}
+.mg-comp-name {
+  font-size: var(--mg-font-size-small);
+  color: var(--mg-text-muted);
+}
+.mg-comp-expand {
+  width: 100%;
+  height: 24px;
+  margin-bottom: 6px;
+  border: 1px solid var(--mg-line);
+  background: var(--mg-input);
+  color: var(--mg-text);
+  font: inherit;
+  cursor: default;
+}
+
+/* 图标条 */
+.mg-strip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 0;
+  height: 100%;
+  background: var(--mg-shell);
+}
+.mg-strip-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--mg-text-muted);
+  font: inherit;
+  cursor: default;
+}
+.mg-strip-btn:hover,
+.mg-strip-btn.mg-on {
+  background: var(--mg-control-active);
+  color: var(--mg-text);
+}
+.mg-strip-icon {
+  font-size: var(--mg-font-size-small);
+}
+.mg-strip.mg-strip-right {
+  border-left: 1px solid var(--mg-separator);
+}
+
+/* 属性面板 */
+.mg-props-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0 4px;
+}
+.mg-props-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mg-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 5px;
+  height: 16px;
+  border-radius: 8px;
+  background: var(--mg-accent);
+  color: var(--mg-handle-fill);
+  font-size: var(--mg-font-size-small);
+}
+.mg-props-grid {
+  display: grid;
+  grid-template-columns: 34px 1fr 34px 1fr;
+  align-items: center;
+  gap: 4px 6px;
+  font-size: var(--mg-font-size-small);
+}
+.mg-props-grid label {
+  color: var(--mg-text-muted);
+}
+.mg-props-note {
+  color: var(--mg-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mg-check-line {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 4px 0;
+  color: var(--mg-success);
+  font-size: var(--mg-font-size-small);
+}
+
+/* 图层 */
+.mg-layer-page {
+  color: var(--mg-text-muted);
+  font-size: var(--mg-font-size-small);
+  padding: 2px 0 4px;
+}
+.mg-layers {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.mg-layer {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--mg-row-height);
+  padding: 0 4px;
+  border: none;
+  background: transparent;
+  color: var(--mg-text);
+  font: inherit;
+  text-align: left;
+  cursor: default;
+}
+.mg-layer:hover {
+  background: var(--mg-control-active);
+}
+.mg-layer.mg-on {
+  background: var(--mg-accent);
+  color: var(--mg-handle-fill);
+}
+.mg-layer-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 页面 */
+.mg-pages {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.mg-page-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 4px;
+  border: none;
+  background: transparent;
+  color: var(--mg-text);
+  font: inherit;
+  text-align: left;
+  cursor: default;
+}
+.mg-page-row:hover {
+  background: var(--mg-control-active);
+}
+.mg-page-row.mg-on {
+  background: var(--mg-tab-active);
+}
+.mg-page-thumb {
+  width: 20px;
+  height: 26px;
+  background: var(--mg-handle-fill);
+  border: 1px solid var(--mg-line);
+  flex: none;
+}
+.mg-page-label {
+  flex: 1;
+}
+.mg-page-size {
+  color: var(--mg-text-muted);
+  font-size: var(--mg-font-size-small);
+}
+
+/* 历史记录 */
+.mg-history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.mg-history li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--mg-row-height);
+  padding: 0 4px;
+  color: var(--mg-text-muted);
+}
+.mg-history li.mg-on {
+  color: var(--mg-text);
+  background: var(--mg-control-active);
+}
+.mg-history-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--mg-line);
+}
+.mg-history li.mg-on .mg-history-dot {
+  background: var(--mg-accent);
+}
+
+/* 文档标签 */
+.mg-doc-tab {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px 0 8px;
+  color: var(--mg-text-muted);
+  min-width: 0;
+}
+.mg-doc-tab.mg-on {
+  color: var(--mg-text);
+}
+.mg-doc-tab-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mg-doc-tab-dirty {
+  margin-left: 2px;
+}
+.mg-doc-tab-close {
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 2px;
+  background: transparent;
+  color: inherit;
+  cursor: default;
+}
+.mg-doc-tab-close:hover {
+  background: var(--mg-control-active);
+}
+.mg-watermark {
+  color: var(--mg-text-muted);
+}
+
+/* ---- 画布 ---- */
+.mg-canvas {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--mg-canvas-backdrop);
+}
+.mg-canvas-gl,
+.mg-canvas-overlay {
+  position: absolute;
+  display: block;
+}
+.mg-canvas-overlay {
+  touch-action: none;
+  outline: none;
+}
+.mg-canvas-message {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--mg-text-muted);
+}
+
+/* ---- 基准对话框 ---- */
+.mg-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--mg-page-outline);
+}
+.mg-dialog {
+  width: 560px;
+  max-width: 90vw;
+  background: var(--mg-panel);
+  border: 1px solid var(--mg-line);
+}
+.mg-dialog-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 30px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--mg-separator);
+  font-weight: 600;
+}
+.mg-dialog-close {
+  border: none;
+  background: transparent;
+  color: var(--mg-text);
+  font-size: 16px;
+  cursor: default;
+}
+.mg-dialog-meta {
+  margin: 10px;
+  color: var(--mg-text-muted);
+  font-size: var(--mg-font-size-small);
+}
+.mg-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px;
+}
+.mg-dialog-actions button {
+  min-width: 80px;
+  height: var(--mg-row-height);
+}
+.mg-bench-table {
+  width: calc(100% - 20px);
+  margin: 0 10px;
+  border-collapse: collapse;
+  font-size: var(--mg-font-size-small);
+}
+.mg-bench-table th,
+.mg-bench-table td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--mg-line);
+  text-align: right;
+}
+.mg-bench-table th:first-child,
+.mg-bench-table td:first-child {
+  text-align: left;
+}
+
+/* ---- dockview 主题：颜色映射到 --mg-* 变量，标签高度 28px（方案 8.2） ---- */
+.dockview-theme-magpdf {
+  --dv-tabs-and-actions-container-font-size: var(--mg-font-size);
+  --dv-tabs-and-actions-container-height: var(--mg-document-tabs-height);
+  --dv-tab-font-size: inherit;
+  --dv-tab-margin: 0;
+  --dv-tab-border-radius: 0;
+  --dv-border-radius: 0;
+  --dv-sash-color: transparent;
+  --dv-active-sash-color: var(--mg-accent);
+  --dv-separator-border: var(--mg-separator);
+  --dv-group-view-background-color: var(--mg-panel);
+  --dv-tabs-and-actions-container-background-color: var(--mg-shell);
+  --dv-activegroup-visiblepanel-tab-background-color: var(--mg-tab-active);
+  --dv-activegroup-hiddenpanel-tab-background-color: var(--mg-shell);
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--mg-panel);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--mg-shell);
+  --dv-activegroup-visiblepanel-tab-color: var(--mg-text);
+  --dv-activegroup-hiddenpanel-tab-color: var(--mg-text-muted);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--mg-text-muted);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--mg-text-muted);
+  --dv-tab-divider-color: var(--mg-line);
+  --dv-icon-hover-background-color: var(--mg-control-active);
+  --dv-drag-over-background-color: var(--mg-control-active);
+  --dv-drag-over-border-color: var(--mg-accent);
+  --dv-floating-border: 1px solid var(--mg-line);
+  --dv-floating-box-shadow: 0 6px 18px var(--mg-page-outline);
+  --dv-floating-titlebar-background-color: var(--mg-shell);
+  --dv-floating-titlebar-height: var(--mg-document-tabs-height);
+  --dv-spacing-padding: 0px;
+  --dv-tabs-container-scrollbar-color: var(--mg-line);
+  color-scheme: dark;
+}
+.dockview-theme-magpdf .dv-tabs-and-actions-container {
+  border-bottom: 1px solid var(--mg-separator);
+}
+.dockview-theme-magpdf .dv-void-container {
+  cursor: default;
+}
+
+.mg-ws-basic .dv-sash-container,
+.mg-ws-freight .dv-sash-container {
+  background: var(--mg-separator);
+}

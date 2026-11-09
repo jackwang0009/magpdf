@@ -1,0 +1,875 @@
+import { metrics, palette } from '@magpdf/ui';
+import { linearHitTester } from '../document/hitTest';
+import { PageLayout } from '../document/pageLayout';
+import type { DocumentSnapshot } from '../document/types';
+import { MM_PER_INCH, PT_PER_INCH, translateRect, unionRects } from '../geometry';
+import type { Point, Rect, Size } from '../geometry';
+import { format, t } from '../i18n';
+import type { EditorStore } from '../store/editorStore';
+import type {
+  InteractionOverlay,
+  ObjectRef,
+  ToolContext,
+  ToolEffect,
+  ToolPointerEvent,
+} from '../tools/machine';
+import type { CommandId } from '../tools/shortcuts';
+import { isTextInputTarget } from '../tools/shortcuts';
+import { ToolManager } from '../tools/toolManager';
+import type { ToolId } from '../tools/tools';
+import {
+  clampView,
+  cssPxPerPt,
+  docRectToScreen,
+  docToScreen,
+  fitPageZoom,
+  centerOnPage,
+  nextZoomStep,
+  panBy,
+  screenToDoc,
+  scrollToPageTop,
+  viewEquals,
+  zoomAt,
+} from '../view/viewState';
+import type { ViewState } from '../view/viewState';
+import { FrameStats, formatMs } from './frameStats';
+import { GlTileRenderer, parseCssColor } from './glRenderer';
+import { MockTileProvider } from './mockTileProvider';
+import { drawOverlay } from './overlay';
+import type { OverlayScene } from './overlay';
+import { computeRenderPlan } from './renderPlan';
+import { TileCache } from './tileCache';
+import type { TileEntry } from './tileCache';
+import type { TileProvider } from './tileProvider';
+import { releasePixels } from './tileProvider';
+import { TileScheduler } from './tileScheduler';
+
+/**
+ * 画布控制器：把 store、瓦片调度、WebGL 合成、叠加层和工具状态机接在一起。
+ * 一个文档一个实例；在 React 之外运行，React 组件只负责挂载/卸载。
+ */
+export interface CanvasControllerOptions {
+  readonly store: EditorStore;
+  readonly documentId: string;
+  /** 已定位（position: relative/absolute）的容器，控制器往里面放两个 canvas */
+  readonly container: HTMLElement;
+  readonly provider?: TileProvider;
+  /** 瓦片缓存上限（字节），默认 96 MB */
+  readonly cacheBytes?: number;
+}
+
+const DEFAULT_CACHE_BYTES = 96 * 1024 * 1024;
+const WHEEL_ZOOM_SENSITIVITY = 1 / 400;
+const STATS_PUSH_INTERVAL = 500;
+const FRAME_GAP_RESET = 100;
+const SCROLLBAR_THICKNESS = 6;
+
+/** 文档 id → 控制器，供快捷键分发和基准脚本查找 */
+export const canvasRegistry = new Map<string, CanvasController>();
+
+export class CanvasController {
+  readonly documentId: string;
+  readonly stats = new FrameStats();
+  readonly cache: TileCache;
+  readonly scheduler: TileScheduler;
+  readonly tools = new ToolManager();
+
+  private readonly store: EditorStore;
+  private readonly container: HTMLElement;
+  private readonly glCanvas: HTMLCanvasElement;
+  private readonly overlayCanvas: HTMLCanvasElement;
+  private readonly overlayCtx: CanvasRenderingContext2D | null;
+  private readonly message: HTMLDivElement;
+  private readonly renderer: GlTileRenderer | null;
+  private readonly provider: TileProvider;
+  private readonly ownsProvider: boolean;
+  private readonly resizeObserver: ResizeObserver | null;
+  private readonly unsubscribe: () => void;
+
+  private layout: PageLayout;
+  private snapshot: DocumentSnapshot | undefined;
+  private containerSize: Size = { width: 0, height: 0 };
+  private dpr = 1;
+  private frameHandle: number | null = null;
+  private overlay: InteractionOverlay | null = null;
+  private hoverScreen: Point | null = null;
+  private lastFrameAt = 0;
+  private lastStatsPush = 0;
+  private lastPointerPush = 0;
+  private cursor = '';
+  /** 上一次从 store 同步过来的选区，用来判断是否要丢掉工具内部的选区覆盖值 */
+  private knownSelection: readonly string[] | null = null;
+  private disposed = false;
+
+  constructor(options: CanvasControllerOptions) {
+    this.store = options.store;
+    this.documentId = options.documentId;
+    this.container = options.container;
+    this.snapshot = this.store.getState().documents[this.documentId]?.snapshot;
+    this.layout = buildLayout(this.snapshot);
+
+    this.glCanvas = document.createElement('canvas');
+    this.glCanvas.className = 'mg-canvas-gl';
+    this.overlayCanvas = document.createElement('canvas');
+    this.overlayCanvas.className = 'mg-canvas-overlay';
+    this.overlayCanvas.setAttribute('role', 'img');
+    this.overlayCanvas.setAttribute('aria-label', t.canvas.label);
+    this.message = document.createElement('div');
+    this.message.className = 'mg-canvas-message';
+    this.message.textContent = t.canvas.webglUnavailable;
+    this.message.hidden = true;
+    this.container.append(this.glCanvas, this.overlayCanvas, this.message);
+
+    this.renderer = GlTileRenderer.create(this.glCanvas);
+    if (!this.renderer) this.message.hidden = false;
+    this.overlayCtx = this.overlayCanvas.getContext('2d');
+
+    this.cache = new TileCache(options.cacheBytes ?? DEFAULT_CACHE_BYTES, (entry) =>
+      this.onEvict(entry),
+    );
+    if (options.provider) {
+      this.provider = options.provider;
+      this.ownsProvider = false;
+    } else {
+      this.provider = new MockTileProvider({
+        getDocument: () => this.store.getState().documents[this.documentId]?.snapshot,
+      });
+      this.ownsProvider = true;
+    }
+    this.scheduler = new TileScheduler(this.provider, this.cache, (entry) =>
+      this.onTileReady(entry),
+    );
+
+    this.unsubscribe = this.store.subscribe((state, previous) =>
+      this.onStoreChange(state, previous),
+    );
+
+    if (typeof ResizeObserver !== 'undefined') {
+      this.resizeObserver = new ResizeObserver(() => this.measure());
+      this.resizeObserver.observe(this.container);
+    } else {
+      this.resizeObserver = null;
+    }
+    this.measure();
+    this.attachEvents();
+    canvasRegistry.set(this.documentId, this);
+    this.invalidate();
+  }
+
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    canvasRegistry.delete(this.documentId);
+    if (this.frameHandle !== null) cancelAnimationFrame(this.frameHandle);
+    this.detachEvents();
+    this.resizeObserver?.disconnect();
+    this.unsubscribe();
+    this.scheduler.dispose();
+    this.cache.clear();
+    if (this.ownsProvider) this.provider.dispose?.();
+    this.renderer?.dispose();
+    this.glCanvas.remove();
+    this.overlayCanvas.remove();
+    this.message.remove();
+  }
+
+  // ---------- 对外 API（菜单、选项栏、基准脚本） ----------
+
+  get view(): ViewState {
+    return this.document?.view ?? { zoom: 1, x: 0, y: 0 };
+  }
+
+  /** 画布（不含标尺）的 CSS 像素尺寸 */
+  get viewport(): Size {
+    const offset = this.rulerOffset;
+    return {
+      width: Math.max(0, this.containerSize.width - offset),
+      height: Math.max(0, this.containerSize.height - offset),
+    };
+  }
+
+  get hasWebGL(): boolean {
+    return this.renderer !== null;
+  }
+
+  get pageLayout(): PageLayout {
+    return this.layout;
+  }
+
+  get tileProvider(): TileProvider {
+    return this.provider;
+  }
+
+  setView(view: ViewState): void {
+    const next = clampView(view, this.viewport, this.layout);
+    if (viewEquals(next, this.view)) return;
+    this.store.getState().setView(this.documentId, next);
+  }
+
+  panBy(dxPx: number, dyPx: number): void {
+    this.setView(panBy(this.view, dxPx, dyPx));
+  }
+
+  zoomAtPoint(screen: Point, zoom: number): void {
+    this.setView(zoomAt(this.view, screen, zoom));
+  }
+
+  zoomStep(direction: 1 | -1): void {
+    const vp = this.viewport;
+    this.zoomAtPoint(
+      { x: vp.width / 2, y: vp.height / 2 },
+      nextZoomStep(this.view.zoom, direction),
+    );
+  }
+
+  fitPage(): void {
+    const page = this.currentPage;
+    if (page === null) return;
+    const zoom = fitPageZoom(this.layout.pageSize(page), this.viewport);
+    this.setView(centerOnPage(this.layout, page, zoom, this.viewport));
+  }
+
+  actualSize(): void {
+    const page = this.currentPage;
+    if (page === null) return;
+    this.setView(centerOnPage(this.layout, page, 1, this.viewport));
+  }
+
+  scrollToPage(index: number): void {
+    if (index < 0 || index >= this.layout.pageCount) return;
+    this.setView(scrollToPageTop(this.layout, index, this.view, this.viewport));
+  }
+
+  /** 执行快捷键命令；返回是否处理 */
+  runCommand(command: CommandId): boolean {
+    switch (command) {
+      case 'view.zoomIn':
+        this.zoomStep(1);
+        return true;
+      case 'view.zoomOut':
+        this.zoomStep(-1);
+        return true;
+      case 'view.fitPage':
+        this.fitPage();
+        return true;
+      case 'view.actualSize':
+        this.actualSize();
+        return true;
+      default: {
+        if (command.startsWith('edit.')) {
+          this.applyEffects(this.tools.command(command, this.toolContext()));
+          this.invalidate();
+          return true;
+        }
+        return false;
+      }
+    }
+  }
+
+  /** 键盘：Space 临时抓手。返回是否处理 */
+  handleKeyDown(event: KeyboardEvent): boolean {
+    if (event.key === ' ' && !isTextInputTarget(event.target)) {
+      if (!event.repeat) {
+        this.tools.beginSpace();
+        this.updateCursor();
+      }
+      return true;
+    }
+    return false;
+  }
+
+  handleKeyUp(event: KeyboardEvent): boolean {
+    if (event.key === ' ') {
+      this.tools.endSpace();
+      this.updateCursor();
+      return true;
+    }
+    return false;
+  }
+
+  /** 工具切换由 store 驱动；这里同步状态机并取消进行中的交互 */
+  syncTool(tool: ToolId): void {
+    this.applyEffects(this.tools.setActiveTool(tool, this.toolContext()));
+    this.updateCursor();
+    this.invalidate();
+  }
+
+  invalidate(): void {
+    if (this.disposed || this.frameHandle !== null) return;
+    this.frameHandle = requestAnimationFrame(this.frame);
+  }
+
+  /** 把当前帧时间统计写进 store（状态栏显示） */
+  pushStats(): void {
+    this.store.getState().setFrameStats(this.stats.summary());
+  }
+
+  // ---------- 内部 ----------
+
+  private get document() {
+    return this.store.getState().documents[this.documentId];
+  }
+
+  private get rulerOffset(): number {
+    return this.store.getState().showRulers ? metrics.rulerSize : 0;
+  }
+
+  private get currentPage(): number | null {
+    if (this.layout.pageCount === 0) return null;
+    return this.document?.currentPage ?? 0;
+  }
+
+  private measure(): void {
+    const rect = this.container.getBoundingClientRect();
+    const size = { width: Math.round(rect.width), height: Math.round(rect.height) };
+    const dpr = window.devicePixelRatio || 1;
+    if (
+      size.width === this.containerSize.width &&
+      size.height === this.containerSize.height &&
+      dpr === this.dpr
+    ) {
+      return;
+    }
+    const first = this.containerSize.width === 0 && this.containerSize.height === 0;
+    this.containerSize = size;
+    this.dpr = dpr;
+    this.overlayCanvas.width = Math.round(size.width * dpr);
+    this.overlayCanvas.height = Math.round(size.height * dpr);
+    this.overlayCanvas.style.width = `${size.width}px`;
+    this.overlayCanvas.style.height = `${size.height}px`;
+    this.layoutGlCanvas();
+    if (first && size.width > 0 && size.height > 0) {
+      // 首次有尺寸：适合页面
+      const page = this.currentPage;
+      if (page !== null && this.document) {
+        const zoom = fitPageZoom(this.layout.pageSize(page), this.viewport);
+        const view = clampView(
+          centerOnPage(this.layout, page, zoom, this.viewport),
+          this.viewport,
+          this.layout,
+        );
+        this.store.getState().setView(this.documentId, view);
+      }
+    } else {
+      this.setView(this.view);
+    }
+    this.invalidate();
+  }
+
+  private layoutGlCanvas(): void {
+    const offset = this.rulerOffset;
+    const vp = this.viewport;
+    this.glCanvas.style.left = `${offset}px`;
+    this.glCanvas.style.top = `${offset}px`;
+    this.glCanvas.style.width = `${vp.width}px`;
+    this.glCanvas.style.height = `${vp.height}px`;
+    this.renderer?.resize(
+      Math.max(1, Math.round(vp.width * this.dpr)),
+      Math.max(1, Math.round(vp.height * this.dpr)),
+    );
+  }
+
+  private onStoreChange(
+    state: ReturnType<EditorStore['getState']>,
+    previous: ReturnType<EditorStore['getState']>,
+  ): void {
+    const doc = state.documents[this.documentId];
+    const prevDoc = previous.documents[this.documentId];
+    if (!doc) return;
+    if (doc.snapshot !== this.snapshot) {
+      this.onSnapshotChange(doc.snapshot);
+    }
+    if (state.showRulers !== previous.showRulers) {
+      this.layoutGlCanvas();
+      this.setView(this.view);
+    }
+    if (state.activeTool !== previous.activeTool) {
+      this.syncTool(state.activeTool);
+    }
+    if (state.showFrameStats !== previous.showFrameStats) {
+      this.stats.reset();
+      this.lastStatsPush = 0;
+    }
+    if (doc.selection !== this.knownSelection) {
+      // 选区被工具之外的地方改了（图层面板、删除对象）：工具内部的临时选区作废
+      this.knownSelection = doc.selection;
+      this.tools.forgetSelectionOverride();
+      this.updateCursor();
+    }
+    if (doc !== prevDoc || state.showRulers !== previous.showRulers) {
+      this.invalidate();
+    }
+  }
+
+  private onSnapshotChange(snapshot: DocumentSnapshot): void {
+    const previous = this.snapshot;
+    this.snapshot = snapshot;
+    if (
+      !previous ||
+      previous.pages.length !== snapshot.pages.length ||
+      pagesResized(previous, snapshot)
+    ) {
+      this.layout = buildLayout(snapshot);
+      this.cache.clear();
+    } else {
+      for (let i = 0; i < snapshot.pages.length; i++) {
+        if (snapshot.pages[i] !== previous.pages[i]) this.scheduler.invalidatePage(i);
+      }
+    }
+    this.invalidate();
+  }
+
+  private onTileReady(entry: TileEntry): void {
+    if (this.renderer && entry.pixels) {
+      entry.texture = this.renderer.uploadTexture(entry.pixels, entry.width, entry.height);
+      releasePixels(entry.pixels);
+      entry.pixels = null;
+    }
+    this.invalidate();
+  }
+
+  private onEvict(entry: TileEntry): void {
+    if (entry.texture) {
+      this.renderer?.deleteTexture(entry.texture);
+      entry.texture = null;
+    }
+  }
+
+  // ---------- 渲染 ----------
+
+  private readonly frame = (now: number): void => {
+    this.frameHandle = null;
+    if (this.disposed) return;
+    const doc = this.document;
+    if (!doc) return;
+    const statsOn = this.store.getState().showFrameStats || this.store.getState().benchmarkRunning;
+    if (statsOn) {
+      if (now - this.lastFrameAt > FRAME_GAP_RESET) this.stats.breakSequence();
+      this.stats.beginFrame(now);
+    }
+    this.lastFrameAt = now;
+
+    const view = doc.view;
+    const vp = this.viewport;
+    const dpr = this.dpr;
+    const plan = computeRenderPlan({
+      layout: this.layout,
+      view,
+      viewport: vp,
+      devicePixelRatio: dpr,
+      has: (id) => {
+        const entry = this.cache.peek(id);
+        return entry !== undefined && (entry.texture !== null || !this.renderer);
+      },
+    });
+
+    if (this.renderer && !this.renderer.isLost) {
+      const r = this.renderer;
+      r.beginFrame(parseCssColor(palette.canvasBackdrop));
+      const scale = cssPxPerPt(view.zoom) * dpr;
+      for (const page of plan.pages) {
+        r.drawQuad(deviceRect(page.docRect, view, scale), null, [1, 1, 1, 1]);
+      }
+      for (const quad of [...plan.fallback, ...plan.tiles]) {
+        const entry = this.cache.get(quad.id);
+        if (!entry?.texture) continue;
+        const pageRect = this.layout.pageRect(quad.key.page);
+        r.drawQuad(
+          tileDeviceRect(quad.docRect, pageRect, view, scale),
+          entry.texture as WebGLTexture,
+        );
+      }
+      r.endFrame();
+    }
+
+    this.scheduler.setWanted([...plan.missing, ...plan.prefetch], doc.snapshot.version);
+
+    this.drawOverlayLayer(
+      doc.selection,
+      plan.pages.map((p) => p.docRect),
+    );
+    this.pushPointer(now);
+    this.updateCurrentPage();
+
+    if (statsOn) {
+      this.stats.endFrame(performance.now());
+      if (now - this.lastStatsPush > STATS_PUSH_INTERVAL && this.store.getState().showFrameStats) {
+        this.lastStatsPush = now;
+        this.pushStats();
+      }
+    }
+  };
+
+  private drawOverlayLayer(selection: readonly string[], pageRects: readonly Rect[]): void {
+    const ctx = this.overlayCtx;
+    if (!ctx) return;
+    const view = this.view;
+    const state = this.store.getState();
+    const selectedRects: Rect[] = [];
+    for (const id of selection) {
+      const ref = this.objectById(id);
+      if (ref) selectedRects.push(docRectToScreen(view, ref.docRect));
+    }
+    const preview = this.overlay?.preview
+      ? Array.from(this.overlay.preview.values(), (r) => docRectToScreen(view, r))
+      : [];
+    const selectionBox = selectedRects.length ? unionRects(selectedRects) : null;
+    const hoverRect = this.hoverRect(view, selection);
+    const current = this.currentPage ?? 0;
+    const origin = this.layout.pageCount
+      ? docToScreen(view, this.layout.pageRect(current))
+      : { x: 0, y: 0 };
+    const vp = this.viewport;
+    const summary = state.showFrameStats ? state.frameStats : null;
+    const scene: OverlayScene = {
+      viewport: this.containerSize,
+      devicePixelRatio: this.dpr,
+      rulers: state.showRulers,
+      rulerOrigin: origin,
+      pxPerMm: (cssPxPerPt(view.zoom) * PT_PER_INCH) / MM_PER_INCH,
+      pointer: this.hoverScreen,
+      pages: pageRects.map((r) => docRectToScreen(view, r)),
+      hover: hoverRect,
+      selected: selectedRects,
+      selectionBox,
+      marquee: this.overlay?.marquee ?? null,
+      zoomRect: this.overlay?.zoomRect ?? null,
+      preview,
+      rotation: this.overlay?.rotation ?? null,
+      scrollbars: this.scrollbars(view, vp),
+      statsText: summary
+        ? format(t.status.frameStats, {
+            p50: formatMs(summary.intervalP50),
+            p95: formatMs(summary.intervalP95),
+            work95: formatMs(summary.workP95),
+            n: summary.samples,
+          })
+        : null,
+    };
+    drawOverlay(ctx, scene);
+  }
+
+  private hoverRect(view: ViewState, selection: readonly string[]): Rect | null {
+    if (!this.hoverScreen || this.overlay || this.tools.effective !== 'select') return null;
+    const id = this.hitAt(this.hoverScreen);
+    if (!id || selection.includes(id)) return null;
+    const ref = this.objectById(id);
+    return ref ? docRectToScreen(view, ref.docRect) : null;
+  }
+
+  private scrollbars(view: ViewState, vp: Size): OverlayScene['scrollbars'] {
+    const s = cssPxPerPt(view.zoom);
+    const docW = this.layout.totalWidth * s;
+    const docH = this.layout.totalHeight * s;
+    let vertical: Rect | null = null;
+    let horizontal: Rect | null = null;
+    if (docH > vp.height + 1) {
+      const track = vp.height - 4;
+      const length = Math.max(24, (vp.height / docH) * track);
+      const pos = 2 + ((view.y * s) / (docH - vp.height)) * (track - length);
+      vertical = {
+        x: vp.width - SCROLLBAR_THICKNESS - 2,
+        y: pos,
+        width: SCROLLBAR_THICKNESS,
+        height: length,
+      };
+    }
+    if (docW > vp.width + 1) {
+      const track = vp.width - 4;
+      const length = Math.max(24, (vp.width / docW) * track);
+      const pos = 2 + ((view.x * s) / (docW - vp.width)) * (track - length);
+      horizontal = {
+        x: pos,
+        y: vp.height - SCROLLBAR_THICKNESS - 2,
+        width: length,
+        height: SCROLLBAR_THICKNESS,
+      };
+    }
+    return { vertical, horizontal };
+  }
+
+  private pushPointer(now: number): void {
+    if (now - this.lastPointerPush < 33) return;
+    this.lastPointerPush = now;
+    const state = this.store.getState();
+    if (state.activeDocumentId !== this.documentId) return;
+    if (!this.hoverScreen) {
+      state.setPointer(null);
+      return;
+    }
+    const doc = screenToDoc(this.view, this.hoverScreen);
+    const hit = this.layout.pageAtPoint(doc);
+    if (hit) {
+      state.setPointer({ page: hit.index, x: hit.local.x, y: hit.local.y });
+    } else {
+      // 页外：相对当前页左上角
+      const page = this.currentPage ?? 0;
+      const rect = this.layout.pageRect(page);
+      state.setPointer({ page, x: doc.x - rect.x, y: doc.y - rect.y });
+    }
+  }
+
+  private updateCurrentPage(): void {
+    if (this.layout.pageCount === 0) return;
+    const view = this.view;
+    const yMax = view.y + this.viewport.height / cssPxPerPt(view.zoom);
+    const page = this.layout.dominantPage(view.y, yMax);
+    const doc = this.document;
+    if (doc && doc.currentPage !== page)
+      this.store.getState().setCurrentPage(this.documentId, page);
+  }
+
+  // ---------- 事件 ----------
+
+  private attachEvents(): void {
+    const el = this.overlayCanvas;
+    el.addEventListener('pointerdown', this.onPointerDown);
+    el.addEventListener('pointermove', this.onPointerMove);
+    el.addEventListener('pointerup', this.onPointerUp);
+    el.addEventListener('pointercancel', this.onPointerUp);
+    el.addEventListener('pointerleave', this.onPointerLeave);
+    el.addEventListener('wheel', this.onWheel, { passive: false });
+    el.addEventListener('contextmenu', this.onContextMenu);
+    el.addEventListener('dblclick', this.onDoubleClick);
+  }
+
+  private detachEvents(): void {
+    const el = this.overlayCanvas;
+    el.removeEventListener('pointerdown', this.onPointerDown);
+    el.removeEventListener('pointermove', this.onPointerMove);
+    el.removeEventListener('pointerup', this.onPointerUp);
+    el.removeEventListener('pointercancel', this.onPointerUp);
+    el.removeEventListener('pointerleave', this.onPointerLeave);
+    el.removeEventListener('wheel', this.onWheel);
+    el.removeEventListener('contextmenu', this.onContextMenu);
+    el.removeEventListener('dblclick', this.onDoubleClick);
+  }
+
+  private screenPoint(event: MouseEvent): Point {
+    const rect = this.overlayCanvas.getBoundingClientRect();
+    const offset = this.rulerOffset;
+    return { x: event.clientX - rect.left - offset, y: event.clientY - rect.top - offset };
+  }
+
+  private toolEvent(type: ToolPointerEvent['type'], event: PointerEvent): ToolPointerEvent {
+    const screen = this.screenPoint(event);
+    return {
+      type,
+      screen,
+      doc: screenToDoc(this.view, screen),
+      button: event.button,
+      shift: event.shiftKey,
+      alt: event.altKey,
+      ctrl: event.ctrlKey || event.metaKey,
+    };
+  }
+
+  private readonly onPointerDown = (event: PointerEvent): void => {
+    if (!this.document) return;
+    this.store.getState().activateDocument(this.documentId);
+    const screen = this.screenPoint(event);
+    if (screen.x < 0 || screen.y < 0) return; // 标尺区域
+    this.overlayCanvas.setPointerCapture(event.pointerId);
+    this.hoverScreen = screen;
+    this.applyEffects(
+      this.tools.dispatch(this.toolEvent('pointerdown', event), this.toolContext()),
+    );
+    this.updateCursor();
+    this.invalidate();
+    event.preventDefault();
+  };
+
+  private readonly onPointerMove = (event: PointerEvent): void => {
+    if (!this.document) return;
+    this.hoverScreen = this.screenPoint(event);
+    this.applyEffects(
+      this.tools.dispatch(this.toolEvent('pointermove', event), this.toolContext()),
+    );
+    this.updateCursor();
+    this.invalidate();
+  };
+
+  private readonly onPointerUp = (event: PointerEvent): void => {
+    if (!this.document) return;
+    if (this.overlayCanvas.hasPointerCapture(event.pointerId)) {
+      this.overlayCanvas.releasePointerCapture(event.pointerId);
+    }
+    const type = event.type === 'pointercancel' ? 'pointercancel' : 'pointerup';
+    this.applyEffects(this.tools.dispatch(this.toolEvent(type, event), this.toolContext()));
+    this.stats.breakSequence();
+    this.updateCursor();
+    this.invalidate();
+  };
+
+  private readonly onPointerLeave = (): void => {
+    this.hoverScreen = null;
+    this.invalidate();
+  };
+
+  private readonly onWheel = (event: WheelEvent): void => {
+    if (!this.document) return;
+    event.preventDefault();
+    const screen = this.screenPoint(event);
+    const delta = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? event.deltaY * 16 : event.deltaY;
+    if (event.ctrlKey || event.metaKey || event.altKey) {
+      const factor = Math.exp(-delta * WHEEL_ZOOM_SENSITIVITY);
+      this.zoomAtPoint(screen, this.view.zoom * factor);
+    } else if (event.shiftKey) {
+      this.panBy(-delta, 0);
+    } else {
+      const dx = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? event.deltaX * 16 : event.deltaX;
+      this.panBy(-dx, -delta);
+    }
+    this.hoverScreen = screen;
+    this.invalidate();
+  };
+
+  private readonly onContextMenu = (event: MouseEvent): void => {
+    event.preventDefault();
+  };
+
+  private readonly onDoubleClick = (): void => {
+    // 抓手工具双击：适合页面（Photoshop 习惯）
+    if (this.tools.effective === 'hand') this.fitPage();
+  };
+
+  // ---------- 工具上下文与副作用 ----------
+
+  private toolContext(): ToolContext {
+    const doc = this.document;
+    const view = this.view;
+    return {
+      view,
+      viewport: this.viewport,
+      layout: this.layout,
+      pages: doc?.snapshot.pages ?? [],
+      hitTester: linearHitTester,
+      selection: doc?.selection ?? [],
+      objectById: (id) => this.objectById(id),
+      docToScreen: (p) => docToScreen(view, p),
+      screenToDoc: (p) => screenToDoc(view, p),
+      options: this.store.getState().toolOptions,
+    };
+  }
+
+  private objectById(id: string): ObjectRef | undefined {
+    const doc = this.document;
+    if (!doc) return undefined;
+    // 对象 id 带页码前缀（p{n}-...），先按前缀直达
+    const match = /^p(\d+)-/.exec(id);
+    const candidates = match ? [doc.snapshot.pages[Number(match[1])]] : doc.snapshot.pages;
+    for (const page of candidates) {
+      if (!page) continue;
+      const object = page.objects.find((o) => o.id === id);
+      if (object) {
+        const pageRect = this.layout.pageRect(page.index);
+        return {
+          page: page.index,
+          object,
+          docRect: translateRect(object.bbox, pageRect.x, pageRect.y),
+        };
+      }
+    }
+    return undefined;
+  }
+
+  private hitAt(screen: Point): string | null {
+    const doc = this.document;
+    if (!doc) return null;
+    const point = screenToDoc(this.view, screen);
+    const hit = this.layout.pageAtPoint(point);
+    if (!hit) return null;
+    const page = doc.snapshot.pages[hit.index];
+    if (!page) return null;
+    return linearHitTester.hitPoint(page, hit.local, 3 / cssPxPerPt(this.view.zoom))?.id ?? null;
+  }
+
+  private applyEffects(effects: readonly ToolEffect[]): void {
+    const state = this.store.getState();
+    for (const effect of effects) {
+      switch (effect.type) {
+        case 'setSelection':
+          state.setSelection(this.documentId, effect.ids);
+          break;
+        case 'moveObjects':
+          state.moveObjects(this.documentId, effect.ids, effect.dx, effect.dy);
+          break;
+        case 'resizeObjects': {
+          const local = new Map<string, Rect>();
+          for (const [id, docRect] of effect.rects) {
+            const ref = this.objectById(id);
+            if (!ref) continue;
+            const pageRect = this.layout.pageRect(ref.page);
+            local.set(id, translateRect(docRect, -pageRect.x, -pageRect.y));
+          }
+          state.resizeObjects(this.documentId, local);
+          break;
+        }
+        case 'deleteObjects':
+          state.deleteObjects(this.documentId, effect.ids);
+          break;
+        case 'setView':
+          this.setView(effect.view);
+          break;
+        case 'setTool':
+          state.setTool(effect.tool);
+          break;
+        case 'overlay':
+          this.overlay = effect.overlay;
+          break;
+        case 'cursor':
+          this.setCursor(effect.cursor);
+          break;
+      }
+    }
+  }
+
+  private updateCursor(): void {
+    this.setCursor(this.tools.cursor(this.toolContext(), this.hoverScreen));
+  }
+
+  private setCursor(cursor: string): void {
+    if (cursor === this.cursor) return;
+    this.cursor = cursor;
+    this.overlayCanvas.style.cursor = cursor;
+  }
+}
+
+function buildLayout(snapshot: DocumentSnapshot | undefined): PageLayout {
+  return new PageLayout(
+    snapshot ? snapshot.pages.map((p) => ({ width: p.width, height: p.height })) : [],
+  );
+}
+
+function pagesResized(a: DocumentSnapshot, b: DocumentSnapshot): boolean {
+  for (let i = 0; i < a.pages.length; i++) {
+    const pa = a.pages[i]!;
+    const pb = b.pages[i]!;
+    if (pa.width !== pb.width || pa.height !== pb.height) return true;
+  }
+  return false;
+}
+
+/** 文档矩形 → 设备像素矩形 */
+function deviceRect(r: Rect, view: ViewState, scale: number): Rect {
+  const x = Math.round((r.x - view.x) * scale);
+  const y = Math.round((r.y - view.y) * scale);
+  return {
+    x,
+    y,
+    width: Math.round((r.x + r.width - view.x) * scale) - x,
+    height: Math.round((r.y + r.height - view.y) * scale) - y,
+  };
+}
+
+/** 瓦片矩形：以页面左上角的整数像素为基准，档位与缩放一致时正好落在像素格上 */
+function tileDeviceRect(tile: Rect, pageRect: Rect, view: ViewState, scale: number): Rect {
+  const originX = Math.round((pageRect.x - view.x) * scale);
+  const originY = Math.round((pageRect.y - view.y) * scale);
+  return {
+    x: originX + (tile.x - pageRect.x) * scale,
+    y: originY + (tile.y - pageRect.y) * scale,
+    width: tile.width * scale,
+    height: tile.height * scale,
+  };
+}

@@ -7,3 +7,5 @@ docs/
 pnpm-lock.yaml
 Cargo.lock
 *.md
+models/manifest.json
+tests/corpus/synthetic/manifest.json

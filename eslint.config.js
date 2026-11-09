@@ -13,6 +13,8 @@ export default defineConfig([
     '**/coverage/**',
     'target/**',
     'third_party/**',
+    // 本地临时性能测量脚本（见 .gitignore）
+    '.perf/**',
   ]),
   {
     files: ['**/*.{js,mjs,cjs,ts,tsx}'],

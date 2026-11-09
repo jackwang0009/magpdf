@@ -1,0 +1,210 @@
+/* 基础控件样式。颜色与尺寸只引用 theme.ts 生成的变量（方案 8.3），不写字面量。 */
+
+.mg-ibtn {
+  width: var(--mg-row-height);
+  height: var(--mg-row-height);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--mg-text);
+  cursor: default;
+}
+
+.mg-ibtn-sm {
+  width: 22px;
+  height: 22px;
+  color: var(--mg-text-muted);
+}
+
+.mg-ibtn:hover:not(:disabled) {
+  background: var(--mg-control-active);
+  color: var(--mg-text);
+}
+
+.mg-ibtn.mg-on {
+  background: var(--mg-control-active);
+  color: var(--mg-text);
+}
+
+.mg-ibtn:disabled {
+  opacity: 0.4;
+}
+
+.mg-ibtn:focus-visible,
+.mg-dd:focus-visible,
+.mg-sect:focus-visible,
+.mg-ptab:focus-visible {
+  outline: 2px solid var(--mg-accent);
+  outline-offset: -2px;
+}
+
+.mg-ck {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.mg-ck input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.mg-ck.mg-disabled {
+  opacity: 0.5;
+}
+
+.mg-box {
+  width: 13px;
+  height: 13px;
+  border-radius: 2px;
+  border: 1px solid var(--mg-line);
+  background: var(--mg-input);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--mg-handle-fill);
+  flex: none;
+}
+
+.mg-box.mg-on {
+  background: var(--mg-accent);
+  border-color: var(--mg-accent);
+}
+
+.mg-ck input:focus-visible + .mg-box {
+  outline: 2px solid var(--mg-accent);
+  outline-offset: 1px;
+}
+
+.mg-dd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 22px;
+  padding: 0 4px 0 8px;
+  background: var(--mg-input);
+  border: 1px solid var(--mg-line);
+  border-radius: 2px;
+  color: var(--mg-text);
+  font: inherit;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.mg-dd:disabled {
+  opacity: 0.5;
+}
+
+.mg-dd-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mg-grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.mg-muted {
+  color: var(--mg-text-muted);
+}
+
+.mg-field {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  height: 22px;
+  padding: 0 6px;
+  min-width: 72px;
+  background: var(--mg-input);
+  border: 1px solid var(--mg-line);
+  border-radius: 2px;
+  white-space: nowrap;
+}
+
+.mg-field.mg-mono {
+  font-family: var(--mg-mono-font-family);
+  justify-content: flex-start;
+}
+
+.mg-field-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mg-field-unit {
+  color: var(--mg-text-muted);
+}
+
+.mg-sect {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  height: var(--mg-row-height);
+  margin-top: 4px;
+  padding: 2px 0 0;
+  border: none;
+  border-top: 1px solid var(--mg-line);
+  background: transparent;
+  color: var(--mg-text);
+  font: inherit;
+  font-size: var(--mg-font-size-small);
+  font-weight: 600;
+  text-align: left;
+  cursor: default;
+}
+
+.mg-ptabs {
+  height: var(--mg-document-tabs-height);
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  background: var(--mg-shell);
+  border-bottom: 1px solid var(--mg-separator);
+}
+
+.mg-ptab {
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  border: none;
+  background: transparent;
+  color: var(--mg-text-muted);
+  font: inherit;
+  cursor: default;
+}
+
+.mg-ptab.mg-on {
+  background: var(--mg-panel);
+  color: var(--mg-text);
+}
+
+.mg-ptabs-tail {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 4px;
+}
+
+.mg-vsep {
+  width: 1px;
+  height: 20px;
+  background: var(--mg-toolbar-separator);
+  margin: 0 4px;
+  flex: none;
+}
