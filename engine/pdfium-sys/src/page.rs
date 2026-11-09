@@ -79,6 +79,11 @@ impl std::fmt::Debug for Page<'_> {
 }
 
 impl<'doc> Page<'doc> {
+    /// 句柄（crate 内使用）。
+    pub(crate) fn raw_page_handle(&self) -> raw::FPDF_PAGE {
+        self.handle
+    }
+
     /// # Safety
     /// `handle` 必须是 `FPDF_LoadPage` 刚返回、尚未关闭的页面句柄，且属于 `doc`。
     pub(crate) unsafe fn from_raw(handle: raw::FPDF_PAGE, doc: &'doc Document<'doc>) -> Self {

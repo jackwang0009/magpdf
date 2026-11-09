@@ -62,6 +62,11 @@ impl<'lib> Document<'lib> {
         })
     }
 
+    /// 句柄（crate 内使用，给 `edit` 模块的新接口用）。
+    pub(crate) fn raw_handle(&self) -> raw::FPDF_DOCUMENT {
+        self.handle
+    }
+
     pub fn page_count(&self) -> usize {
         // SAFETY: handle 有效。
         let n = unsafe { raw::FPDF_GetPageCount(self.handle) };

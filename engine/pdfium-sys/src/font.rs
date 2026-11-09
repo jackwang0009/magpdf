@@ -25,6 +25,11 @@ impl std::fmt::Debug for Font<'_> {
 }
 
 impl Font<'_> {
+    /// 句柄（crate 内使用）。
+    pub(crate) fn raw_font_handle(&self) -> raw::FPDF_FONT {
+        self.handle
+    }
+
     /// # Safety
     /// `handle` 必须是 `FPDFTextObj_GetFont` 返回的非空句柄，且其所属文字对象仍然存活。
     pub(crate) unsafe fn from_raw(handle: raw::FPDF_FONT) -> Self {
