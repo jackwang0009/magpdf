@@ -197,6 +197,7 @@ dependencies = [
  "anyhow",
  "clap",
  "magpdf-engine",
+ "magpdf-text",
  "pdfium-sys",
  "png",
  "serde",
@@ -240,6 +241,7 @@ version = "0.1.0"
 dependencies = [
  "pdfium-sys",
  "serde",
+ "serde_json",
  "thiserror",
  "tracing",
 ]

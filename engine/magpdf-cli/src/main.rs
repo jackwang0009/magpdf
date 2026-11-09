@@ -4,6 +4,7 @@
 
 mod image;
 mod roundtrip;
+mod text_blocks;
 
 use std::path::{Path, PathBuf};
 
@@ -52,6 +53,8 @@ enum Command {
     /// `roundtrip --isolate` 的子进程入口：处理单个文件并把 JSON 结果写到标准输出
     #[command(hide = true)]
     RoundtripWorker(roundtrip::WorkerArgs),
+    /// 文字行/块聚类（V07）：统计、JSON、与标注比对
+    TextBlocks(text_blocks::Args),
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -95,6 +98,7 @@ fn main() -> Result<()> {
         } => render(&lib, &file, page, dpi, annots, &output),
         Command::Roundtrip(args) => roundtrip::run(&lib, &args),
         Command::RoundtripWorker(args) => roundtrip::run_worker(&lib, &args),
+        Command::TextBlocks(args) => text_blocks::run(&lib, args),
     }
 }
 

@@ -6,10 +6,34 @@ use crate::font::Font;
 use crate::geom::{Matrix, Rect, Rgba};
 use crate::raw;
 
-/// 文字渲染模式（`Tr` 操作数 0–7）。
+/// 页面对象类型，对应 `FPDF_PAGEOBJ_*`。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ObjectKind {
+    Text,
+    Path,
+    Image,
+    Shading,
+    Form,
+    Unknown,
+}
+
+impl ObjectKind {
+    fn from_raw(v: i32) -> Self {
+        match u32::try_from(v).unwrap_or(u32::MAX) {
+            raw::FPDF_PAGEOBJ_TEXT => Self::Text,
+            raw::FPDF_PAGEOBJ_PATH => Self::Path,
+            raw::FPDF_PAGEOBJ_IMAGE => Self::Image,
+            raw::FPDF_PAGEOBJ_SHADING => Self::Shading,
+            raw::FPDF_PAGEOBJ_FORM => Self::Form,
+            _ => Self::Unknown,
+        }
+    }
+}
+
+/// 文字渲染模式（`Tr` 操作符），对应 `FPDF_TEXTRENDERMODE_*`。
 ///
-/// 4–7 带裁剪：同一个 `BT…ET` 里的字形合起来作为裁剪区域，方案 2.3 要求这样的文字块整体保留，
-/// 往返测试单独统计含裁剪文字的页面。
+/// `Invisible`（`Tr 3`）常见于扫描件的 OCR 文字层（方案 4.3、6.2）；`*Clip` 模式的文字块
+/// 要整体当作一个对象（方案 2.3 第 3 条）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TextRenderMode {
     Fill,
@@ -37,36 +61,17 @@ impl TextRenderMode {
         })
     }
 
-    /// 是否把字形加入裁剪路径（模式 4–7）。
+    /// 字形是否不会画出来（`Tr 3` 与 `Tr 7`）。
+    pub fn is_invisible(self) -> bool {
+        matches!(self, Self::Invisible | Self::Clip)
+    }
+
+    /// 是否把字形加入剪切路径（`Tr 4`–`Tr 7`）。
     pub fn is_clip(self) -> bool {
         matches!(
             self,
             Self::FillClip | Self::StrokeClip | Self::FillStrokeClip | Self::Clip
         )
-    }
-}
-
-/// 页面对象类型，对应 `FPDF_PAGEOBJ_*`。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ObjectKind {
-    Text,
-    Path,
-    Image,
-    Shading,
-    Form,
-    Unknown,
-}
-
-impl ObjectKind {
-    fn from_raw(v: i32) -> Self {
-        match u32::try_from(v).unwrap_or(u32::MAX) {
-            raw::FPDF_PAGEOBJ_TEXT => Self::Text,
-            raw::FPDF_PAGEOBJ_PATH => Self::Path,
-            raw::FPDF_PAGEOBJ_IMAGE => Self::Image,
-            raw::FPDF_PAGEOBJ_SHADING => Self::Shading,
-            raw::FPDF_PAGEOBJ_FORM => Self::Form,
-            _ => Self::Unknown,
-        }
     }
 }
 
@@ -102,9 +107,26 @@ impl PageObject<'_> {
         self.handle
     }
 
+    /// 句柄的不透明标识：同一页面存活期间，指向同一个对象的句柄返回相同的值。
+    ///
+    /// 只用于在同一页面内判断"是不是同一个对象"（例如把字符归到所属的文字对象，方案 5.1），
+    /// 页面关闭后没有意义，也不能跨页面、跨进程比较或持久化。
+    pub fn handle_id(&self) -> usize {
+        self.handle as usize
+    }
+
     pub fn kind(&self) -> ObjectKind {
         // SAFETY: handle 有效。
         ObjectKind::from_raw(unsafe { raw::FPDFPageObj_GetType(self.handle) })
+    }
+
+    /// 文字对象的渲染模式；非文字对象或 PDFium 不认识的模式返回 `None`。
+    pub fn text_render_mode(&self) -> Option<TextRenderMode> {
+        if self.kind() != ObjectKind::Text {
+            return None;
+        }
+        // SAFETY: handle 是有效的文字对象；非文字对象时 PDFium 返回 UNKNOWN，上面已排除。
+        TextRenderMode::from_raw(unsafe { raw::FPDFTextObj_GetTextRenderMode(self.handle) })
     }
 
     /// 对象在页面坐标里的包围盒。
@@ -225,15 +247,6 @@ impl PageObject<'_> {
     pub fn has_transparency(&self) -> bool {
         // SAFETY: handle 有效。
         unsafe { raw::FPDFPageObj_HasTransparency(self.handle) != 0 }
-    }
-
-    /// 文字对象的渲染模式；非文字对象返回 `None`。
-    pub fn text_render_mode(&self) -> Option<TextRenderMode> {
-        if self.kind() != ObjectKind::Text {
-            return None;
-        }
-        // SAFETY: handle 是有效的文字对象。
-        TextRenderMode::from_raw(unsafe { raw::FPDFTextObj_GetTextRenderMode(self.handle) })
     }
 
     /// 文字对象使用的字体；非文字对象或字体缺失时返回 `None`。

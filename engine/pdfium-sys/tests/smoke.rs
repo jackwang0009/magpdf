@@ -207,7 +207,66 @@ fn text_page_reads_characters() {
             info.bbox
         );
         assert!(!info.generated);
+        assert!(!info.unicode_map_error, "标准 14 字体有 Unicode 映射");
+        assert!(!info.hyphen);
+        assert_eq!(info.render_mode, Some(TextRenderMode::Fill));
         assert_eq!(text.chars().count(), 2);
+
+        // 同一个 Tj 里的字符属于同一个文字对象，标识一致并与页面对象的标识相同。
+        let id0 = text.text_object_id(0).expect("object id");
+        assert_eq!(text.text_object_id(1), Some(id0));
+        assert_eq!(page.object(0).expect("obj").handle_id(), id0);
+        assert_eq!(text.text_object_id(5), None, "越界索引没有文字对象");
+    });
+}
+
+#[test]
+fn text_render_mode_and_object_identity() {
+    with_library(|lib| {
+        // 两个文字对象：第一个不可见（Tr 3，扫描件 OCR 层的写法），第二个正常填充。
+        let content =
+            "BT /F1 12 Tf 3 Tr 10 70 Td (Hidden) Tj ET BT /F1 12 Tf 0 Tr 10 30 Td (Shown) Tj ET";
+        let resources = "<< /Font << /F1 5 0 R >> >>";
+        let font = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>";
+        let doc = Document::load_bytes(lib, minimal_pdf(content, resources, &[font]), None)
+            .expect("load");
+        let page = doc.page(0).expect("page");
+        assert_eq!(page.object_count(), 2);
+        let modes: Vec<_> = page.objects().map(|o| o.text_render_mode()).collect();
+        assert_eq!(
+            modes,
+            vec![Some(TextRenderMode::Invisible), Some(TextRenderMode::Fill)]
+        );
+        assert!(TextRenderMode::Invisible.is_invisible());
+        assert!(TextRenderMode::Clip.is_invisible() && TextRenderMode::Clip.is_clip());
+        assert!(!TextRenderMode::Fill.is_clip());
+
+        let text = page.text().expect("text page");
+        // "Hidden" 6 个字符 + 生成的换行 + "Shown" 5 个字符。
+        let infos: Vec<_> = text.chars().collect();
+        let hidden: Vec<_> = infos
+            .iter()
+            .filter(|c| !c.generated && c.render_mode == Some(TextRenderMode::Invisible))
+            .collect();
+        let shown: Vec<_> = infos
+            .iter()
+            .filter(|c| !c.generated && c.render_mode == Some(TextRenderMode::Fill))
+            .collect();
+        assert_eq!((hidden.len(), shown.len()), (6, 5));
+        let hidden_ids: std::collections::BTreeSet<_> =
+            hidden.iter().map(|c| c.text_object_id).collect();
+        let shown_ids: std::collections::BTreeSet<_> =
+            shown.iter().map(|c| c.text_object_id).collect();
+        assert_eq!(hidden_ids.len(), 1);
+        assert_eq!(shown_ids.len(), 1);
+        assert_ne!(hidden_ids, shown_ids, "不同文字对象的标识不同");
+        let generated: Vec<_> = infos.iter().filter(|c| c.generated).collect();
+        assert!(!generated.is_empty(), "两行之间应有生成的换行字符");
+        assert!(
+            generated
+                .iter()
+                .all(|c| c.text_object_id.is_none() && c.render_mode.is_none())
+        );
     });
 }
 

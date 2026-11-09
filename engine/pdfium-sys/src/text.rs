@@ -2,7 +2,7 @@ use std::ffi::{c_int, c_uint, c_ulong, c_void};
 use std::marker::PhantomData;
 
 use crate::geom::{Matrix, Rect, Rgba};
-use crate::object::PageObject;
+use crate::object::{PageObject, TextRenderMode};
 use crate::raw;
 
 /// 字符级信息，是文字块识别（方案 5.1、P0 计划 V07）的输入。
@@ -16,6 +16,8 @@ pub struct CharInfo {
     pub loose_bbox: Option<Rect>,
     /// 基线起点。
     pub origin: (f64, f64),
+    /// `Tf` 设定的字号。文字矩阵带缩放时（如 `12 0 0 12 x y Tm` 配 `/F1 1 Tf`），
+    /// 实际字高要乘上 [`matrix`](Self::matrix) 的纵向缩放。
     pub font_size: f64,
     pub font_name: String,
     /// PDF 字体描述符的 Flags。
@@ -26,6 +28,14 @@ pub struct CharInfo {
     pub fill_color: Option<Rgba>,
     /// 是否是 PDFium 为排版插入的生成字符（空格、换行等），不是文件里真正的字形。
     pub generated: bool,
+    /// 字符没有 Unicode 映射（无 ToUnicode 或映射失败），方案 5.1 第 2 条的"不可编辑文字"。
+    pub unicode_map_error: bool,
+    /// PDFium 判定为行尾连字符（此时 `unicode` 被替换成 0x2）。
+    pub hyphen: bool,
+    /// 所属文字对象的标识（[`PageObject::handle_id`]），生成字符没有。
+    pub text_object_id: Option<usize>,
+    /// 所属文字对象的渲染模式，生成字符没有。
+    pub render_mode: Option<TextRenderMode>,
 }
 
 /// 一页的文字内容（`FPDF_TEXTPAGE`）。
@@ -192,6 +202,15 @@ impl TextPage<'_> {
         unsafe { raw::FPDFText_HasUnicodeMapError(self.handle, i) == 1 }
     }
 
+    /// 字符是否被 PDFium 判定为行尾连字符（文字提取时合并断词用）。
+    pub fn is_hyphen(&self, index: usize) -> bool {
+        let Ok(i) = c_int::try_from(index) else {
+            return false;
+        };
+        // SAFETY: handle 有效。
+        unsafe { raw::FPDFText_IsHyphen(self.handle, i) == 1 }
+    }
+
     /// 字符所属的文字对象。
     pub fn text_object(&self, index: usize) -> Option<PageObject<'_>> {
         let i = c_int::try_from(index).ok()?;
@@ -201,9 +220,15 @@ impl TextPage<'_> {
         (!obj.is_null()).then(|| unsafe { PageObject::from_raw(obj) })
     }
 
+    /// 字符所属文字对象的标识（见 [`PageObject::handle_id`]）；生成字符返回 `None`。
+    pub fn text_object_id(&self, index: usize) -> Option<usize> {
+        self.text_object(index).map(|o| o.handle_id())
+    }
+
     /// 一次取齐某个字符的全部信息。
     pub fn char_info(&self, index: usize) -> Option<CharInfo> {
         let (font_name, font_flags) = self.font_info(index).unwrap_or_default();
+        let text_object = self.text_object(index);
         Some(CharInfo {
             unicode: self.unicode(index)?,
             bbox: self.char_box(index)?,
@@ -216,6 +241,10 @@ impl TextPage<'_> {
             matrix: self.char_matrix(index),
             fill_color: self.fill_color(index),
             generated: self.is_generated(index),
+            unicode_map_error: self.has_unicode_map_error(index),
+            hyphen: self.is_hyphen(index),
+            text_object_id: text_object.map(|o| o.handle_id()),
+            render_mode: text_object.and_then(|o| o.text_render_mode()),
         })
     }
 
