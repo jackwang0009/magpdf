@@ -205,20 +205,19 @@ impl PageObject<'_> {
         self.line_to(x, y)
     }
 
-    /// 直线到 `(x, y)`（`FPDFPageObj_AddLineToPath`）。路径的第一个点也是用这个接口建立的。
+    /// 直线到 `(x, y)`（`FPDFPath_LineTo`）。
     pub fn line_to(&self, x: f32, y: f32) -> Result<()> {
         // SAFETY: handle 有效且是路径对象。
-        if unsafe { raw::FPDFPageObj_AddLineToPath(self.raw_handle(), x, y) } == 0 {
+        if unsafe { raw::FPDFPath_LineTo(self.raw_handle(), x, y) } == 0 {
             return Err(Error::PageObject);
         }
         Ok(())
     }
 
-    /// 三次贝塞尔曲线（`FPDFPageObj_AddBezierToPath`）。
+    /// 三次贝塞尔曲线（`FPDFPath_BezierTo`）。
     pub fn bezier_to(&self, x1: f32, y1: f32, x2: f32, y2: f32, x3: f32, y3: f32) -> Result<()> {
         // SAFETY: handle 有效且是路径对象。
-        let ok =
-            unsafe { raw::FPDFPageObj_AddBezierToPath(self.raw_handle(), x1, y1, x2, y2, x3, y3) };
+        let ok = unsafe { raw::FPDFPath_BezierTo(self.raw_handle(), x1, y1, x2, y2, x3, y3) };
         if ok == 0 {
             return Err(Error::PageObject);
         }
