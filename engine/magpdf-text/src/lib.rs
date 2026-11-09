@@ -23,6 +23,7 @@ pub mod edit;
 pub mod error;
 pub mod eval;
 pub mod fontfile;
+pub mod fontmap;
 pub mod fontmatch;
 pub mod geom;
 pub mod glyph;
