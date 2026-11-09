@@ -27,6 +27,7 @@ pub mod geom;
 pub mod glyph;
 pub mod layout;
 pub mod shaping;
+pub mod subset;
 
 pub use error::{EditError, Result as EditResult};
 pub use fontfile::FontFace;
