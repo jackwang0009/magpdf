@@ -51,10 +51,12 @@ third_party/pdfium/
 
 | 项 | 要求 | 说明 |
 |---|---|---|
+| **git `core.autocrlf`** | **必须为 `false`** | PDFium 没有把 `testing/resources/*.pdf` 标成 binary，autocrlf 会把约 270 个测试 PDF 改成 CRLF（本机 346 个里有 276 个），`pdfium_unittests` 和往返基线因此不可比。克隆前 `git config --global core.autocrlf false`；已坏掉的检出用 `git -C pdfium -c core.autocrlf=false checkout -- testing/resources` 恢复。取样一律用 `git cat-file blob` 或 `git archive` 取原始字节（《工程规范》第 1 节、V01 报告 5、V02 报告 4.2） |
 | Visual Studio 2022 Build Tools | MSVC v143（已验证 14.44.35207）、Windows 11 SDK（已验证 10.0.26100） | 不需要完整 VS，也不需要 SDK 的 "Debugging Tools"（见 `patches/build/`） |
 | depot_tools | `D:\depot_tools`（`sync.ps1` 没有就克隆） | 只用 `gclient`；gn / ninja / clang / python 都由 DEPS 带来，不用系统里的 |
 | 磁盘 | 源码 + 依赖约 3.4 GB（全历史检出，含 .git 460 MB；已排除用不到的 rust-toolchain 2.8 GB），`out/Release` 约 330–370 MB | |
 | 网络 | 首次同步要能访问 `*.googlesource.com`、`chrome-infra-packages.appspot.com`、`storage.googleapis.com` | `sync.ps1 -Proxy http://127.0.0.1:7897` 或先设 `HTTPS_PROXY`；构建本身离线即可 |
+| 主仓库 `.gitattributes` | 需要 `*.patch text eol=lf` | 否则 `patches/` 下的补丁在 Windows 上被检出成 CRLF，`git apply` 失败；`apply-patches.ps1` 会先规范成 LF 兜底（《工程规范》第 1 节） |
 
 必须的环境变量由脚本自行设置：`DEPOT_TOOLS_WIN_TOOLCHAIN=0`（不拉 Google 内部工具链包）、`GYP_MSVS_OVERRIDE_PATH` / `vs2022_install`
 （Build Tools 目录）、`WINDOWSSDKDIR`、`WINDOWS_SDK_VERSION`（见第 5 节）。脚本不依赖 vcvars，可在任意 PowerShell 里运行。
@@ -90,6 +92,9 @@ dist/VERSION  args.gn  LICENSE  licenses/*  PDFiumConfig.cmake  BUILD-INFO.txt
 离线时用脚本内置对照表，查不到就写 0 并警告）、`BUILD`=分支号、`MINOR`/`PATCH`=0。
 `licenses/` 按 ninja 依赖图收集实际链进 `pdfium.dll` 的第三方组件许可（pdfium-binaries 是写死的列表，
 它多了没链进去的 libpng、simdutf，少了实际链进去的 brotli、libc++、libyuv）。
+
+发布给其他组的预编译包命名为 `pdfium-win-x64-<MAJOR.MINOR.BUILD.PATCH>.zip`，在 `magpdf-pdfium` 仓库打 `v*` 标签发 Release；
+`scripts/fetch-pdfium-prebuilt.ps1` 在 Release 可用后增加"从我们的 Release 拉取"的开关，让其他组在原版与分支预编译库之间切换（《工程规范》第 7 节、V01 报告 8.5）。
 
 ## 4. 耗时与体积（Ryzen 7 9800X3D 16 线程 / NVMe，`-Jobs 12`，另有 5 个 agent 在同时编译）
 

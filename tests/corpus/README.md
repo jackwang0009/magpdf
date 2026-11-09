@@ -10,11 +10,12 @@
 | `browser-report/` | 浏览器打印、报表系统生成 |
 | `scan/` | 扫描件（200/300 dpi 黑白与彩色、手机拍照） |
 | `freight/` | 货代单证（提单、托书、装箱单、发票、面单、平台标签） |
-| `public/` | 公开测试集（PDF.js、PDFium 仓库自带的测试文件） |
-| `synthetic/` | 自制样本：针对生成器缺陷逐项构造（CMYK、专色、渐变、`TJ` 字距、Type3、ExtGState、多内容流等） |
+| `public/` | 公开测试集（PDF.js、PDFium 仓库自带的测试文件），按 `public/<仓库名>/<子目录>` 组织：`public/pdfium/resources`、`public/pdfium/pixel`、`public/pdfjs/`… |
+| `synthetic/` | 自制样本：针对生成器缺陷逐项构造（CMYK、专色、渐变、`TJ` 字距、`Tc/Tw`、Type3、文字裁剪、ExtGState、多内容流、内联图像等），分类 S |
 
 规则：
 - 真实单证必须先按脱敏规范处理，未脱敏的文件不得入库，也不得上传到任何外部服务（《工程规范》11）。
 - 大文件走 Git LFS；`tests/baselines/` 存像素比对基线。
 - 每个目录放一份 `manifest.json`，记录文件来源、生成工具、页数和已知特性，供报告按来源分类。字段见《测试样本收集与脱敏规范》第 6 节；
   用 `tools/make_manifest.py <目录>` 生成或更新（`synthetic/` 由其 `generate.py` 自行生成）。
+- 往返测试按相对路径的第一级目录（`pdfium`、`pdfjs`）区分来源；PDFium 内部的四个子目录在报告里单独列一行。

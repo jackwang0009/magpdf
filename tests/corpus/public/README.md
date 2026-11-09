@@ -7,7 +7,7 @@
 
 | 来源 | 位置 | 许可 | 规模（2026-11 本机统计） |
 |---|---|---|---|
-| PDFium 测试资源 | 本机 `D:\pdfium-src\pdfium\testing\resources`（上游 `pdfium/testing/resources`） | BSD-3-Clause（`pdfium/LICENSE`） | 347 个 `.pdf`，共 2.9 MB：根目录 301、`pixel/` 33、`javascript/` 6、`xfa/` 6；另有 569 个 `.in` 模板 |
+| PDFium 测试资源 | 本机 `D:\pdfium-src\pdfium\testing\resources`（上游 `pdfium/testing/resources`） | BSD-3-Clause（`pdfium/LICENSE`） | `chromium/8138`（`5f092b5299`）分支上 346 个 `.pdf`，共 2.9 MB：根目录 301、`pixel/` 33、`javascript/` 6、`xfa/` 6；另有数百个 `.in` 模板。上游 main 分支比 8138 多一个 `image_pattern_colorspace.pdf`（本机 347 个即含它，见 V02 报告 3、6.2） |
 | pdf.js 测试文件 | `pdf.js/test/pdfs`（GitHub `mozilla/pdf.js`） | Apache-2.0（仓库 `LICENSE`）；个别文件在 `test/pdfs/` 内另有说明 | 数百个文件，其中大量是 `.link` 文件（只记录外部网址，仓库里没有文件本体） |
 
 PDFium 的 `.in` 文件是模板，经 `testing/tools/fixup_pdf_template.py` 补上 xref 后才是合法 PDF；`pixel/`、`javascript/` 下的 `.in`
