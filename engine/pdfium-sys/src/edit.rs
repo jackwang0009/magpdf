@@ -195,28 +195,30 @@ impl PageObject<'_> {
         (!handle.is_null()).then(|| unsafe { PageObject::from_raw(handle) })
     }
 
-    /// 新子路径起点（`FPDFPath_MoveTo`）。
-    pub fn move_to(&self, x: f32, y: f32) -> Result<()> {
-        // SAFETY: handle 有效且是路径对象。
-        if unsafe { raw::FPDFPath_MoveTo(self.raw_handle(), x, y) } == 0 {
+    /// 新子路径起点：PDFium 的公共 API 没有 `MoveTo`，这里用"闭合当前子路径 + 从 `(x, y)` 起笔"实现。
+    pub fn start_subpath(&self, x: f32, y: f32) -> Result<()> {
+        // SAFETY: handle 有效且是路径对象；点与上一子路径重叠，不改变外观。
+        let ok = unsafe { raw::FPDFPath_Close(self.raw_handle()) };
+        if ok == 0 {
             return Err(Error::PageObject);
         }
-        Ok(())
+        self.line_to(x, y)
     }
 
-    /// 直线到 `(x, y)`（`FPDFPath_LineTo`）。
+    /// 直线到 `(x, y)`（`FPDFPageObj_AddLineToPath`）。路径的第一个点也是用这个接口建立的。
     pub fn line_to(&self, x: f32, y: f32) -> Result<()> {
         // SAFETY: handle 有效且是路径对象。
-        if unsafe { raw::FPDFPath_LineTo(self.raw_handle(), x, y) } == 0 {
+        if unsafe { raw::FPDFPageObj_AddLineToPath(self.raw_handle(), x, y) } == 0 {
             return Err(Error::PageObject);
         }
         Ok(())
     }
 
-    /// 三次贝塞尔曲线（`FPDFPath_BezierTo`）。
+    /// 三次贝塞尔曲线（`FPDFPageObj_AddBezierToPath`）。
     pub fn bezier_to(&self, x1: f32, y1: f32, x2: f32, y2: f32, x3: f32, y3: f32) -> Result<()> {
         // SAFETY: handle 有效且是路径对象。
-        let ok = unsafe { raw::FPDFPath_BezierTo(self.raw_handle(), x1, y1, x2, y2, x3, y3) };
+        let ok =
+            unsafe { raw::FPDFPageObj_AddBezierToPath(self.raw_handle(), x1, y1, x2, y2, x3, y3) };
         if ok == 0 {
             return Err(Error::PageObject);
         }
