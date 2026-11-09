@@ -1,0 +1,81 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Pages /Kids [13 0 R] /Count 1 >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>
+endobj
+3 0 obj
+<< /Type /XObject /Subtype /Form /BBox [0 0 100 60] /Length 36 >>
+stream
+1 1 0 rg 1 0 0 RG 2 w 1 1 98 58 re B
+endstream
+endobj
+4 0 obj
+<< /Type /XObject /Subtype /Form /BBox [0 0 120 40] /Resources << /Font << /F1 2 0 R >> >> /Length 81 >>
+stream
+q 0.8 0 0 RG 2 w 2 2 116 36 re S BT /F1 18 Tf 0.8 0 0 rg 20 13 Td (DRAFT) Tj ET Q
+endstream
+endobj
+5 0 obj
+<< /Type /Annot /Subtype /Popup /Rect [180 100 290 145] /Parent 6 0 R /Open true >>
+endobj
+6 0 obj
+<< /Type /Annot /Subtype /Text /Rect [250 150 270 170] /F 4 /Name /Comment /T (SAMPLE reviewer) /Contents (Sample note contents) /Popup 5 0 R /C [1 1 0] >>
+endobj
+7 0 obj
+<< /Type /Annot /Subtype /Square /Rect [20 100 120 160] /F 4 /C [1 0 0] /IC [1 1 0] /AP << /N 3 0 R >> >>
+endobj
+8 0 obj
+<< /Type /Annot /Subtype /Stamp /Name /Draft /Rect [140 120 260 160] /F 4 /AP << /N 4 0 R >> >>
+endobj
+9 0 obj
+<< /Type /Annot /Subtype /Square /Rect [20 30 120 90] /F 6 /C [0 0 1] /AP << /N 3 0 R >> >>
+endobj
+10 0 obj
+<< /Type /Annot /Subtype /Square /Rect [140 30 240 90] /F 36 /C [0 1 0] /AP << /N 3 0 R >> >>
+endobj
+11 0 obj
+<< /Type /Annot /Subtype /Link /Rect [20 10 150 25] /Border [0 0 1] /C [0 0 1] /A << /S /URI /URI (https://example.invalid/sample) >> >>
+endobj
+12 0 obj
+<<  /Length 198 >>
+stream
+BT /F1 9 Tf 0 g 20 12 Td (page content: link annot sits on this line) Tj ET
+0 g 1 w 20 95 m 280 95 l S
+BT /F1 7 Tf 0 g 10 188 Td (struct-annots-appearance: render with and without annotations) Tj ET
+endstream
+endobj
+13 0 obj
+<< /Type /Page /Parent 1 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 2 0 R >> >> /Contents 12 0 R /Annots [7 0 R 8 0 R 9 0 R 10 0 R 11 0 R 6 0 R 5 0 R] >>
+endobj
+14 0 obj
+<< /Type /Catalog /Pages 1 0 R >>
+endobj
+15 0 obj
+<< /Title (struct-annots-appearance) /Subject (MagPDF synthetic test sample) /Producer (MagPDF synthetic corpus generator \(tests/corpus/synthetic/generate.py\)) >>
+endobj
+xref
+0 16
+0000000000 65535 f 
+0000000015 00000 n 
+0000000073 00000 n 
+0000000175 00000 n 
+0000000310 00000 n 
+0000000529 00000 n 
+0000000628 00000 n 
+0000000799 00000 n 
+0000000920 00000 n 
+0000001031 00000 n 
+0000001138 00000 n 
+0000001248 00000 n 
+0000001401 00000 n 
+0000001652 00000 n 
+0000001834 00000 n 
+0000001884 00000 n 
+trailer
+<< /Size 16 /Root 14 0 R /Info 15 0 R /ID [<272BB8CDD41116B78013152F198C4877> <272BB8CDD41116B78013152F198C4877>]  >>
+startxref
+2065
+%%EOF

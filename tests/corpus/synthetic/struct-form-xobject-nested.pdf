@@ -1,0 +1,53 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Pages /Kids [6 0 R] /Count 1 >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+3 0 obj
+<< /Type /XObject /Subtype /Form /BBox [0 0 100 100] /Length 55 >>
+stream
+1 0 0 rg -30 -30 160 160 re f 1 1 0 rg 25 25 50 50 re f
+endstream
+endobj
+4 0 obj
+<< /Type /XObject /Subtype /Form /BBox [0 0 100 100] /Resources << /XObject << /Fx2 3 0 R >> >> /Length 58 >>
+stream
+0 0 1 rg 0 0 100 100 re f q 0.5 0 0 0.5 25 25 cm /Fx2 Do Q
+endstream
+endobj
+5 0 obj
+<<  /Length 193 >>
+stream
+q 1 0 0 1 20 50 cm /Fx1 Do Q
+q 1.2 0 0 1.2 150 40 cm /Fx1 Do Q
+BT /F1 7 Tf 0 g 10 188 Td (struct-form-xobject-nested: outer form x2, inner form scaled 0.5, inner overflow clipped by BBox) Tj ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 1 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 2 0 R >> /XObject << /Fx1 4 0 R >> >> /Contents 5 0 R >>
+endobj
+7 0 obj
+<< /Type /Catalog /Pages 1 0 R >>
+endobj
+8 0 obj
+<< /Title (struct-form-xobject-nested) /Subject (MagPDF synthetic test sample) /Producer (MagPDF synthetic corpus generator \(tests/corpus/synthetic/generate.py\)) >>
+endobj
+xref
+0 9
+0000000000 65535 f 
+0000000015 00000 n 
+0000000072 00000 n 
+0000000169 00000 n 
+0000000324 00000 n 
+0000000525 00000 n 
+0000000770 00000 n 
+0000000922 00000 n 
+0000000971 00000 n 
+trailer
+<< /Size 9 /Root 7 0 R /Info 8 0 R /ID [<9263EA89DFD5A368AB4CE27838D5510F> <9263EA89DFD5A368AB4CE27838D5510F>]  >>
+startxref
+1153
+%%EOF

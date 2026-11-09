@@ -1,0 +1,62 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Pages /Kids [4 0 R 6 0 R 8 0 R] /Count 3 >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+3 0 obj
+<<  /Length 155 >>
+stream
+0 0 0.7 rg 150 190 m 170 160 l 160 160 l 160 120 l 140 120 l 140 160 l 130 160 l h f
+BT /F1 12 Tf 0 g 20 20 Td (/Rotate 90: arrow should point RIGHT) Tj ET
+endstream
+endobj
+4 0 obj
+<< /Type /Page /Parent 1 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 2 0 R >> >> /Contents 3 0 R /Rotate 90 >>
+endobj
+5 0 obj
+<<  /Length 155 >>
+stream
+0 0 0.7 rg 150 190 m 170 160 l 160 160 l 160 120 l 140 120 l 140 160 l 130 160 l h f
+BT /F1 12 Tf 0 g 20 20 Td (/Rotate 180: arrow should point DOWN) Tj ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 1 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 2 0 R >> >> /Contents 5 0 R /Rotate 180 >>
+endobj
+7 0 obj
+<<  /Length 155 >>
+stream
+0 0 0.7 rg 150 190 m 170 160 l 160 160 l 160 120 l 140 120 l 140 160 l 130 160 l h f
+BT /F1 12 Tf 0 g 20 20 Td (/Rotate 270: arrow should point LEFT) Tj ET
+endstream
+endobj
+8 0 obj
+<< /Type /Page /Parent 1 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 2 0 R >> >> /Contents 7 0 R /Rotate 270 >>
+endobj
+9 0 obj
+<< /Type /Catalog /Pages 1 0 R >>
+endobj
+10 0 obj
+<< /Title (struct-page-rotate) /Subject (MagPDF synthetic test sample) /Producer (MagPDF synthetic corpus generator \(tests/corpus/synthetic/generate.py\)) >>
+endobj
+xref
+0 11
+0000000000 65535 f 
+0000000015 00000 n 
+0000000084 00000 n 
+0000000181 00000 n 
+0000000388 00000 n 
+0000000525 00000 n 
+0000000732 00000 n 
+0000000870 00000 n 
+0000001077 00000 n 
+0000001215 00000 n 
+0000001264 00000 n 
+trailer
+<< /Size 11 /Root 9 0 R /Info 10 0 R /ID [<ACB87A2D43C893C53C9BBA2A986BF2CB> <ACB87A2D43C893C53C9BBA2A986BF2CB>]  >>
+startxref
+1439
+%%EOF

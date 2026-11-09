@@ -1,0 +1,72 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Pages /Kids [11 0 R] /Count 1 >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Times-Roman /Encoding /WinAnsiEncoding >>
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Times-BoldItalic /Encoding /WinAnsiEncoding >>
+endobj
+6 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding >>
+endobj
+7 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Symbol >>
+endobj
+8 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /ZapfDingbats >>
+endobj
+9 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding << /Type /Encoding /BaseEncoding /WinAnsiEncoding /Differences [97 /bullet /dagger /section] >> >>
+endobj
+10 0 obj
+<<  /Length 595 >>
+stream
+BT /F1 11 Tf 0 g 15 180 Td (Helvetica: SAMPLE FREIGHT CO. B/L SMPL-TEST-0001) Tj ET
+BT /F2 11 Tf 0 g 15 158 Td (Helvetica-Bold: PACKING LIST (SAMPLE)) Tj ET
+BT /F3 11 Tf 0 g 15 136 Td (Times-Roman: Shipper: SAMPLE Trading Ltd, 1 Test Road) Tj ET
+BT /F4 11 Tf 0 g 15 114 Td (Times-BoldItalic: Consignee: SAMPLE Import GmbH) Tj ET
+BT /F5 11 Tf 0 g 15 92 Td (Courier: CNTR SMPU1234561  SEAL SMP000001) Tj ET
+BT /F6 11 Tf 0 g 15 70 Td (abgd ABGD \245 \362 \345) Tj ET
+BT /F7 11 Tf 0 g 15 48 Td (3456 nopq \110\111) Tj ET
+BT /F8 11 Tf 0 g 15 26 Td (abc -> bullet dagger section via Differences) Tj ET
+endstream
+endobj
+11 0 obj
+<< /Type /Page /Parent 1 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 2 0 R /F2 3 0 R /F3 4 0 R /F4 5 0 R /F5 6 0 R /F6 7 0 R /F7 8 0 R /F8 9 0 R >> >> /Contents 10 0 R >>
+endobj
+12 0 obj
+<< /Type /Catalog /Pages 1 0 R >>
+endobj
+13 0 obj
+<< /Title (text-standard14) /Subject (MagPDF synthetic test sample) /Producer (MagPDF synthetic corpus generator \(tests/corpus/synthetic/generate.py\)) >>
+endobj
+xref
+0 14
+0000000000 65535 f 
+0000000015 00000 n 
+0000000073 00000 n 
+0000000170 00000 n 
+0000000272 00000 n 
+0000000371 00000 n 
+0000000475 00000 n 
+0000000570 00000 n 
+0000000637 00000 n 
+0000000710 00000 n 
+0000000886 00000 n 
+0000001534 00000 n 
+0000001732 00000 n 
+0000001782 00000 n 
+trailer
+<< /Size 14 /Root 12 0 R /Info 13 0 R /ID [<D4A161A2E34803851036E7EE15E25C44> <D4A161A2E34803851036E7EE15E25C44>]  >>
+startxref
+1954
+%%EOF

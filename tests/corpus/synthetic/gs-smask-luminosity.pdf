@@ -1,0 +1,51 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Pages /Kids [6 0 R] /Count 1 >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+3 0 obj
+<< /ShadingType 2 /ColorSpace /DeviceGray /Coords [20 0 280 0] /Function << /FunctionType 2 /Domain [0 1] /C0 [1] /C1 [0] /N 1 >> /Extend [true true] >>
+endobj
+4 0 obj
+<< /Type /XObject /Subtype /Form /BBox [0 0 300 200] /Resources << /Shading << /ShM 3 0 R >> >> /Group << /S /Transparency /CS /DeviceGray >> /Length 26 >>
+stream
+0 0 300 200 re W n /ShM sh
+endstream
+endobj
+5 0 obj
+<<  /Length 253 >>
+stream
+q /GSm gs 0 0 1 rg 20 60 260 100 re f Q
+q /GSm gs 1 0 0 RG 10 w 20 175 m 280 175 l S Q
+q /GSm gs /GSnone gs 0 0.6 0 rg 20 20 260 30 re f Q
+BT /F1 7 Tf 0 g 10 188 Td (gs-smask-luminosity: blue block and red line fade left->right; green block solid) Tj ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 1 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 2 0 R >> /ExtGState << /GSm << /SMask << /S /Luminosity /G 4 0 R /BC [0] >> >> /GSnone << /SMask /None >> >> >> /Contents 5 0 R >>
+endobj
+7 0 obj
+<< /Type /Catalog /Pages 1 0 R >>
+endobj
+8 0 obj
+<< /Title (gs-smask-luminosity) /Subject (MagPDF synthetic test sample) /Producer (MagPDF synthetic corpus generator \(tests/corpus/synthetic/generate.py\)) >>
+endobj
+xref
+0 9
+0000000000 65535 f 
+0000000015 00000 n 
+0000000072 00000 n 
+0000000169 00000 n 
+0000000337 00000 n 
+0000000552 00000 n 
+0000000857 00000 n 
+0000001083 00000 n 
+0000001132 00000 n 
+trailer
+<< /Size 9 /Root 7 0 R /Info 8 0 R /ID [<352EF82A4B3ABF4932AAF10533066AA3> <352EF82A4B3ABF4932AAF10533066AA3>]  >>
+startxref
+1307
+%%EOF

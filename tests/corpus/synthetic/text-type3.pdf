@@ -1,0 +1,72 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Pages /Kids [9 0 R] /Count 1 >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+3 0 obj
+<<  /Length 39 >>
+stream
+1000 0 d0 1 0 0 rg 100 100 800 800 re f
+endstream
+endobj
+4 0 obj
+<<  /Length 53 >>
+stream
+1000 0 0 0 1000 1000 d1 0 0 m 1000 0 l 500 1000 l h f
+endstream
+endobj
+5 0 obj
+<<  /Length 102 >>
+stream
+1000 0 0 0 1000 1000 d1 q 1000 0 0 1000 0 0 cm BI /W 4 /H 4 /IM true /BPC 1 /F /AHx ID
+00606000 >
+EI Q
+endstream
+endobj
+6 0 obj
+<< /square 3 0 R /tri 4 0 R /dot 5 0 R >>
+endobj
+7 0 obj
+<< /Type /Font /Subtype /Type3 /FontBBox [0 0 1000 1000] /FontMatrix [0.001 0 0 0.001 0 0] /CharProcs 6 0 R /Encoding << /Type /Encoding /Differences [97 /square /tri /dot] >> /FirstChar 97 /LastChar 99 /Widths [1000 1000 1000] /Resources << >> >>
+endobj
+8 0 obj
+<<  /Length 213 >>
+stream
+0 0 1 rg 20 160 100 25 re f
+BT /T3 28 Tf 0 g 20 110 Td (abcabc) Tj ET
+BT /F1 12 Tf 0 g 20 80 Td (Helvetica text after Type3 in the same stream) Tj ET
+0 0.6 0 rg 20 20 260 30 re f
+1 0 0 RG 3 w 150 160 m 280 185 l S
+endstream
+endobj
+9 0 obj
+<< /Type /Page /Parent 1 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 2 0 R /T3 7 0 R >> >> /Contents 8 0 R >>
+endobj
+10 0 obj
+<< /Type /Catalog /Pages 1 0 R >>
+endobj
+11 0 obj
+<< /Title (text-type3) /Subject (MagPDF synthetic test sample) /Producer (MagPDF synthetic corpus generator \(tests/corpus/synthetic/generate.py\)) >>
+endobj
+xref
+0 12
+0000000000 65535 f 
+0000000015 00000 n 
+0000000072 00000 n 
+0000000169 00000 n 
+0000000259 00000 n 
+0000000363 00000 n 
+0000000517 00000 n 
+0000000574 00000 n 
+0000000837 00000 n 
+0000001102 00000 n 
+0000001238 00000 n 
+0000001288 00000 n 
+trailer
+<< /Size 12 /Root 10 0 R /Info 11 0 R /ID [<76E5F722D37F93243A52360ACF7F4319> <76E5F722D37F93243A52360ACF7F4319>]  >>
+startxref
+1455
+%%EOF

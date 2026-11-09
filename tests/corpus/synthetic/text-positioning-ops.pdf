@@ -1,0 +1,40 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Pages /Kids [4 0 R] /Count 1 >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+3 0 obj
+<<  /Length 370 >>
+stream
+BT /F1 12 Tf 20 175 Td 50 Tz (Tz 50 horizontal scaling narrow) Tj ET
+BT /F1 12 Tf 20 155 Td 150 Tz (Tz 150 wide) Tj ET
+BT /F1 12 Tf 100 Tz 20 130 Td (Base) Tj 5 Ts (super) Tj -5 Ts (sub) Tj 0 Ts ( normal) Tj ET
+BT /F1 12 Tf 14 TL 20 100 Td (Line 1 set with Td, TL 14) Tj T* (Line 2 after T*) Tj (Line 3 via quote operator) ' 2 1 (Line 4 via double-quote: Tw 2 Tc 1) " ET
+endstream
+endobj
+4 0 obj
+<< /Type /Page /Parent 1 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 2 0 R >> >> /Contents 3 0 R >>
+endobj
+5 0 obj
+<< /Type /Catalog /Pages 1 0 R >>
+endobj
+6 0 obj
+<< /Title (text-positioning-ops) /Subject (MagPDF synthetic test sample) /Producer (MagPDF synthetic corpus generator \(tests/corpus/synthetic/generate.py\)) >>
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000000015 00000 n 
+0000000072 00000 n 
+0000000169 00000 n 
+0000000591 00000 n 
+0000000717 00000 n 
+0000000766 00000 n 
+trailer
+<< /Size 7 /Root 5 0 R /Info 6 0 R /ID [<276108F8F83A7526DDB599A1BFC0F793> <276108F8F83A7526DDB599A1BFC0F793>]  >>
+startxref
+942
+%%EOF

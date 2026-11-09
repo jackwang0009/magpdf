@@ -17,6 +17,10 @@ coverage/
 /models/**/*.tar
 /models/**/*.zip
 
+# Python（测试文件库工具）
+__pycache__/
+*.pyc
+
 # 测试输出
 /tests/out/
 

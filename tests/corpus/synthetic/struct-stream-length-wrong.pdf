@@ -1,0 +1,39 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Pages /Kids [4 0 R] /Count 1 >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+3 0 obj
+<<  /Length 116 >>
+stream
+0 0.5 0.5 rg 20 60 120 100 re f
+0 g 160 60 120 100 re S
+BT /F1 10 Tf 0 g 20 30 Td (stream /Length is 10 bytes too short) Tj ET
+endstream
+endobj
+4 0 obj
+<< /Type /Page /Parent 1 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 2 0 R >> >> /Contents 3 0 R >>
+endobj
+5 0 obj
+<< /Type /Catalog /Pages 1 0 R >>
+endobj
+6 0 obj
+<< /Title (struct-stream-length-wrong) /Subject (MagPDF synthetic test sample) /Producer (MagPDF synthetic corpus generator \(tests/corpus/synthetic/generate.py\)) >>
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000000015 00000 n 
+0000000072 00000 n 
+0000000169 00000 n 
+0000000347 00000 n 
+0000000473 00000 n 
+0000000522 00000 n 
+trailer
+<< /Size 7 /Root 5 0 R /Info 6 0 R /ID [<AC59CDC13025B5B23C0612F7B6AFC50F> <AC59CDC13025B5B23C0612F7B6AFC50F>]  >>
+startxref
+704
+%%EOF

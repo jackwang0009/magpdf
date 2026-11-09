@@ -1,0 +1,48 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Pages /Kids [6 0 R] /Count 1 >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>
+endobj
+3 0 obj
+<< /Type /Pattern /PatternType 2 /Shading << /ShadingType 2 /ColorSpace /DeviceRGB /Coords [20 0 280 0] /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> /Extend [true true] >> >>
+endobj
+4 0 obj
+<< /Type /Pattern /PatternType 2 /Shading << /ShadingType 3 /ColorSpace /DeviceRGB /Coords [220 110 0 220 110 60] /Function << /FunctionType 2 /Domain [0 1] /C0 [1 1 0] /C1 [0 0.5 0] /N 1 >> /Extend [false true] >> >>
+endobj
+5 0 obj
+<<  /Length 193 >>
+stream
+/Pattern cs /Psh scn 20 60 120 110 re f
+/Pattern cs /Prad scn 160 60 120 110 re f
+BT /F1 26 Tf /Pattern cs /Psh scn 20 20 Td (GRADIENT TEXT) Tj ET
+/Pattern CS /Prad SCN 8 w 20 182 m 280 182 l S
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 1 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 2 0 R >> /Pattern << /Psh 3 0 R /Prad 4 0 R >> >> /Contents 5 0 R >>
+endobj
+7 0 obj
+<< /Type /Catalog /Pages 1 0 R >>
+endobj
+8 0 obj
+<< /Title (pattern-shading-fill) /Subject (MagPDF synthetic test sample) /Producer (MagPDF synthetic corpus generator \(tests/corpus/synthetic/generate.py\)) >>
+endobj
+xref
+0 9
+0000000000 65535 f 
+0000000015 00000 n 
+0000000072 00000 n 
+0000000174 00000 n 
+0000000394 00000 n 
+0000000627 00000 n 
+0000000872 00000 n 
+0000001036 00000 n 
+0000001085 00000 n 
+trailer
+<< /Size 9 /Root 7 0 R /Info 8 0 R /ID [<89A193C09B95237BACAD0B77DDA2EE43> <89A193C09B95237BACAD0B77DDA2EE43>]  >>
+startxref
+1261
+%%EOF

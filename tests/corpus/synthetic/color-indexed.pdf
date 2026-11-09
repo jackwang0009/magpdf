@@ -1,0 +1,54 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Pages /Kids [6 0 R] /Count 1 >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+3 0 obj
+[/Indexed /DeviceRGB 3 <FF000000FF000000FFFFFF00>]
+endobj
+4 0 obj
+<< /Type /XObject /Subtype /Image /Width 4 /Height 4 /ColorSpace /CSidx /BitsPerComponent 2 /Length 4 >>
+stream
+l±∆
+endstream
+endobj
+5 0 obj
+<<  /Length 300 >>
+stream
+/CSidx cs 0 sc 20 110 50 70 re f
+/CSidx cs 1 sc 80 110 50 70 re f
+2 sc 140 110 50 70 re f
+3 sc 200 110 50 70 re f
+q 80 0 0 80 20 20 cm /Im1 Do Q
+BT /F1 8 Tf 0 g 120 50 Td (left: 2 bpc Indexed image, same palette) Tj ET
+BT /F1 7 Tf 0 g 10 188 Td (color-indexed: 4-entry palette, fills and image) Tj ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 1 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 2 0 R >> /ColorSpace << /CSidx 3 0 R >> /XObject << /Im1 4 0 R >> >> /Contents 5 0 R >>
+endobj
+7 0 obj
+<< /Type /Catalog /Pages 1 0 R >>
+endobj
+8 0 obj
+<< /Title (color-indexed) /Subject (MagPDF synthetic test sample) /Producer (MagPDF synthetic corpus generator \(tests/corpus/synthetic/generate.py\)) >>
+endobj
+xref
+0 9
+0000000000 65535 f 
+0000000015 00000 n 
+0000000072 00000 n 
+0000000169 00000 n 
+0000000235 00000 n 
+0000000377 00000 n 
+0000000729 00000 n 
+0000000912 00000 n 
+0000000961 00000 n 
+trailer
+<< /Size 9 /Root 7 0 R /Info 8 0 R /ID [<EE1EA7AFE729248770BCC98449B91591> <EE1EA7AFE729248770BCC98449B91591>]  >>
+startxref
+1130
+%%EOF

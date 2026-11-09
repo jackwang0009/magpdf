@@ -1,0 +1,3061 @@
+{
+  "schema": 1,
+  "directory": "synthetic",
+  "category": "S",
+  "description": "自制样本：针对 PDFium 内容流生成器缺陷与方案 2.3 生成规则逐项构造；由 generate.py 确定性生成。",
+  "groups": {
+    "color": "颜色空间与图案（方案 2.1 第 1 条）",
+    "shading": "渐变 sh（方案 2.1 第 2 条）",
+    "extgstate": "扩展图形状态（方案 2.1 第 3 条）",
+    "text": "文字：字距、渲染模式、字体类型（方案 2.1 第 4、5 条）",
+    "structure": "内容流、页面与文件结构（方案 2.1 第 6 条、2.3、9.4/10.6）",
+    "composite": "货代单证风格综合样本（方案 13.1）"
+  },
+  "files": [
+    {
+      "id": "S-0001",
+      "category": "S",
+      "file": "color-devicegray.pdf",
+      "sha256": "e4a7399004b94b2fb78d93a8fb67551be267ce682fa6c6c610826870e61be690",
+      "size": 1203,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "devicegray",
+        "fill",
+        "stroke"
+      ],
+      "expected": "三个灰阶方块、三个灰色描边框和一行灰色文字。生成器把 g/G 改写成 rg/RG：像素应一致，但内容流的颜色操作符变了；比较往返前后内容流即可看出。",
+      "issues": [],
+      "title": "DeviceGray 填充与描边（g / G）",
+      "group": "color",
+      "refs": [
+        "方案 2.1 颜色空间",
+        "P0 计划 V02/V03 第 2 项"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 8,
+            "text": 2,
+            "path": 6,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0002",
+      "category": "S",
+      "file": "color-devicecmyk.pdf",
+      "sha256": "13207ba327d1c1df2126be1864a33b3c09aeef5021b3421b8ebc2739a6a8fbe3",
+      "size": 1290,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "devicecmyk",
+        "fill",
+        "stroke",
+        "rich-black"
+      ],
+      "expected": "C/M/Y/K 四个原色块、四色黑与单黑对比、蓝色（C+M）描边。生成器把 k/K 换成 rg/RG 后颜色空间丢失；四色黑和单黑在转成 RGB 后可能变成同一个值，印刷时无法区分。",
+      "issues": [],
+      "title": "DeviceCMYK 填充与描边（k / K）",
+      "group": "color",
+      "refs": [
+        "方案 2.1 颜色空间",
+        "P0 计划 V02/V03 第 2 项"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 10,
+            "text": 2,
+            "path": 8,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0003",
+      "category": "S",
+      "file": "color-separation.pdf",
+      "sha256": "5098ad2707a69b3013ef0c1f6c8e350f5619e5a6833687a24242f2bb0c991996",
+      "size": 1791,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "separation",
+        "spot",
+        "tint-transform",
+        "sep-all",
+        "sep-none"
+      ],
+      "expected": "虚构专色 SampleOrange 的 100%/60%/30% 色块与描边、/All 色块、/None 色块（按规范不应留下任何墨迹）、专色文字。生成器不写专色操作符时色块变黑；/None 色块若被画出来说明转换成了 RGB。",
+      "issues": [],
+      "title": "Separation 专色（含 /All 与 /None）",
+      "group": "color",
+      "refs": [
+        "方案 2.1 颜色空间",
+        "P0 计划 V02/V03 第 2 项"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 9,
+            "text": 3,
+            "path": 6,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0004",
+      "category": "S",
+      "file": "color-devicen.pdf",
+      "sha256": "7c86dfaa6cca7a1ba2e824b9c9b936b2fabd9526ec72e59a479af522d593ffe8",
+      "size": 1414,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "devicen",
+        "spot",
+        "function-type4"
+      ],
+      "expected": "两个虚构着色剂 SampleOrange / SampleBlue 的四种组合色块与一个描边。生成器丢失颜色空间时全部变黑；PostScript 计算函数的解析与 DeviceN 分量数（2）要在往返后保持。",
+      "issues": [],
+      "title": "DeviceN 双通道专色（PostScript 型 4 函数）",
+      "group": "color",
+      "refs": [
+        "方案 2.1 颜色空间",
+        "P0 计划 V02/V03 第 2 项"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 6,
+            "text": 1,
+            "path": 5,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0005",
+      "category": "S",
+      "file": "color-iccbased-embedded.pdf",
+      "sha256": "ed6825db4b6074f84087329a5f0ce479d33ba80a0e0c41a39ca2d1347bbb8ab1",
+      "size": 1644,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "iccbased",
+        "icc-embedded",
+        "n3"
+      ],
+      "expected": "嵌入的 ICC 把红、绿原色对调：按配置转换的渲染器把 (1 0 0) 画成绿色，第二块画成红色；忽略 ICC 的渲染器画成红、绿。右侧 DeviceRGB 参照红块。往返后若颜色空间被丢成 DeviceRGB，前两块与参照块的关系反转。",
+      "issues": [],
+      "title": "ICCBased N=3，嵌入红绿互换的小 ICC 配置",
+      "group": "color",
+      "refs": [
+        "方案 2.1 颜色空间",
+        "P0 计划 V02/V03 第 2 项"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 6,
+            "text": 2,
+            "path": 4,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0006",
+      "category": "S",
+      "file": "color-iccbased-fallback.pdf",
+      "sha256": "a749e78fde7e32a0897def651da69e13dc38a2e2d9b588d63f790787c08deae2",
+      "size": 1530,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "iccbased",
+        "icc-invalid",
+        "alternate",
+        "n4",
+        "n1"
+      ],
+      "expected": "N=4 的 ICC 流内容不是合法配置，带 /Alternate /DeviceCMYK；N=1 的无效配置不带 Alternate（应按 DeviceGray）。青、黑、灰三块应正常显示；往返后颜色空间对象是否保留、还是被替换成设备空间。",
+      "issues": [],
+      "title": "ICCBased 配置无效，回退到 /Alternate",
+      "group": "color",
+      "refs": [
+        "方案 2.1 颜色空间",
+        "P0 计划 V02/V03 第 2 项"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 4,
+            "text": 1,
+            "path": 3,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0007",
+      "category": "S",
+      "file": "color-indexed.pdf",
+      "sha256": "2f5ebea23191f4e4618b5dc89ae16baa904e87913d1a9068defeb4b076f1477a",
+      "size": 1463,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "indexed",
+        "palette",
+        "image-indexed"
+      ],
+      "expected": "4 色调色板（红绿蓝黄）：索引 0–3 的四个色块，以及用同一调色板的 2 bpc 4×4 图像。索引色填充写成 RGB 时像素不变，但 hival 边界（索引 3）和调色板引用会丢失。",
+      "issues": [],
+      "title": "Indexed 颜色空间：填充与 2 位图像",
+      "group": "color",
+      "refs": [
+        "方案 2.1 颜色空间",
+        "P0 计划 V02/V03 第 2 项"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 7,
+            "text": 2,
+            "path": 4,
+            "image": 1,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0008",
+      "category": "S",
+      "file": "color-lab.pdf",
+      "sha256": "86a75045561fcc8c3e323e33159035280856c643a29d7c03a010f6b1e3a7b88a",
+      "size": 1295,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "lab",
+        "cie"
+      ],
+      "expected": "四个 Lab 色块：品红、绿、蓝、近白。Lab 分量范围按 /Range [-100 100 -100 100]；写成 RGB 后颜色相近但不再是设备无关色。",
+      "issues": [],
+      "title": "Lab 颜色空间填充",
+      "group": "color",
+      "refs": [
+        "方案 2.1 颜色空间",
+        "P0 计划 V02/V03 第 2 项"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 6,
+            "text": 1,
+            "path": 5,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0009",
+      "category": "S",
+      "file": "color-calrgb-calgray.pdf",
+      "sha256": "c8ce47b1a2c77c16adb45cd862087f7e83928fb3151c1e4e24d5f86b7f21fcbf",
+      "size": 1444,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "calrgb",
+        "calgray",
+        "cie"
+      ],
+      "expected": "CalRGB（带 Gamma 与 Matrix）三块、CalGray 两块。PDFium 把 CalRGB 按 DeviceRGB 处理（忽略 Gamma/Matrix），往返后颜色空间名是否保留。",
+      "issues": [],
+      "title": "CalRGB 与 CalGray",
+      "group": "color",
+      "refs": [
+        "方案 2.1 颜色空间",
+        "P0 计划 V02/V03 第 2 项"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 6,
+            "text": 1,
+            "path": 5,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0010",
+      "category": "S",
+      "file": "pattern-tiling.pdf",
+      "sha256": "85161997b9c771e67ce9d2abb97c0515d9230225d4a2045df299719481a503f2",
+      "size": 1753,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "pattern",
+        "tiling",
+        "paint-type-1",
+        "paint-type-2",
+        "pattern-matrix"
+      ],
+      "expected": "左：着色平铺图案（红蓝格）；右：非着色图案以 /Pattern+DeviceRGB 指定蓝色、图案矩阵旋转 45°；底部：图案描边的粗线。生成器不写 Pattern 时三者都变成黑色实心。",
+      "issues": [],
+      "title": "平铺图案填充：着色 / 非着色 / 带 Matrix / 描边",
+      "group": "color",
+      "refs": [
+        "方案 2.1 颜色空间",
+        "P0 计划 V02/V03 第 2 项",
+        "方案 4.1 对象"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 4,
+            "text": 1,
+            "path": 3,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0011",
+      "category": "S",
+      "file": "pattern-shading-fill.pdf",
+      "sha256": "c0d8b2b2bc4a0dcce9c3c367b2261f1d9bec60b167bf24aad2e6853809a8fe5a",
+      "size": 1594,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "pattern",
+        "shading-pattern",
+        "axial",
+        "radial",
+        "text-pattern-fill"
+      ],
+      "expected": "左块轴向渐变图案、右块径向渐变图案、底部大字用轴向渐变填充、顶部粗线用径向渐变描边。这些是路径/文字对象而不是 sh 对象；生成器不写 Pattern 时全部变黑。",
+      "issues": [],
+      "title": "渐变图案作为路径与文字的填充、描边",
+      "group": "color",
+      "refs": [
+        "方案 2.1 颜色空间",
+        "P0 计划 V02/V03 第 2 项",
+        "方案 2.1 渐变 sh",
+        "P0 计划 V03 第 3 项"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 4,
+            "text": 1,
+            "path": 3,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0012",
+      "category": "S",
+      "file": "shading-axial.pdf",
+      "sha256": "974ac00865034423df6f0246023f662341976698658695eaa449f06f5aa275a1",
+      "size": 1482,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "shading",
+        "axial",
+        "sh",
+        "extend",
+        "clip"
+      ],
+      "expected": "左：Extend [true true]，剪切区被整块填满；右：Extend [false false] 且 Coords 窄于剪切区，两侧留白。生成器跳过 sh 时两块都消失。",
+      "issues": [],
+      "title": "轴向渐变 sh（Extend 开 / 关）",
+      "group": "shading",
+      "refs": [
+        "方案 2.1 渐变 sh",
+        "P0 计划 V03 第 3 项"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 3,
+            "text": 1,
+            "path": 0,
+            "image": 0,
+            "shading": 2,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0013",
+      "category": "S",
+      "file": "shading-radial.pdf",
+      "sha256": "6f8eee92eb462af3f0502ff8bb7e23a83063f3fa18901b95625ee9d95bb9c8ec",
+      "size": 1487,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "shading",
+        "radial",
+        "sh",
+        "extend",
+        "clip"
+      ],
+      "expected": "左：同心圆，Extend [false true] 外圈颜色延伸填满剪切区；右：偏心小圆到大圆、不延伸，圆外留白。",
+      "issues": [],
+      "title": "径向渐变 sh（同心 / 偏心，Extend）",
+      "group": "shading",
+      "refs": [
+        "方案 2.1 渐变 sh",
+        "P0 计划 V03 第 3 项"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 3,
+            "text": 1,
+            "path": 0,
+            "image": 0,
+            "shading": 2,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0014",
+      "category": "S",
+      "file": "shading-stitching-background.pdf",
+      "sha256": "2d2c5301eb91859c64b12c86ae045827677c50fbbba75d180bc3eae0785c1aa1",
+      "size": 2135,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "shading",
+        "axial",
+        "function-type3",
+        "background",
+        "bbox",
+        "shading-pattern"
+      ],
+      "expected": "左块：同一渐变作为图案填充，Coords 不覆盖整块、Extend 关，渐变外的区域应显示 /Background 黄色；右块：同一渐变直接 sh，按规范忽略 Background，渐变外留白；/BBox 把渐变限制在中间一条。",
+      "issues": [],
+      "title": "拼接函数多色渐变，带 /Background 与 /BBox",
+      "group": "shading",
+      "refs": [
+        "方案 2.1 渐变 sh",
+        "P0 计划 V03 第 3 项"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 3,
+            "text": 1,
+            "path": 1,
+            "image": 0,
+            "shading": 1,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0015",
+      "category": "S",
+      "file": "shading-functions.pdf",
+      "sha256": "dd51aa6690f38036102ee83f71e288b0fcdb54337be8f867f9d5d9e6aaa6be88",
+      "size": 2037,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "shading",
+        "axial",
+        "function-type0",
+        "function-type4",
+        "function-array"
+      ],
+      "expected": "三条横向渐变：上为 4 个采样点的型 0 函数（台阶状），中为型 4 PostScript 函数（正弦条纹），下为三个单输出函数组成的数组。任一函数类型解析或写回失败都会让对应条带消失或变色。",
+      "issues": [],
+      "title": "采样函数、PostScript 函数、函数数组的渐变",
+      "group": "shading",
+      "refs": [
+        "方案 2.1 渐变 sh",
+        "P0 计划 V03 第 3 项"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 4,
+            "text": 1,
+            "path": 0,
+            "image": 0,
+            "shading": 3,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0016",
+      "category": "S",
+      "file": "shading-mesh.pdf",
+      "sha256": "6d7b8ffd96366da763c41ed143bf8cb8106fc80480da030c7b698b6be53ae2d1",
+      "size": 1568,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "shading",
+        "mesh",
+        "type4",
+        "type6",
+        "coons",
+        "binary-stream"
+      ],
+      "expected": "左：两个三角形组成的四边形，顶点红绿蓝黄；右：一个边缘弯曲的 Coons 曲面片。二进制顶点数据在往返时必须原样保留；任何重编码都会破坏网格。",
+      "issues": [],
+      "title": "网格渐变：型 4 自由三角形、型 6 Coons 曲面片（二进制数据）",
+      "group": "shading",
+      "refs": [
+        "方案 2.1 渐变 sh",
+        "P0 计划 V03 第 3 项"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 3,
+            "text": 1,
+            "path": 0,
+            "image": 0,
+            "shading": 2,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0017",
+      "category": "S",
+      "file": "gs-alpha.pdf",
+      "sha256": "c5cd9df9daf70e9391f1bbf0e8a82deb6d75db23f08310ad8a83b28789464bd5",
+      "size": 1192,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "extgstate",
+        "ca",
+        "CA",
+        "alpha"
+      ],
+      "expected": "红块不透明，蓝块 50%、绿块 25% 叠在上面，底部黑线 50% 描边，文字 ALPHA 50%。生成器只合成 ca/CA/BM，这一项应能保持。",
+      "issues": [],
+      "title": "常量透明度 ca / CA（填充、描边、文字）",
+      "group": "extgstate",
+      "refs": [
+        "方案 2.1 ExtGState",
+        "P0 计划 V03 第 4 项"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 6,
+            "text": 2,
+            "path": 4,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0018",
+      "category": "S",
+      "file": "gs-blend-modes.pdf",
+      "sha256": "ef26f3678b247f12b00ad0c97d8a6e132308d9766c6df440e04596db590c7955",
+      "size": 1718,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "extgstate",
+        "blend-mode",
+        "BM"
+      ],
+      "expected": "三条彩色横带作底，8 个灰蓝方块分别用 Multiply、Screen、Difference、Darken、Lighten、Exclusion、HardLight、Hue 叠加。每个方块跨三条底色，效果应各不相同；BM 丢失时都变成普通覆盖。",
+      "issues": [],
+      "title": "混合模式 BM（8 种）",
+      "group": "extgstate",
+      "refs": [
+        "方案 2.1 ExtGState",
+        "P0 计划 V03 第 4 项"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 13,
+            "text": 2,
+            "path": 11,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0019",
+      "category": "S",
+      "file": "gs-smask-luminosity.pdf",
+      "sha256": "5e884087257a0186b6b5d9a6fc19896f3f395088fc5e4ef0bb45d4ca7663886c",
+      "size": 1640,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "extgstate",
+        "smask",
+        "luminosity",
+        "transparency-group",
+        "shading"
+      ],
+      "expected": "蓝色大块经亮度蒙版从左到右淡出（蒙版是一个灰度透明度组，里面画黑到白的轴向渐变）；顶部红线也套同一蒙版；底部绿块用 /SMask /None 关闭蒙版后应是实心。生成器丢掉 SMask 时蓝块、红线变成实心。",
+      "issues": [],
+      "title": "软蒙版 SMask /Luminosity（透明度组 XObject + 渐变）",
+      "group": "extgstate",
+      "refs": [
+        "方案 2.1 ExtGState",
+        "P0 计划 V03 第 4 项",
+        "方案 13.1 设计软件导出"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 4,
+            "text": 1,
+            "path": 3,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0020",
+      "category": "S",
+      "file": "gs-transparency-group.pdf",
+      "sha256": "7cfa6b74f78c67c00c27d2ce04a070a8302157118097f5619152590d16b7fe61",
+      "size": 1807,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "transparency-group",
+        "knockout",
+        "isolated",
+        "form-xobject",
+        "blend-mode",
+        "ca"
+      ],
+      "expected": "左：组内两个 50% 透明方块，组设 /K true 挖空，重叠处只见上面的方块；整组再以 ca 0.7 绘制。右：同样两个方块不放进组，重叠处颜色叠加。组内嵌套一个 Multiply 混合的子 Form。",
+      "issues": [],
+      "title": "透明度组 Form XObject（隔离、挖空）与嵌套混合模式",
+      "group": "extgstate",
+      "refs": [
+        "方案 2.1 ExtGState",
+        "P0 计划 V03 第 4 项",
+        "方案 3.2 拖动预览第 4 条"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 4,
+            "text": 1,
+            "path": 2,
+            "image": 0,
+            "shading": 0,
+            "form": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0021",
+      "category": "S",
+      "file": "gs-overprint.pdf",
+      "sha256": "f64df37c2d78dd8adf2895cddef5506ef581b4261265e025bfb19e4dc278033f",
+      "size": 1193,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "extgstate",
+        "overprint",
+        "OP",
+        "OPM",
+        "devicecmyk"
+      ],
+      "expected": "左对：青块以 OP/op true、OPM 1 叠在品红块上，支持叠印预览的渲染器（Acrobat 叠印预览）在重叠处显示蓝色；右对：同样的两块不叠印，重叠处为青色。PDFium 不模拟叠印，两对看起来一样；关键是往返后 ExtGState 里 OP/op/OPM 是否还在。",
+      "issues": [],
+      "title": "叠印 OP / op / OPM 1（CMYK）",
+      "group": "extgstate",
+      "refs": [
+        "方案 2.1 ExtGState",
+        "P0 计划 V03 第 4 项",
+        "方案 13.2 第 3 项 第二渲染器"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 5,
+            "text": 1,
+            "path": 4,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0022",
+      "category": "S",
+      "file": "gs-text-knockout.pdf",
+      "sha256": "2161dc3765b5320e99bcaaac4f479073fc0488e62707013c72278f8a86643c79",
+      "size": 1201,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "extgstate",
+        "text-knockout",
+        "TK",
+        "ca",
+        "Tc"
+      ],
+      "expected": "两行 50% 透明、字距为负因而互相重叠的 O：第一行 TK false（重叠处颜色叠加更深），第二行 TK true（重叠处不叠加）。PDFium 可能忽略 TK，两行相同；往返后 TK 是否保留要看 ExtGState。",
+      "issues": [],
+      "title": "文字挖空 TK 与重叠字形的透明度",
+      "group": "extgstate",
+      "refs": [
+        "方案 2.1 ExtGState",
+        "P0 计划 V03 第 4 项"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 4,
+            "text": 4,
+            "path": 0,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0023",
+      "category": "S",
+      "file": "gs-line-params.pdf",
+      "sha256": "07226d5a05ae9954553dfeae4c16fcbba54a8041908eb5f449d9f6de0afb9b66",
+      "size": 1422,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "extgstate",
+        "line-width",
+        "line-cap",
+        "line-join",
+        "miter-limit",
+        "dash",
+        "LW",
+        "D"
+      ],
+      "expected": "上两条折线外观应完全相同：第一条用 ExtGState（LW/LC/LJ/ML/D），第二条用 w/J/j/M/d 操作符。第三条线宽 0（最细线），第四、五条比较斜接限制 10 与 1 的尖角。",
+      "issues": [],
+      "title": "线宽、线端、接头、斜接限制、虚线：ExtGState 与操作符两种写法",
+      "group": "extgstate",
+      "refs": [
+        "方案 2.1 ExtGState",
+        "P0 计划 V03 第 4 项"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 6,
+            "text": 1,
+            "path": 5,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0024",
+      "category": "S",
+      "file": "text-tj-kerning.pdf",
+      "sha256": "1d0fa4df3e31e96d6068677a886980cbb638410972d8cbe0fc15e965257011ee",
+      "size": 1345,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "text",
+        "TJ",
+        "kerning"
+      ],
+      "expected": "第 1 行用 TJ 拉开字距，第 2 行是同样文字的 Tj 参照；第 3 行正值让字母回退重叠；第 4 行数组以数字开头；第 5 行混合 (…) 与 <…> 串。生成器丢掉字距后第 1、3、4、5 行会挤回正常间距，与原文件像素差异明显。",
+      "issues": [],
+      "title": "TJ 字距数组（负值拉开、正值回退、首项调整、混合十六进制串）",
+      "group": "text",
+      "refs": [
+        "方案 2.1 文字 TJ/Tc/Tw",
+        "P0 计划 V03 第 1 项"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 6,
+            "text": 6,
+            "path": 0,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0025",
+      "category": "S",
+      "file": "text-tc-tw.pdf",
+      "sha256": "ebb33642084279c556778bd46fed06fd5f21e91c322390dae90f792813645e9e",
+      "size": 1341,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "text",
+        "Tc",
+        "Tw",
+        "TJ"
+      ],
+      "expected": "6 行：无间距参照、Tc 3、Tw 10、负 Tc 加 Tw、TJ 与 Tc/Tw 同时作用、Tw 20（Tw 只作用于单字节码 32）。Tc/Tw 只存于文字状态、生成器不写出，往返后 2–6 行会恢复成参照行的间距。最底下的说明文字故意不重置 Tw：文字状态跨 BT…ET 泄漏（方案 2.3 开头），它也应保持 20 的词距。",
+      "issues": [],
+      "title": "字符间距 Tc 与单词间距 Tw",
+      "group": "text",
+      "refs": [
+        "方案 2.1 文字 TJ/Tc/Tw",
+        "P0 计划 V03 第 1 项"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 7,
+            "text": 7,
+            "path": 0,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0026",
+      "category": "S",
+      "file": "text-positioning-ops.pdf",
+      "sha256": "c92218e3dc959a2f3e352a52a7d2998c207215640b2d44365d9056e2e86da9d5",
+      "size": 1234,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "text",
+        "Tz",
+        "Ts",
+        "TL",
+        "T*",
+        "quote",
+        "dblquote"
+      ],
+      "expected": "前两行 Tz 50%/150%；第三行一个 BT 内 4 次 Tj 带不同 Ts；第四段用 TL、T*、' 和 \" 换行（\" 同时设置 Tw 2、Tc 1）。Tz、Ts 在解析时折算进文字矩阵，应能保留；\" 设的 Tw/Tc 会丢。",
+      "issues": [],
+      "title": "Tz 水平缩放、Ts 上下标、TL/T*、' 与 \" 换行操作符",
+      "group": "text",
+      "refs": [
+        "方案 2.1 文字 TJ/Tc/Tw",
+        "P0 计划 V03 第 1 项"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 10,
+            "text": 10,
+            "path": 0,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0027",
+      "category": "S",
+      "file": "text-render-modes.pdf",
+      "sha256": "e6e48e99ac7e31fede4e07c9cc3a222a536dfc892a8a42da5b2a4c86f0c75e5f",
+      "size": 1227,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "text",
+        "Tr",
+        "stroke-text",
+        "invisible-text"
+      ],
+      "expected": "Tr 0 红色填充、Tr 1 蓝色描边、Tr 2 填充加描边、Tr 3 不可见（仍是文字对象，可被选中、可复制）。往返后 Tr 3 的文字不应显示出来，Tr 1 的描边宽度（1 pt）不应变。",
+      "issues": [],
+      "title": "文字渲染模式 Tr 0–3",
+      "group": "text",
+      "refs": [
+        "方案 2.1 文字 TJ/Tc/Tw",
+        "P0 计划 V03 第 1 项",
+        "方案 5.1 读取"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 5,
+            "text": 5,
+            "path": 0,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0028",
+      "category": "S",
+      "file": "text-clip-modes.pdf",
+      "sha256": "df35ebee28bdbb75c5363c82e037690f5df819a08fbdf9a53eb3895d58112fb5",
+      "size": 1798,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "text",
+        "Tr",
+        "text-clip",
+        "shading",
+        "image",
+        "clip"
+      ],
+      "expected": "CLIP4 填蓝再作裁剪、透出渐变；CLIP5 描边红再裁剪、透出绿块；CLIP6 填描边后裁剪、透出橙块；CLIP7 只裁剪、透出图像；底部一个 BT 内两个 Tj 的字形并集作裁剪、透出紫带。文字裁剪块必须整体保留（方案 2.3 第 3 条），拆开或丢掉裁剪后，渐变/色块/图像会整块露出来。",
+      "issues": [],
+      "title": "文字裁剪模式 Tr 4–7 与裁剪后的图形",
+      "group": "text",
+      "refs": [
+        "方案 2.3 第 3 条 文字裁剪整体保留",
+        "P0 计划 V03 生成规则",
+        "方案 2.1 文字 TJ/Tc/Tw",
+        "P0 计划 V03 第 1 项"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 12,
+            "text": 7,
+            "path": 3,
+            "image": 1,
+            "shading": 1,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0029",
+      "category": "S",
+      "file": "text-standard14.pdf",
+      "sha256": "49f720ed31e228cae2c3832d884afeef4b5d228913d8a397add6c4dd2db48155",
+      "size": 2391,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "text",
+        "standard-14",
+        "type1",
+        "encoding-differences",
+        "symbol",
+        "zapfdingbats"
+      ],
+      "expected": "Helvetica、Helvetica-Bold、Times-Roman、Times-BoldItalic、Courier、Symbol、ZapfDingbats 各一行，最后一行 Helvetica 用 Differences 把 a/b/c 映射成 bullet/dagger/section。非嵌入字体由 PDFium 内置字体替代；往返后编码字典应保留。",
+      "issues": [],
+      "title": "标准 14 字体（非嵌入）与 Differences 编码",
+      "group": "text",
+      "refs": [
+        "方案 2.1 文字 TJ/Tc/Tw",
+        "P0 计划 V03 第 1 项",
+        "方案 5.2 修改已有文字"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 8,
+            "text": 8,
+            "path": 0,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0030",
+      "category": "S",
+      "file": "text-truetype-embedded.pdf",
+      "sha256": "463e396c5838b1e807e6b0091658b41afd6fa2e14168fa568ee9d0a172cfb9db",
+      "size": 2373,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "text",
+        "truetype",
+        "embedded-font",
+        "fontfile2",
+        "subset"
+      ],
+      "expected": "字体只有 9 个直线轮廓字形（空格 - 1 A D F G M P），以 /FontFile2 嵌入、WinAnsi 编码、带 /Widths。大字 MAG PDF、小字 GAP-1；字形轮廓是否正确、宽度是否按 /Widths 排布；往返后字体流必须原样保留。",
+      "issues": [],
+      "title": "嵌入的极小 TrueType 子集（程序生成的几何字形）",
+      "group": "text",
+      "refs": [
+        "方案 2.1 文字 TJ/Tc/Tw",
+        "P0 计划 V03 第 1 项",
+        "方案 5.3 排版",
+        "P0 计划 V08"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 3,
+            "text": 3,
+            "path": 0,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0031",
+      "category": "S",
+      "file": "text-type3.pdf",
+      "sha256": "8a38eb10e699da200715ffe82c5fe6db053477f74a822c36928de70e3f83aeea",
+      "size": 1852,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "text",
+        "type3",
+        "d0",
+        "d1",
+        "inline-image"
+      ],
+      "expected": "蓝条 → Type3 文字 abcabc（红方、黑三角、空心方）→ Helvetica 文字 → 绿条、红斜线，全部在一条内容流里。原版生成器遇到 Type3 文字直接返回、留下未闭合的 q 和 BT，后面的 Helvetica 文字、绿条、红线全部落进文字块，整条流损坏。",
+      "issues": [],
+      "title": "Type3 字体文字，同一内容流里前后都有其他对象",
+      "group": "text",
+      "refs": [
+        "方案 2.1 Type3",
+        "P0 计划 V03 第 5 项"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 5,
+            "text": 2,
+            "path": 3,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0032",
+      "category": "S",
+      "file": "text-type3-multistream.pdf",
+      "sha256": "d5973adadfb0358830361e376a9f3bc8e232b25252fa2e96ad09fd3c7b7aea8d",
+      "size": 1942,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "text",
+        "type3",
+        "multi-stream"
+      ],
+      "expected": "与 text-type3 相同的内容，但 Type3 文字单独放在 /Contents 数组的第一条流里，Helvetica 文字和色条在第二条。用来观察生成器的损坏是否只限于 Type3 所在的流（只重写被改过的流时第二条流应完好）。",
+      "issues": [],
+      "title": "Type3 文字在第一条内容流，其他对象在第二条",
+      "group": "text",
+      "refs": [
+        "方案 2.1 Type3",
+        "P0 计划 V03 第 5 项",
+        "方案 2.3 第 5 条"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 5,
+            "text": 2,
+            "path": 3,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0033",
+      "category": "S",
+      "file": "text-cid-cjk-nonembedded.pdf",
+      "sha256": "1e50c31903e523d82231ce20fe702226d55c446e938392338503d24424e0aeb7",
+      "size": 2098,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "text",
+        "type0",
+        "cid",
+        "cjk",
+        "non-embedded",
+        "UniGB-UCS2-H",
+        "Identity-H",
+        "lang-zh"
+      ],
+      "expected": "STSong-Light 非嵌入，依赖 PDFium 内置 CMap 与系统替代字体：前两行同一句中文分别用 UCS2 编码和 Identity-H 的 CID 编码写出，应显示一致；第三行英文经 UCS2；第四行 CID 文字加 Tc 3。往返后双字节字串与字体字典必须原样。",
+      "issues": [],
+      "title": "Type0 非嵌入中文字体：UniGB-UCS2-H 与 Identity-H（Adobe-GB1 CID）",
+      "group": "text",
+      "refs": [
+        "方案 2.1 文字 TJ/Tc/Tw",
+        "P0 计划 V03 第 1 项",
+        "方案 5.3 排版",
+        "方案 5.4 字体来源"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 5,
+            "text": 5,
+            "path": 0,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0034",
+      "category": "S",
+      "file": "text-cid-truetype-identity.pdf",
+      "sha256": "7092588afc6f702868d757da0a3bb6e445b31c6d9c3830180579b0bcc0d038e0",
+      "size": 3112,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "text",
+        "type0",
+        "cidfonttype2",
+        "Identity-H",
+        "embedded-font",
+        "tounicode",
+        "W-array"
+      ],
+      "expected": "这是 V08 '改一行字' 计划采用的嵌入方式：字形号直接作 CID，/W 数组给宽度，ToUnicode 让文字可复制。大字 MAG PDF 应与 text-truetype-embedded 一致，复制出的文字应是 'MAG PDF'。",
+      "issues": [],
+      "title": "Type0/CIDFontType2 嵌入 TrueType，Identity-H + CIDToGIDMap + ToUnicode",
+      "group": "text",
+      "refs": [
+        "方案 2.1 文字 TJ/Tc/Tw",
+        "P0 计划 V03 第 1 项",
+        "方案 5.3 排版",
+        "P0 计划 V08"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 3,
+            "text": 3,
+            "path": 0,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0035",
+      "category": "S",
+      "file": "struct-multi-stream-q.pdf",
+      "sha256": "39928ba5a8d6ba56735a036fce9ea6a8d1236b6582df8bea35275db909a2a9ec",
+      "size": 1239,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "multi-stream",
+        "contents-array",
+        "q-Q-split",
+        "clip",
+        "operand-split"
+      ],
+      "expected": "/Contents 是 3 条流：流 1 画红块并留下未闭合的 q + 剪切；流 2 画被该剪切限制的蓝块、Q、并以 '220 120 50' 三个操作数结尾；流 3 以 '60 re f' 开头接上绿块。渲染：红块、剪切后的蓝带、绿块都完整。往返后 3 条流被合并或逐条重写时都不能丢对象、不能错剪切。",
+      "issues": [],
+      "title": "多内容流：q/剪切在第一条流，Q 在后面的流；操作数跨流拆开",
+      "group": "structure",
+      "refs": [
+        "方案 2.1 层级与内容流",
+        "方案 2.3 第 5 条",
+        "P0 计划 V03 第 6 项"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 4,
+            "text": 1,
+            "path": 3,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0036",
+      "category": "S",
+      "file": "struct-multi-stream-bt.pdf",
+      "sha256": "7ef1af21957f4a8e4edb4d3274f4508533742abb7f2ed58479f95654495d4958",
+      "size": 1217,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "multi-stream",
+        "contents-array",
+        "BT-ET-split",
+        "TJ"
+      ],
+      "expected": "BT 和第一行在流 1，第二行与一个 TJ 在流 2，第三行和 ET 在流 3，之后是一条黑带。4 个文字对象、1 个路径。跨流的文字块在重写时必须保持为一个 BT…ET 组，否则第二、三行位置（相对 Td）错位。",
+      "issues": [],
+      "title": "多内容流：文字块 BT…ET 跨三条流",
+      "group": "structure",
+      "refs": [
+        "方案 2.1 层级与内容流",
+        "方案 2.3 第 5 条",
+        "P0 计划 V03 第 6 项"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 5,
+            "text": 4,
+            "path": 1,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0037",
+      "category": "S",
+      "file": "struct-form-xobject-nested.pdf",
+      "sha256": "dab3bec3d8d4945f82ccdd425e2b4bf18c651a2ac0cf633d850d31a16d7bd94a",
+      "size": 1486,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "form-xobject",
+        "nested",
+        "bbox-clip",
+        "matrix"
+      ],
+      "expected": "外层 Form（蓝底）内部缩放绘制内层 Form（红底黄心，且故意画出 BBox 之外的部分应被裁掉）；外层以两种 cm 画两次。页面对象是 2 个 Form，内部对象不计入页面统计；往返后 Form 内容流应原样。",
+      "issues": [],
+      "title": "两层嵌套的 Form XObject，带 Matrix 与 BBox 剪切",
+      "group": "structure",
+      "refs": [
+        "方案 4.1 对象",
+        "P0 计划 V02 渲染比对",
+        "方案 2.1 向 Form XObject 插入对象"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 3,
+            "text": 1,
+            "path": 0,
+            "image": 0,
+            "shading": 0,
+            "form": 2
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0038",
+      "category": "S",
+      "file": "struct-form-xobject-reused.pdf",
+      "sha256": "8bdc14caa8de199fadd11f8b747d4f0815fa4a1858a777ce15a2e68ead4fea34",
+      "size": 1418,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "form-xobject",
+        "reuse",
+        "matrix",
+        "rotate"
+      ],
+      "expected": "一个'印章'Form（圆形路径 + 文字）平移、旋转 30°、缩放 0.6 各画一次。编辑其中一个实例时不能影响其他两个——对象模型里是 3 个 Form 对象共用一个流。",
+      "issues": [],
+      "title": "同一个 Form XObject 以不同矩阵绘制三次",
+      "group": "structure",
+      "refs": [
+        "方案 4.1 对象",
+        "P0 计划 V02 渲染比对",
+        "方案 4.2 命令与撤销"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 4,
+            "text": 1,
+            "path": 0,
+            "image": 0,
+            "shading": 0,
+            "form": 3
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0039",
+      "category": "S",
+      "file": "struct-inline-image.pdf",
+      "sha256": "0f739ab559b2ef746082ce826f46fe40bf97671237bbebb072778c74a6527503",
+      "size": 1771,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "inline-image",
+        "BI-ID-EI",
+        "AHx",
+        "Fl",
+        "image-mask",
+        "indexed",
+        "filter-chain"
+      ],
+      "expected": "6 个 60×40 的内联图像：第 2 个的像素数据恰好含字节 'EI '，解析器必须按尺寸读而不是搜索 EI；第 3 个是用填充色（深绿）画的 1 位蒙版；第 4 个用页面资源里的命名 Indexed 颜色空间；第 5 个过滤器链 AHx→Fl。往返后内联图像应原样写回（数据、缩写键名、过滤器）。",
+      "issues": [],
+      "title": "内联图像 BI/ID/EI：灰度 AHx、原始 RGB（数据含 'EI '）、图像蒙版、命名颜色空间、多重过滤器、Interpolate",
+      "group": "structure",
+      "refs": [
+        "方案 4.1 对象",
+        "P0 计划 V02 渲染比对",
+        "方案 2.1 公共 API 缺少",
+        "P0 计划 V17 内联图像对应一个对象"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 7,
+            "text": 1,
+            "path": 0,
+            "image": 6,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0040",
+      "category": "S",
+      "file": "struct-image-xobject-masks.pdf",
+      "sha256": "16a0559aa8eb1aa6e7781eb5d5f2e30a25e1b24f27eba00eba4cd9a67e9f389d",
+      "size": 2524,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "image",
+        "smask",
+        "color-key-mask",
+        "stencil-mask",
+        "16-bit",
+        "decode"
+      ],
+      "expected": "斜向灰带作底；5 个图像：带 SMask 的 RGB（左侧透明右侧不透明）、颜色键蒙版（纯蓝像素透明）、1 位模板蒙版（用蓝色填充色）、16 位灰度、/Decode 反相的 RGB。往返后 SMask/Mask 引用、Decode 数组都应保留。",
+      "issues": [],
+      "title": "图像 XObject：SMask、颜色键 Mask、模板蒙版、16 位、Decode 反相",
+      "group": "structure",
+      "refs": [
+        "方案 4.1 对象",
+        "P0 计划 V02 渲染比对"
+      ],
+      "pdfVersion": "1.5",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 7,
+            "text": 1,
+            "path": 1,
+            "image": 5,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0041",
+      "category": "S",
+      "file": "struct-many-objects-clip.pdf",
+      "sha256": "8c10fab6588c427d45a1abcbda2420a0a89f05b40adc5652b9e5deb0dc0ef776",
+      "size": 5365,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "many-objects",
+        "clip",
+        "shared-clip",
+        "performance"
+      ],
+      "expected": "一个 q…剪切…Q 组里 1500 个 4×4 的小方块（每行换一次颜色），内容流用 Flate 压缩。按方案 2.3 第 2 条应合为一组、剪切只写一次；若生成器给每个对象重复写剪切，文件会膨胀几十倍，可用文件大小直接看出。",
+      "issues": [],
+      "title": "同一剪切路径下 1500 个小矩形",
+      "group": "structure",
+      "refs": [
+        "方案 2.3 第 2 条 剪切路径共用",
+        "方案 4.3 对象很多的页面"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 1501,
+            "text": 1,
+            "path": 1500,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0042",
+      "category": "S",
+      "file": "struct-marked-content.pdf",
+      "sha256": "ecf7a82de58ebd032ca64641a6614e0596352782d00574c2eca8d9ed504280a3",
+      "size": 1579,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "marked-content",
+        "BDC",
+        "MCID",
+        "tagged",
+        "properties",
+        "private-dict"
+      ],
+      "expected": "Artifact 背景 → /P MCID 0 文字 → /Div MCID 1 内嵌套 /Span MCID 2 文字、红块、以 /Properties 资源名引用的 /Figure 蓝块 → 带内联私有字典的 /MagPDF 标签文字。渲染无特殊效果；关键是往返后嵌套层次与 MCID 不乱（FPDFPageObj_GetMarkedContentID 可读到 0/2/1/3）。",
+      "issues": [],
+      "title": "标记内容 BMC/BDC/EMC 嵌套、MCID、资源属性、私有标签",
+      "group": "structure",
+      "refs": [
+        "方案 2.3 第 4 条 标记内容嵌套",
+        "方案 4.1 对象",
+        "方案 11.4 组件存储"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 7,
+            "text": 4,
+            "path": 3,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0043",
+      "category": "S",
+      "file": "struct-page-rotate.pdf",
+      "sha256": "41510990e902b4803f4a42ed8f116be2926b0b57093df0e67e293636d2ba0d17",
+      "size": 1815,
+      "pages": 3,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "rotate",
+        "multi-page",
+        "page-geometry"
+      ],
+      "expected": "3 页，每页内容相同（箭头指向未旋转页面的上方 + 文字），/Rotate 依次 90、180、270。info 的宽高在 90/270 时应互换为 200×300，rotation 为 1/2/3；渲染后箭头分别指右、下、左。",
+      "issues": [],
+      "title": "页面 /Rotate 90 / 180 / 270",
+      "group": "structure",
+      "refs": [
+        "方案 4.1 对象",
+        "P0 计划 V02 渲染比对",
+        "接口协议 9.3 渲染"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 3,
+        "pageInfo": [
+          {
+            "width": 200,
+            "height": 300,
+            "rotation": 1,
+            "objects": 2,
+            "text": 1,
+            "path": 1,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          },
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 2,
+            "objects": 2,
+            "text": 1,
+            "path": 1,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          },
+          {
+            "width": 200,
+            "height": 300,
+            "rotation": 3,
+            "objects": 2,
+            "text": 1,
+            "path": 1,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0044",
+      "category": "S",
+      "file": "struct-mediabox-cropbox.pdf",
+      "sha256": "56a1bee11a5fba33cee3bc1870677826a05127afd122d7e956db35bd0aa7ec01",
+      "size": 1972,
+      "pages": 4,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "mediabox",
+        "cropbox",
+        "page-geometry",
+        "multi-page"
+      ],
+      "expected": "4 页：MediaBox [100 100 400 300]；MediaBox 300×200 加 CropBox [50 50 250 150]（页面尺寸 200×100）；MediaBox 写成 [300 200 0 0]；MediaBox [-150 -100 150 100]。每页画边框与坐标文字，边框应贴合可见区域。对象坐标不在 0..宽高范围时，命中测试与保存都容易出错。",
+      "issues": [],
+      "title": "MediaBox 原点偏移 / CropBox 小于 MediaBox / 反向角点 / 负坐标",
+      "group": "structure",
+      "refs": [
+        "方案 4.1 对象",
+        "P0 计划 V02 渲染比对",
+        "方案 10.6 裁剪到单据边缘"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 4,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 2,
+            "text": 1,
+            "path": 1,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          },
+          {
+            "width": 200,
+            "height": 100,
+            "rotation": 0,
+            "objects": 2,
+            "text": 1,
+            "path": 1,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          },
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 2,
+            "text": 1,
+            "path": 1,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          },
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 2,
+            "text": 1,
+            "path": 1,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0045",
+      "category": "S",
+      "file": "struct-page-tree-inherited.pdf",
+      "sha256": "8625ccee45571a56a04c0dff2d3c29b25907ab57ba3958764b81e8678bfe90ff",
+      "size": 1358,
+      "pages": 2,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "page-tree",
+        "inherited-attributes",
+        "rotate",
+        "multi-page"
+      ],
+      "expected": "根 Pages → 中间 Pages（声明 MediaBox、Resources、Rotate 90）→ 2 个不带这些键的页面。info 两页都应是 200×300、rotation 1，文字用继承的字体正常显示。保存时若把继承属性写丢，页面会变成默认尺寸。",
+      "issues": [],
+      "title": "页面树中间节点，MediaBox / Resources / Rotate 由父节点继承",
+      "group": "structure",
+      "refs": [
+        "方案 4.1 对象",
+        "P0 计划 V02 渲染比对",
+        "方案 9.1 保存方式"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 2,
+        "pageInfo": [
+          {
+            "width": 200,
+            "height": 300,
+            "rotation": 1,
+            "objects": 2,
+            "text": 1,
+            "path": 1,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          },
+          {
+            "width": 200,
+            "height": 300,
+            "rotation": 1,
+            "objects": 2,
+            "text": 1,
+            "path": 1,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0046",
+      "category": "S",
+      "file": "struct-empty-pages.pdf",
+      "sha256": "81b93e9d70f10452f2b6c1929e8afdf388983f1a51a9ba4ec64228ffc647e0fa",
+      "size": 1205,
+      "pages": 4,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "empty-page",
+        "no-contents",
+        "multi-page",
+        "edge-case"
+      ],
+      "expected": "4 页都应渲染为空白、对象数 0。生成器对没有内容流的页面新建流、对空数组的处理，往返后不应报错也不应产生多余对象。",
+      "issues": [],
+      "title": "无内容页：没有 /Contents、空流、只有注释的流、空数组",
+      "group": "structure",
+      "refs": [
+        "方案 2.1 层级与内容流",
+        "方案 2.3 第 5 条",
+        "P0 计划 V03 第 6 项"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 4,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 0,
+            "text": 0,
+            "path": 0,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          },
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 0,
+            "text": 0,
+            "path": 0,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          },
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 0,
+            "text": 0,
+            "path": 0,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          },
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 0,
+            "text": 0,
+            "path": 0,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0047",
+      "category": "S",
+      "file": "struct-xref-stream-objstm.pdf",
+      "sha256": "5a929ecdd7ec71bd62622a4cd9236e1c4986fe4edc108601976635a7a1a14eb4",
+      "size": 912,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "xref-stream",
+        "object-stream",
+        "pdf-1.5",
+        "flate",
+        "predictor"
+      ],
+      "expected": "所有非流对象打包进一个对象流，交叉引用流带 /Predictor 12。内容是简单的蓝块、黑框和文字。保存（尤其是增量保存）时要能在对象流之上正确追加；往返后 PDFium 以何种形式写出 xref。",
+      "issues": [],
+      "title": "PDF 1.5：交叉引用流 + 对象流（Flate，PNG 预测器）",
+      "group": "structure",
+      "refs": [
+        "方案 13.2 第 4 项 结构校验",
+        "方案 9.1 保存方式",
+        "P0 计划 V17 第 1 条"
+      ],
+      "pdfVersion": "1.5",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 3,
+            "text": 1,
+            "path": 2,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0048",
+      "category": "S",
+      "file": "struct-xref-stream-plain.pdf",
+      "sha256": "0066058d1b593a3863e4ec5759050f08271571ac9d79a6b0bebe66c6cb115d43",
+      "size": 976,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "xref-stream",
+        "pdf-1.5",
+        "uncompressed"
+      ],
+      "expected": "与 struct-xref-stream-objstm 内容相同，但交叉引用流不压缩、对象不打包，便于用文本编辑器查看结构。",
+      "issues": [],
+      "title": "PDF 1.5：未压缩的交叉引用流，无对象流",
+      "group": "structure",
+      "refs": [
+        "方案 13.2 第 4 项 结构校验",
+        "方案 9.1 保存方式",
+        "P0 计划 V17 第 1 条"
+      ],
+      "pdfVersion": "1.5",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 3,
+            "text": 1,
+            "path": 2,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0049",
+      "category": "S",
+      "file": "struct-incremental-update.pdf",
+      "sha256": "38374cd0aff25fc8480b7839fc2fe3ebbfabacff5e551b3176ddf177e88f6fc3",
+      "size": 1478,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "incremental-update",
+        "prev",
+        "two-xref-sections"
+      ],
+      "expected": "第一节写出蓝块 + 'VERSION 1'，第二节（/Prev 指向第一节）用同编号对象替换成红块 + 'VERSION 2 (UPDATED)' 并改 /Title。打开时必须显示红色第二版；qpdf 应无警告。往返保存时第三节追加还是重写整个文件（方案 9.1）。",
+      "issues": [],
+      "title": "增量更新：第二节替换了内容流和 Info",
+      "group": "structure",
+      "refs": [
+        "方案 13.2 第 4 项 结构校验",
+        "方案 9.1 保存方式",
+        "P0 计划 V17 第 1 条"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 3,
+            "text": 1,
+            "path": 2,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0050",
+      "category": "S",
+      "file": "struct-xref-bad-offsets.pdf",
+      "sha256": "2e357a84215453503debd6e18c966f51b58d66c039b3ee50e213b69b85352686",
+      "size": 989,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "damaged",
+        "xref-offsets-wrong",
+        "repairable"
+      ],
+      "expected": "交叉引用表存在但所有偏移量加了 3，PDFium 校验失败后重建 xref 仍能打开并正确渲染。qpdf 会报 'xref not found / recovered'。",
+      "issues": [],
+      "title": "损坏但可修复：xref 表每个偏移错 3 字节",
+      "group": "structure",
+      "refs": [
+        "方案 13.2 第 4 项 结构校验",
+        "方案 9.1 保存方式",
+        "P0 计划 V17 第 1 条",
+        "方案 2.2 损坏的 PDF"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "expect-warn",
+      "checkNote": "xref 偏移故意错位，qpdf 报警并修复",
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 3,
+            "text": 1,
+            "path": 2,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0051",
+      "category": "S",
+      "file": "struct-xref-missing.pdf",
+      "sha256": "c39950652311d78181d22a8aef3c9f5dedbdd73b72ab488a98c9889aa795f548",
+      "size": 824,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "damaged",
+        "xref-missing",
+        "repairable"
+      ],
+      "expected": "文件没有交叉引用表，startxref 指向 trailer 关键字。解析器必须扫描全文件重建对象表。",
+      "issues": [],
+      "title": "损坏但可修复：没有 xref 表，startxref 指向 trailer",
+      "group": "structure",
+      "refs": [
+        "方案 13.2 第 4 项 结构校验",
+        "方案 9.1 保存方式",
+        "P0 计划 V17 第 1 条",
+        "方案 2.2 损坏的 PDF"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "expect-warn",
+      "checkNote": "故意不写 xref，qpdf 报警并重建",
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 3,
+            "text": 1,
+            "path": 2,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0052",
+      "category": "S",
+      "file": "struct-stream-length-wrong.pdf",
+      "sha256": "022fc3de3795b3d7e100ea62518b1b45cd28878cc2b0064333b22f704564ec1e",
+      "size": 996,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "damaged",
+        "stream-length-wrong",
+        "repairable"
+      ],
+      "expected": "内容流 /Length 少写 10，解析器在 Length 处找不到 endstream 时要向后搜索。渲染应完整（文字最后几个字符不能丢）。",
+      "issues": [],
+      "title": "损坏但可修复：内容流 /Length 比实际短 10 字节",
+      "group": "structure",
+      "refs": [
+        "方案 13.2 第 4 项 结构校验",
+        "方案 9.1 保存方式",
+        "P0 计划 V17 第 1 条"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "expect-warn",
+      "checkNote": "/Length 故意写短，qpdf 报警并恢复",
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 3,
+            "text": 1,
+            "path": 2,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0053",
+      "category": "S",
+      "file": "struct-ocg-layers.pdf",
+      "sha256": "2caa7dac7a14d46356f18c2b7d708729fb6efebace136e1351595c628ba3f2c1",
+      "size": 1953,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "ocg",
+        "optional-content",
+        "print-off",
+        "view-off",
+        "layers",
+        "no-print-layer"
+      ],
+      "expected": "图层 Background：浅黄底 + 文字 'BACKGROUND (screen only)'，/Usage /Print /PrintState /OFF 并在 /D /AS 登记 Print 事件；图层 PrintOnly：红框 + 文字 'PRINT ONLY' + 一个带 /OC 的图像，/View /ViewState /OFF 并登记 View 事件；中间的黑字始终可见。屏幕渲染：见背景、不见红框；FPDF_PRINTING 渲染：不见背景、见红框（V16 要验证的前提）。往返保存后 BDC /OC 嵌套与 /OC 键必须保留。",
+      "issues": [],
+      "title": "两个可选内容组：一个打印关闭（/PrintState /OFF），一个屏幕关闭（/ViewState /OFF）",
+      "group": "structure",
+      "refs": [
+        "方案 9.4 打印",
+        "方案 10.6 套打",
+        "P0 计划 V16",
+        "方案 2.3 像素比对打开所有图层"
+      ],
+      "pdfVersion": "1.5",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 6,
+            "text": 3,
+            "path": 2,
+            "image": 1,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0054",
+      "category": "S",
+      "file": "struct-annots-appearance.pdf",
+      "sha256": "7501ea92d6293b10f4b2d4551fd7c52b54df981891fe33c716485f286f8e6394",
+      "size": 2542,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "annots",
+        "appearance-stream",
+        "hidden-flag",
+        "noview-flag",
+        "link",
+        "popup"
+      ],
+      "expected": "页面内容只有一行字和一条线；批注：带 /AP 的黄底红框 Square、带 /AP 的 DRAFT 印章、F=Hidden 的 Square（不显示）、F=NoView 的 Square（屏幕不显示、打印显示）、无 AP 的 Link、带 Popup 的 Text。不带 --annots 渲染时只有页面内容；带 --annots 时出现 Square 与 Stamp。批注不是页面对象，往返重写内容流不应动它们。",
+      "issues": [],
+      "title": "页面 /Annots：带外观流的 Square 与 Stamp、Hidden、NoView、Link、Text+Popup",
+      "group": "structure",
+      "refs": [
+        "方案 9.4 批注和表单",
+        "方案 11.6 印章",
+        "接口协议 9.3"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 3,
+            "text": 2,
+            "path": 1,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0055",
+      "category": "S",
+      "file": "struct-cm-nested-transforms.pdf",
+      "sha256": "25c00ee0e3f1b59a2c102a8a2f82b2e0b6db50ca14484d3731c427546268e671",
+      "size": 1375,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "cm",
+        "transform",
+        "nested-q",
+        "rotate",
+        "skew",
+        "mirror",
+        "Tm",
+        "number-formatting"
+      ],
+      "expected": "红块用 0.001 缩放加五位数坐标画出；蓝块旋转 45°；绿块经三层 q/cm 嵌套（2×0.5 = 1）；黑框斜切；紫块水平镜像；右侧一行竖排文字。生成器把 cm 折算进对象矩阵后，数字精度与写法（科学计数法、过多小数）会影响保真；往返后各块位置不能偏移。",
+      "issues": [],
+      "title": "cm 变换：缩放 0.001 的大坐标、旋转、三层嵌套 q/cm、斜切、镜像、Tm 旋转文字",
+      "group": "structure",
+      "refs": [
+        "方案 4.1 对象",
+        "P0 计划 V02 渲染比对",
+        "P0 计划 V17 自研序列化"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 7,
+            "text": 2,
+            "path": 5,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0056",
+      "category": "S",
+      "file": "struct-missing-resources.pdf",
+      "sha256": "9c65482083da25ed5031dc14a59fa3e94a3fb8caa1fbfd39d6323f81699004e1",
+      "size": 1153,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "missing-resources",
+        "edge-case",
+        "fallback-font"
+      ],
+      "expected": "/F9 不在资源里（PDFium 用默认 Helvetica 显示）、/X9 Do 被忽略（不产生对象）、/GS9 gs 被忽略后方块照画、/CS9 cs 被忽略。预期 2 个文字、2 个路径、0 个图像/Form。生成器写回时不应为缺失的资源生成空引用或崩溃。",
+      "issues": [],
+      "title": "内容流引用不存在的字体、XObject、ExtGState、颜色空间",
+      "group": "structure",
+      "refs": [
+        "方案 4.1 对象",
+        "P0 计划 V02 渲染比对",
+        "方案 2.1 对不规范文件的兼容性"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 4,
+            "text": 2,
+            "path": 2,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0057",
+      "category": "S",
+      "file": "freight-label-composite.pdf",
+      "sha256": "84cb4cebcf0062c372bf3143a571dbea07a29daf98457f2dab3fe73dd9df5429",
+      "size": 6866,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "freight",
+        "label",
+        "barcode",
+        "code39",
+        "container-number",
+        "sscc",
+        "rotate-text",
+        "separation",
+        "ca",
+        "cjk",
+        "lang-zh",
+        "lang-en",
+        "TJ"
+      ],
+      "expected": "288×432 pt 标签页。箱号 SMPU1234561（ISO 6346 校验位正确）与 SSCC 099999990000000010（GS1 模 10 校验位正确）各配一个 Code 39 条码（路径对象）；右侧竖排 SIDE A；左下专色红圈 SAMPLE 印章带 60% 透明；底部一行中文。往返后条码条宽不能变（否则扫描枪读不出），专色与透明度不能丢。",
+      "issues": [],
+      "title": "4×6 英寸货运标签：Code 39 条码、箱号校验位、SSCC、旋转文字、专色印章、中文",
+      "group": "composite",
+      "refs": [
+        "方案 13.1 货代单证",
+        "方案 11.5 条码",
+        "方案 11.6 印章与签名",
+        "货代业务规则 1.1/1.4",
+        "方案 11.7 标签",
+        "货代业务规则 2.2 进仓标签"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 288,
+            "height": 432,
+            "rotation": 0,
+            "objects": 27,
+            "text": 20,
+            "path": 7,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0058",
+      "category": "S",
+      "file": "freight-bl-composite.pdf",
+      "sha256": "b8f06a4681c44606bd2cacf63e57d519bb60fd5ba71c45861191f180f862dff2",
+      "size": 6381,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "freight",
+        "bill-of-lading",
+        "table",
+        "TJ",
+        "devicecmyk",
+        "separation",
+        "ca",
+        "marked-content",
+        "form-xobject",
+        "cjk",
+        "lang-zh",
+        "lang-en",
+        "dash",
+        "barcode"
+      ],
+      "expected": "300×440 pt。一条路径画出整张表格线；字段标签 6 pt、字段值 9 pt（部分用 TJ 调字距）；右上 CMYK 标志块；'SAMPLE' 专色圆章 50% 透明压在签名栏；箱号字段包在 /MagPDF 标记内容里（模拟组件存储）；页脚是 Form XObject；底部 Code 39 条码。这是最接近真实单证的综合样本，往返后任一特性丢失都会在像素比对里出现。",
+      "issues": [],
+      "title": "提单样式页：表格线、TJ 字段、CMYK 标志、专色透明印章、标记内容、Form 页脚、中文、虚线",
+      "group": "composite",
+      "refs": [
+        "方案 13.1 货代单证",
+        "方案 11.5 条码",
+        "方案 11.6 印章与签名",
+        "货代业务规则 1.1/1.4",
+        "方案 11.4 在文件中的存储",
+        "货代业务规则 1.3 提单号"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 440,
+            "rotation": 0,
+            "objects": 44,
+            "text": 37,
+            "path": 6,
+            "image": 0,
+            "shading": 0,
+            "form": 1
+          }
+        ]
+      }
+    }
+  ]
+}

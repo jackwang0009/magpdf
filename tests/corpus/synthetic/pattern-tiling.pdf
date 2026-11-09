@@ -1,0 +1,58 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Pages /Kids [7 0 R] /Count 1 >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+3 0 obj
+<< /Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 20 20] /XStep 20 /YStep 20 /Resources << >> /Length 85 >>
+stream
+1 0 0 rg 0 0 10 10 re f 0 0 1 rg 10 10 10 10 re f 0 g 0 10 m 20 10 l 10 0 m 10 20 l S
+endstream
+endobj
+4 0 obj
+<< /Type /Pattern /PatternType 1 /PaintType 2 /TilingType 1 /BBox [0 0 12 12] /XStep 12 /YStep 12 /Resources << >> /Matrix [0.7071 0.7071 -0.7071 0.7071 0 0] /Length 25 >>
+stream
+0 0 6 6 re f 6 6 6 6 re f
+endstream
+endobj
+5 0 obj
+[/Pattern /DeviceRGB]
+endobj
+6 0 obj
+<<  /Length 252 >>
+stream
+/Pattern cs /P1 scn 20 50 120 120 re f
+/CSpat cs 0 0 1 /P2 scn 160 50 120 120 re f
+/Pattern CS /P1 SCN 10 w 20 30 m 280 30 l S
+BT /F1 7 Tf 0 g 10 188 Td (pattern-tiling: coloured tiling, uncoloured tiling \(blue, rotated matrix\), pattern stroke) Tj ET
+endstream
+endobj
+7 0 obj
+<< /Type /Page /Parent 1 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 2 0 R >> /Pattern << /P1 3 0 R /P2 4 0 R >> /ColorSpace << /CSpat 5 0 R >> >> /Contents 6 0 R >>
+endobj
+8 0 obj
+<< /Type /Catalog /Pages 1 0 R >>
+endobj
+9 0 obj
+<< /Title (pattern-tiling) /Subject (MagPDF synthetic test sample) /Producer (MagPDF synthetic corpus generator \(tests/corpus/synthetic/generate.py\)) >>
+endobj
+xref
+0 10
+0000000000 65535 f 
+0000000015 00000 n 
+0000000072 00000 n 
+0000000169 00000 n 
+0000000416 00000 n 
+0000000646 00000 n 
+0000000683 00000 n 
+0000000987 00000 n 
+0000001179 00000 n 
+0000001228 00000 n 
+trailer
+<< /Size 10 /Root 8 0 R /Info 9 0 R /ID [<EBFCEC71410B20A05FB96E68976B5C95> <EBFCEC71410B20A05FB96E68976B5C95>]  >>
+startxref
+1398
+%%EOF

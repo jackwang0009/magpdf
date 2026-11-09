@@ -1,0 +1,41 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Pages /Kids [4 0 R] /Count 1 >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+3 0 obj
+<<  /Length 243 >>
+stream
+0 1 0 0 k 20 40 100 100 re f
+q /GSop gs 1 0 0 0 k 60 80 100 100 re f Q
+0 1 0 0 k 170 40 100 100 re f
+q /GSnop gs 1 0 0 0 k 210 80 100 100 re f Q
+BT /F1 7 Tf 0 g 10 188 Td (gs-overprint: left pair OP/op true OPM 1, right pair OP/op false) Tj ET
+endstream
+endobj
+4 0 obj
+<< /Type /Page /Parent 1 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 2 0 R >> /ExtGState << /GSop << /OP true /op true /OPM 1 >> /GSnop << /OP false /op false /OPM 0 >> >> >> /Contents 3 0 R >>
+endobj
+5 0 obj
+<< /Type /Catalog /Pages 1 0 R >>
+endobj
+6 0 obj
+<< /Title (gs-overprint) /Subject (MagPDF synthetic test sample) /Producer (MagPDF synthetic corpus generator \(tests/corpus/synthetic/generate.py\)) >>
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000000015 00000 n 
+0000000072 00000 n 
+0000000169 00000 n 
+0000000464 00000 n 
+0000000684 00000 n 
+0000000733 00000 n 
+trailer
+<< /Size 7 /Root 5 0 R /Info 6 0 R /ID [<C48EB85EF27F07E615E5EF0A632FF9AE> <C48EB85EF27F07E615E5EF0A632FF9AE>]  >>
+startxref
+901
+%%EOF

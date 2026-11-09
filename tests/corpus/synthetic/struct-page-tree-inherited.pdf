@@ -1,0 +1,54 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 2 >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+3 0 obj
+<< /Type /Pages /Parent 1 0 R /Kids [5 0 R 7 0 R] /Count 2 /MediaBox [0 0 300 200] /Rotate 90 /Resources << /Font << /F1 2 0 R >> >> >>
+endobj
+4 0 obj
+<<  /Length 111 >>
+stream
+0.2 0.4 0.8 rg 20 20 260 60 re f
+BT /F1 12 Tf 0 g 20 120 Td (Inherited MediaBox/Resources/Rotate, page 1) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 3 0 R /Contents 4 0 R >>
+endobj
+6 0 obj
+<<  /Length 111 >>
+stream
+0.4 0.4 0.8 rg 20 20 260 60 re f
+BT /F1 12 Tf 0 g 20 120 Td (Inherited MediaBox/Resources/Rotate, page 2) Tj ET
+endstream
+endobj
+7 0 obj
+<< /Type /Page /Parent 3 0 R /Contents 6 0 R >>
+endobj
+8 0 obj
+<< /Type /Catalog /Pages 1 0 R >>
+endobj
+9 0 obj
+<< /Title (struct-page-tree-inherited) /Subject (MagPDF synthetic test sample) /Producer (MagPDF synthetic corpus generator \(tests/corpus/synthetic/generate.py\)) >>
+endobj
+xref
+0 10
+0000000000 65535 f 
+0000000015 00000 n 
+0000000072 00000 n 
+0000000169 00000 n 
+0000000320 00000 n 
+0000000483 00000 n 
+0000000546 00000 n 
+0000000709 00000 n 
+0000000772 00000 n 
+0000000821 00000 n 
+trailer
+<< /Size 10 /Root 8 0 R /Info 9 0 R /ID [<0A9E831B56F6AD9454FD2B44AC37A1D2> <0A9E831B56F6AD9454FD2B44AC37A1D2>]  >>
+startxref
+1003
+%%EOF

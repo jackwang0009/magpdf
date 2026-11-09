@@ -48,6 +48,13 @@ jobs:
       - run: cargo test --workspace --locked
       - name: magpdf-cli 烟雾测试
         run: cargo run --locked -p magpdf-cli -- --help
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 自制样本校验（往返测试的烟雾子集）
+        run: |
+          python -m pip install -r tests/requirements-test.txt
+          python tests/corpus/synthetic/check.py --cli target/debug/magpdf-cli.exe
 
   licenses:
     name: 依赖许可证与安全公告

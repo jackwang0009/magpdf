@@ -1,0 +1,53 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Pages /Kids [6 0 R] /Count 1 >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+3 0 obj
+<< /FunctionType 4 /Domain [0 1 0 1] /Range [0 1 0 1 0 1 0 1] /Length 27 >>
+stream
+{ exch dup 0.5 mul exch 0 }
+endstream
+endobj
+4 0 obj
+[/DeviceN [/SampleOrange /SampleBlue] /DeviceCMYK 3 0 R]
+endobj
+5 0 obj
+<<  /Length 278 >>
+stream
+/CSdn cs 1 0 scn 20 110 60 70 re f
+/CSdn cs 0 1 scn 90 110 60 70 re f
+/CSdn cs 1 1 scn 160 110 60 70 re f
+/CSdn cs 0.5 0.5 scn 20 30 60 60 re f
+/CSdn CS 1 0 SCN 6 w 100 30 120 60 re S
+BT /F1 7 Tf 0 g 10 188 Td (color-devicen: 2-colorant DeviceN with type-4 tint transform) Tj ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 1 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 2 0 R >> /ColorSpace << /CSdn 4 0 R >> >> /Contents 5 0 R >>
+endobj
+7 0 obj
+<< /Type /Catalog /Pages 1 0 R >>
+endobj
+8 0 obj
+<< /Title (color-devicen) /Subject (MagPDF synthetic test sample) /Producer (MagPDF synthetic corpus generator \(tests/corpus/synthetic/generate.py\)) >>
+endobj
+xref
+0 9
+0000000000 65535 f 
+0000000015 00000 n 
+0000000072 00000 n 
+0000000169 00000 n 
+0000000305 00000 n 
+0000000377 00000 n 
+0000000707 00000 n 
+0000000863 00000 n 
+0000000912 00000 n 
+trailer
+<< /Size 9 /Root 7 0 R /Info 8 0 R /ID [<F936760D6F5E4682CFE520833A1CE273> <F936760D6F5E4682CFE520833A1CE273>]  >>
+startxref
+1081
+%%EOF

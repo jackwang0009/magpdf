@@ -1,0 +1,42 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Pages /Kids [4 0 R] /Count 1 >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+3 0 obj
+<<  /Length 485 >>
+stream
+BT /F1 14 Tf 20 165 Td [(Kern) -500 (ing) 250 (TJ) -1000 (array)] TJ ET
+BT /F1 14 Tf 20 140 Td (KerningTJarray  <- same glyphs via Tj) Tj ET
+BT /F1 14 Tf 20 110 Td [(A) -2000 (B) -2000 (C) 1500 (D) 1200 (E)] TJ ET
+BT /F1 14 Tf 20 80 Td [-3000 (Lead) 0 (ing) 500 (adj) -800 (ust) 0 (ed)] TJ ET
+BT /F1 14 Tf 20 50 Td [(Mixed) <20> -400 <686578> ( and ) 300 <6C6974> (eral)] TJ ET
+BT /F1 7 Tf 0 g 10 20 Td (text-tj-kerning: compare line 1 \(TJ\) with line 2 \(Tj\) after round-trip) Tj ET
+endstream
+endobj
+4 0 obj
+<< /Type /Page /Parent 1 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 2 0 R >> >> /Contents 3 0 R >>
+endobj
+5 0 obj
+<< /Type /Catalog /Pages 1 0 R >>
+endobj
+6 0 obj
+<< /Title (text-tj-kerning) /Subject (MagPDF synthetic test sample) /Producer (MagPDF synthetic corpus generator \(tests/corpus/synthetic/generate.py\)) >>
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000000015 00000 n 
+0000000072 00000 n 
+0000000169 00000 n 
+0000000706 00000 n 
+0000000832 00000 n 
+0000000881 00000 n 
+trailer
+<< /Size 7 /Root 5 0 R /Info 6 0 R /ID [<51DE527B4DD9A3FEC97452862E18CAA2> <51DE527B4DD9A3FEC97452862E18CAA2>]  >>
+startxref
+1052
+%%EOF

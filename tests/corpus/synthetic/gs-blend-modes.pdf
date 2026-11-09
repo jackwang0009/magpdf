@@ -1,0 +1,49 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Pages /Kids [4 0 R] /Count 1 >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+3 0 obj
+<<  /Length 656 >>
+stream
+1 0.3 0.3 rg 10 130 280 40 re f
+0.3 0.8 0.3 rg 10 90 280 40 re f
+0.3 0.3 1 rg 10 50 280 40 re f
+q /B0 gs 0.5 0.5 0.7 rg 15 40 28 140 re f Q
+q /B1 gs 0.5 0.5 0.7 rg 49 40 28 140 re f Q
+q /B2 gs 0.5 0.5 0.7 rg 83 40 28 140 re f Q
+q /B3 gs 0.5 0.5 0.7 rg 117 40 28 140 re f Q
+q /B4 gs 0.5 0.5 0.7 rg 151 40 28 140 re f Q
+q /B5 gs 0.5 0.5 0.7 rg 185 40 28 140 re f Q
+q /B6 gs 0.5 0.5 0.7 rg 219 40 28 140 re f Q
+q /B7 gs 0.5 0.5 0.7 rg 253 40 28 140 re f Q
+BT /F1 6 Tf 0 g 15 30 Td [(Mult) -900 (Scrn) -900 (Diff) -1100 (Dark) -950 (Light) -950 (Excl) -1000 (HardL) -900 (Hue)] TJ ET
+BT /F1 7 Tf 0 g 10 188 Td (gs-blend-modes: 8 blend modes over 3 bands) Tj ET
+endstream
+endobj
+4 0 obj
+<< /Type /Page /Parent 1 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 2 0 R >> /ExtGState << /B0 << /BM /Multiply >> /B1 << /BM /Screen >> /B2 << /BM /Difference >> /B3 << /BM /Darken >> /B4 << /BM /Lighten >> /B5 << /BM /Exclusion >> /B6 << /BM /HardLight >> /B7 << /BM /Hue >> >> >> /Contents 3 0 R >>
+endobj
+5 0 obj
+<< /Type /Catalog /Pages 1 0 R >>
+endobj
+6 0 obj
+<< /Title (gs-blend-modes) /Subject (MagPDF synthetic test sample) /Producer (MagPDF synthetic corpus generator \(tests/corpus/synthetic/generate.py\)) >>
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000000015 00000 n 
+0000000072 00000 n 
+0000000169 00000 n 
+0000000877 00000 n 
+0000001206 00000 n 
+0000001255 00000 n 
+trailer
+<< /Size 7 /Root 5 0 R /Info 6 0 R /ID [<B05A2A51DED0B960963D45FE6122CA68> <B05A2A51DED0B960963D45FE6122CA68>]  >>
+startxref
+1425
+%%EOF

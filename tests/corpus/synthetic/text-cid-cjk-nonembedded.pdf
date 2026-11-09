@@ -1,0 +1,57 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Pages /Kids [8 0 R] /Count 1 >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+3 0 obj
+<< /Type /FontDescriptor /FontName /STSong-Light /Flags 4 /FontBBox [-25 -254 1000 880] /ItalicAngle 0 /Ascent 880 /Descent -120 /CapHeight 700 /StemV 80 >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /CIDFontType0 /BaseFont /STSong-Light /CIDSystemInfo << /Registry (Adobe) /Ordering (GB1) /Supplement 2 >> /FontDescriptor 3 0 R /DW 1000 /W [1 95 500] >>
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type0 /BaseFont /STSong-Light /Encoding /UniGB-UCS2-H /DescendantFonts [4 0 R] >>
+endobj
+6 0 obj
+<< /Type /Font /Subtype /Type0 /BaseFont /STSong-Light /Encoding /Identity-H /DescendantFonts [4 0 R] >>
+endobj
+7 0 obj
+<<  /Length 517 >>
+stream
+BT /FU 16 Tf 0 g 20 160 Td <6837672C8D278FD000206D4B8BD56587672C> Tj ET
+BT /FI 16 Tf 0 0 0.6 rg 20 130 Td <10220427080A110E000104A90D6B0ED30427> Tj ET
+BT /FU 12 Tf 0 g 20 100 Td <00530041004D0050004C00450020004600520045004900470048005400200032003000320036> Tj ET
+q BT /FI 12 Tf 3 Tc 0.6 0 0 rg 20 70 Td <00340022002E0031002D00260001002700330026002A00280029003500010013001100130017> Tj ET Q
+BT /F1 7 Tf 0 g 10 30 Td (text-cid-cjk-nonembedded: STSong-Light via UniGB-UCS2-H \(black\) and Identity-H CIDs \(blue\)) Tj ET
+endstream
+endobj
+8 0 obj
+<< /Type /Page /Parent 1 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 2 0 R /FU 5 0 R /FI 6 0 R >> >> /Contents 7 0 R >>
+endobj
+9 0 obj
+<< /Type /Catalog /Pages 1 0 R >>
+endobj
+10 0 obj
+<< /Title (text-cid-cjk-nonembedded) /Subject (MagPDF synthetic test sample) /Producer (MagPDF synthetic corpus generator \(tests/corpus/synthetic/generate.py\)) >>
+endobj
+xref
+0 11
+0000000000 65535 f 
+0000000015 00000 n 
+0000000072 00000 n 
+0000000169 00000 n 
+0000000341 00000 n 
+0000000535 00000 n 
+0000000657 00000 n 
+0000000777 00000 n 
+0000001346 00000 n 
+0000001492 00000 n 
+0000001541 00000 n 
+trailer
+<< /Size 11 /Root 9 0 R /Info 10 0 R /ID [<090FC467B44B6C35597D2FA300292B13> <090FC467B44B6C35597D2FA300292B13>]  >>
+startxref
+1722
+%%EOF

@@ -1,0 +1,50 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Pages /Kids [6 0 R] /Count 1 >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+3 0 obj
+[/CalRGB << /WhitePoint [0.9505 1 1.089] /Gamma [2.2 2.2 2.2] /Matrix [0.4124 0.2126 0.0193 0.3576 0.7152 0.1192 0.1805 0.0722 0.9505] >>]
+endobj
+4 0 obj
+[/CalGray << /WhitePoint [0.9505 1 1.089] /Gamma 2.2 >>]
+endobj
+5 0 obj
+<<  /Length 271 >>
+stream
+/CSrgb cs 0.9 0.2 0.2 sc 20 110 60 70 re f
+/CSrgb cs 0.2 0.7 0.2 sc 90 110 60 70 re f
+/CSrgb cs 0.2 0.2 0.9 sc 160 110 60 70 re f
+/CSg cs 0.3 sc 20 30 60 60 re f
+/CSg cs 0.7 sc 90 30 60 60 re f
+BT /F1 7 Tf 0 g 10 188 Td (color-calrgb-calgray: CalRGB x3, CalGray x2) Tj ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 1 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 2 0 R >> /ColorSpace << /CSrgb 3 0 R /CSg 4 0 R >> >> /Contents 5 0 R >>
+endobj
+7 0 obj
+<< /Type /Catalog /Pages 1 0 R >>
+endobj
+8 0 obj
+<< /Title (color-calrgb-calgray) /Subject (MagPDF synthetic test sample) /Producer (MagPDF synthetic corpus generator \(tests/corpus/synthetic/generate.py\)) >>
+endobj
+xref
+0 9
+0000000000 65535 f 
+0000000015 00000 n 
+0000000072 00000 n 
+0000000169 00000 n 
+0000000323 00000 n 
+0000000395 00000 n 
+0000000718 00000 n 
+0000000886 00000 n 
+0000000935 00000 n 
+trailer
+<< /Size 9 /Root 7 0 R /Info 8 0 R /ID [<B42BE41B9BC3D985DE0A065579E4FDDD> <B42BE41B9BC3D985DE0A065579E4FDDD>]  >>
+startxref
+1111
+%%EOF

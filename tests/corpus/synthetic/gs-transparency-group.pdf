@@ -1,0 +1,54 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Pages /Kids [6 0 R] /Count 1 >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+3 0 obj
+<< /Type /XObject /Subtype /Form /BBox [0 0 60 60] /Resources << /ExtGState << /BMm << /BM /Multiply >> >> >> /Group << /S /Transparency /CS /DeviceRGB >> /Length 35 >>
+stream
+q /BMm gs 1 1 0 rg 0 0 60 60 re f Q
+endstream
+endobj
+4 0 obj
+<< /Type /XObject /Subtype /Form /BBox [0 0 130 130] /Resources << /ExtGState << /GS50 << /ca 0.5 >> >> /XObject << /Fin 3 0 R >> >> /Group << /S /Transparency /CS /DeviceRGB /I true /K true >> /Length 91 >>
+stream
+q /GS50 gs 1 0 0 rg 0 30 90 90 re f 0 0 1 rg 40 0 90 90 re f Q q 1 0 0 1 35 35 cm /Fin Do Q
+endstream
+endobj
+5 0 obj
+<<  /Length 250 >>
+stream
+q /GS70 gs 1 0 0 1 15 35 cm /Fg Do Q
+q /GS50 gs 1 0 0 rg 160 65 90 90 re f Q
+q /GS50 gs 0 0 1 rg 200 35 90 90 re f Q
+BT /F1 6 Tf 0 g 10 188 Td (gs-transparency-group: left knockout group \(ca .7, nested Multiply form\); right plain 50% overlap) Tj ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 1 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 2 0 R >> /ExtGState << /GS70 << /ca 0.7 >> /GS50 << /ca 0.5 >> >> /XObject << /Fg 4 0 R >> >> /Contents 5 0 R >>
+endobj
+7 0 obj
+<< /Type /Catalog /Pages 1 0 R >>
+endobj
+8 0 obj
+<< /Title (gs-transparency-group) /Subject (MagPDF synthetic test sample) /Producer (MagPDF synthetic corpus generator \(tests/corpus/synthetic/generate.py\)) >>
+endobj
+xref
+0 9
+0000000000 65535 f 
+0000000015 00000 n 
+0000000072 00000 n 
+0000000169 00000 n 
+0000000406 00000 n 
+0000000738 00000 n 
+0000001040 00000 n 
+0000001248 00000 n 
+0000001297 00000 n 
+trailer
+<< /Size 9 /Root 7 0 R /Info 8 0 R /ID [<37FD15C1DC5F45DC63B6516BFC82C5F5> <37FD15C1DC5F45DC63B6516BFC82C5F5>]  >>
+startxref
+1474
+%%EOF

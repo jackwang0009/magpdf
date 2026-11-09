@@ -1,0 +1,51 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Pages /Kids [6 0 R] /Count 1 >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+3 0 obj
+<<  /Length 50 >>
+stream
+q 1 0 0 rg 20 120 80 60 re f q 20 20 260 90 re W n
+endstream
+endobj
+4 0 obj
+<<  /Length 47 >>
+stream
+0 0 1 rg 0 0 300 200 re f Q 0 1 0 rg 220 120 50
+endstream
+endobj
+5 0 obj
+<<  /Length 121 >>
+stream
+60 re f Q BT /F1 7 Tf 0 g 10 188 Td (struct-multi-stream-q: 3 streams, q/clip in #1, Q in #2, operands split #2/#3) Tj ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 1 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 2 0 R >> >> /Contents [3 0 R 4 0 R 5 0 R] >>
+endobj
+7 0 obj
+<< /Type /Catalog /Pages 1 0 R >>
+endobj
+8 0 obj
+<< /Title (struct-multi-stream-q) /Subject (MagPDF synthetic test sample) /Producer (MagPDF synthetic corpus generator \(tests/corpus/synthetic/generate.py\)) >>
+endobj
+xref
+0 9
+0000000000 65535 f 
+0000000015 00000 n 
+0000000072 00000 n 
+0000000169 00000 n 
+0000000270 00000 n 
+0000000368 00000 n 
+0000000541 00000 n 
+0000000681 00000 n 
+0000000730 00000 n 
+trailer
+<< /Size 9 /Root 7 0 R /Info 8 0 R /ID [<63BE0AC0F16E8C9FF4078E53BFEE0306> <63BE0AC0F16E8C9FF4078E53BFEE0306>]  >>
+startxref
+907
+%%EOF

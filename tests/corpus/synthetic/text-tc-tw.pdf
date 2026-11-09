@@ -1,0 +1,43 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Pages /Kids [4 0 R] /Count 1 >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+3 0 obj
+<<  /Length 486 >>
+stream
+BT /F1 12 Tf 20 170 Td (Reference line no spacing) Tj ET
+BT /F1 12 Tf 3 Tc 20 145 Td (Tc = 3 char spacing) Tj ET
+BT /F1 12 Tf 0 Tc 10 Tw 20 120 Td (Tw = 10 word spacing here) Tj ET
+BT /F1 12 Tf -1 Tc 4 Tw 20 95 Td (Negative Tc with Tw 4) Tj ET
+BT /F1 12 Tf 2 Tc 6 Tw 20 70 Td [(TJ) -300 (plus Tc) -300 (and Tw)] TJ ET
+BT /F1 12 Tf 0 Tc 20 Tw 20 45 Td <547720323020616666656374732062797465203332206F6E6C79> Tj ET
+BT /F1 7 Tf 0 g 10 20 Td (text-tc-tw: Tc/Tw live only in text state) Tj ET
+endstream
+endobj
+4 0 obj
+<< /Type /Page /Parent 1 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 2 0 R >> >> /Contents 3 0 R >>
+endobj
+5 0 obj
+<< /Type /Catalog /Pages 1 0 R >>
+endobj
+6 0 obj
+<< /Title (text-tc-tw) /Subject (MagPDF synthetic test sample) /Producer (MagPDF synthetic corpus generator \(tests/corpus/synthetic/generate.py\)) >>
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000000015 00000 n 
+0000000072 00000 n 
+0000000169 00000 n 
+0000000707 00000 n 
+0000000833 00000 n 
+0000000882 00000 n 
+trailer
+<< /Size 7 /Root 5 0 R /Info 6 0 R /ID [<337FE2DB0D016ACFEC8422573C8CF362> <337FE2DB0D016ACFEC8422573C8CF362>]  >>
+startxref
+1048
+%%EOF

@@ -1,0 +1,42 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Pages /Kids [4 0 R] /Count 1 >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>
+endobj
+3 0 obj
+<<  /Length 269 >>
+stream
+1 0 0 rg 20 60 100 100 re f
+q /GS50 gs 0 0 1 rg 70 40 100 100 re f Q
+q /GS25 gs 0 0.6 0 rg 120 80 100 100 re f Q
+q /GS50 gs 0 G 8 w 20 20 m 280 20 l S Q
+q /GS50 gs BT /F1 24 Tf 0 g 190 40 Td (ALPHA) Tj ET Q
+BT /F1 7 Tf 0 g 10 188 Td (gs-alpha: ca/CA 0.5 and 0.25) Tj ET
+endstream
+endobj
+4 0 obj
+<< /Type /Page /Parent 1 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 2 0 R >> /ExtGState << /GS50 << /ca 0.5 /CA 0.5 >> /GS25 << /ca 0.25 >> >> >> /Contents 3 0 R >>
+endobj
+5 0 obj
+<< /Type /Catalog /Pages 1 0 R >>
+endobj
+6 0 obj
+<< /Title (gs-alpha) /Subject (MagPDF synthetic test sample) /Producer (MagPDF synthetic corpus generator \(tests/corpus/synthetic/generate.py\)) >>
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000000015 00000 n 
+0000000072 00000 n 
+0000000174 00000 n 
+0000000495 00000 n 
+0000000687 00000 n 
+0000000736 00000 n 
+trailer
+<< /Size 7 /Root 5 0 R /Info 6 0 R /ID [<111FAB1F242959F09AB3BA58DFD58D4A> <111FAB1F242959F09AB3BA58DFD58D4A>]  >>
+startxref
+900
+%%EOF

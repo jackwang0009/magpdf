@@ -1,0 +1,74 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Pages /Kids [4 0 R 6 0 R 8 0 R 10 0 R] /Count 4 >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+3 0 obj
+<<  /Length 97 >>
+stream
+0.8 0 0 RG 2 w 105 105 290 190 re S
+BT /F1 9 Tf 0 g 112 112 Td (MediaBox [100 100 400 300]) Tj ET
+endstream
+endobj
+4 0 obj
+<< /Type /Page /Parent 1 0 R /MediaBox [100 100 400 300] /Resources << /Font << /F1 2 0 R >> >> /Contents 3 0 R >>
+endobj
+5 0 obj
+<<  /Length 89 >>
+stream
+0.8 0 0 RG 2 w 55 55 190 90 re S
+BT /F1 9 Tf 0 g 62 62 Td (CropBox [50 50 250 150]) Tj ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 1 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 2 0 R >> >> /Contents 5 0 R /CropBox [50 50 250 150] >>
+endobj
+7 0 obj
+<<  /Length 104 >>
+stream
+0.8 0 0 RG 2 w 5 5 290 190 re S
+BT /F1 9 Tf 0 g 12 12 Td (MediaBox [300 200 0 0] reversed corners) Tj ET
+endstream
+endobj
+8 0 obj
+<< /Type /Page /Parent 1 0 R /MediaBox [300 200 0 0] /Resources << /Font << /F1 2 0 R >> >> /Contents 7 0 R >>
+endobj
+9 0 obj
+<<  /Length 101 >>
+stream
+0.8 0 0 RG 2 w -145 -95 290 190 re S
+BT /F1 9 Tf 0 g -138 -88 Td (MediaBox [-150 -100 150 100]) Tj ET
+endstream
+endobj
+10 0 obj
+<< /Type /Page /Parent 1 0 R /MediaBox [-150 -100 150 100] /Resources << /Font << /F1 2 0 R >> >> /Contents 9 0 R >>
+endobj
+11 0 obj
+<< /Type /Catalog /Pages 1 0 R >>
+endobj
+12 0 obj
+<< /Title (struct-mediabox-cropbox) /Subject (MagPDF synthetic test sample) /Producer (MagPDF synthetic corpus generator \(tests/corpus/synthetic/generate.py\)) >>
+endobj
+xref
+0 13
+0000000000 65535 f 
+0000000015 00000 n 
+0000000091 00000 n 
+0000000188 00000 n 
+0000000336 00000 n 
+0000000466 00000 n 
+0000000606 00000 n 
+0000000757 00000 n 
+0000000913 00000 n 
+0000001039 00000 n 
+0000001192 00000 n 
+0000001325 00000 n 
+0000001375 00000 n 
+trailer
+<< /Size 13 /Root 11 0 R /Info 12 0 R /ID [<921B073E7195D76C13E2BAC39ABA7D6C> <921B073E7195D76C13E2BAC39ABA7D6C>]  >>
+startxref
+1555
+%%EOF

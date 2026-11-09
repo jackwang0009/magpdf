@@ -1,0 +1,41 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Pages /Kids [4 0 R] /Count 1 >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+3 0 obj
+<<  /Length 285 >>
+stream
+BT /F9 14 Tf 0 g 20 150 Td (Font /F9 is missing from /Resources) Tj ET
+q 100 0 0 50 20 80 cm /X9 Do Q
+q /GS9 gs 0 0 1 rg 150 80 100 50 re f Q
+q /CS9 cs 0.5 sc 0.9 0.4 0 rg 20 20 100 40 re f Q
+BT /F1 7 Tf 0 g 10 188 Td (struct-missing-resources: F9 / X9 / GS9 / CS9 all undefined) Tj ET
+endstream
+endobj
+4 0 obj
+<< /Type /Page /Parent 1 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 2 0 R >> >> /Contents 3 0 R >>
+endobj
+5 0 obj
+<< /Type /Catalog /Pages 1 0 R >>
+endobj
+6 0 obj
+<< /Title (struct-missing-resources) /Subject (MagPDF synthetic test sample) /Producer (MagPDF synthetic corpus generator \(tests/corpus/synthetic/generate.py\)) >>
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000000015 00000 n 
+0000000072 00000 n 
+0000000169 00000 n 
+0000000506 00000 n 
+0000000632 00000 n 
+0000000681 00000 n 
+trailer
+<< /Size 7 /Root 5 0 R /Info 6 0 R /ID [<9A87A912BC23BFBF7C2762BE35CA3816> <9A87A912BC23BFBF7C2762BE35CA3816>]  >>
+startxref
+861
+%%EOF

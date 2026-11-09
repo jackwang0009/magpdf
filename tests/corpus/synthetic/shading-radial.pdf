@@ -1,0 +1,47 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Pages /Kids [6 0 R] /Count 1 >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+3 0 obj
+<< /ShadingType 3 /ColorSpace /DeviceRGB /Coords [80 110 0 80 110 50] /Function << /FunctionType 2 /Domain [0 1] /C0 [1 1 1] /C1 [0.8 0 0] /N 1 >> /Extend [false true] >>
+endobj
+4 0 obj
+<< /ShadingType 3 /ColorSpace /DeviceRGB /Coords [200 130 5 225 110 60] /Function << /FunctionType 2 /Domain [0 1] /C0 [1 1 0.6] /C1 [0 0.3 0.7] /N 1 >> /Extend [false false] >>
+endobj
+5 0 obj
+<<  /Length 172 >>
+stream
+q 20 40 120 140 re W n /Sh1 sh Q
+q 160 40 120 140 re W n /Sh2 sh Q
+BT /F1 7 Tf 0 g 10 188 Td (shading-radial: concentric \(outer extend\) and eccentric \(no extend\)) Tj ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 1 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 2 0 R >> /Shading << /Sh1 3 0 R /Sh2 4 0 R >> >> /Contents 5 0 R >>
+endobj
+7 0 obj
+<< /Type /Catalog /Pages 1 0 R >>
+endobj
+8 0 obj
+<< /Title (shading-radial) /Subject (MagPDF synthetic test sample) /Producer (MagPDF synthetic corpus generator \(tests/corpus/synthetic/generate.py\)) >>
+endobj
+xref
+0 9
+0000000000 65535 f 
+0000000015 00000 n 
+0000000072 00000 n 
+0000000169 00000 n 
+0000000355 00000 n 
+0000000548 00000 n 
+0000000772 00000 n 
+0000000935 00000 n 
+0000000984 00000 n 
+trailer
+<< /Size 9 /Root 7 0 R /Info 8 0 R /ID [<7E5D2A47ACCB7E8439478BAFD8A9BFE9> <7E5D2A47ACCB7E8439478BAFD8A9BFE9>]  >>
+startxref
+1154
+%%EOF

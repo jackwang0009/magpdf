@@ -1,0 +1,47 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Pages /Kids [5 0 R] /Count 1 >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>
+endobj
+3 0 obj
+<< /Type /XObject /Subtype /Form /BBox [0 0 80 80] /Resources << /Font << /F1 2 0 R >> >> /Length 172 >>
+stream
+0.8 0 0 RG 3 w 80 40 m 80 62.09 62.09 80 40 80 c 17.91 80 0 62.09 0 40 c 0 17.91 17.91 0 40 0 c 62.09 0 80 17.91 80 40 c h S BT /F1 12 Tf 0.8 0 0 rg 16 34 Td (SAMPLE) Tj ET
+endstream
+endobj
+4 0 obj
+<<  /Length 187 >>
+stream
+q 1 0 0 1 20 100 cm /St Do Q
+q 0.866 0.5 -0.5 0.866 150 90 cm /St Do Q
+q 0.6 0 0 0.6 220 20 cm /St Do Q
+BT /F1 7 Tf 0 g 10 188 Td (struct-form-xobject-reused: same form, 3 matrices) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 1 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 2 0 R >> /XObject << /St 3 0 R >> >> /Contents 4 0 R >>
+endobj
+6 0 obj
+<< /Type /Catalog /Pages 1 0 R >>
+endobj
+7 0 obj
+<< /Title (struct-form-xobject-reused) /Subject (MagPDF synthetic test sample) /Producer (MagPDF synthetic corpus generator \(tests/corpus/synthetic/generate.py\)) >>
+endobj
+xref
+0 8
+0000000000 65535 f 
+0000000015 00000 n 
+0000000072 00000 n 
+0000000174 00000 n 
+0000000484 00000 n 
+0000000723 00000 n 
+0000000874 00000 n 
+0000000923 00000 n 
+trailer
+<< /Size 8 /Root 6 0 R /Info 7 0 R /ID [<CA54E381FFDF9B9D5D65A469CD264C34> <CA54E381FFDF9B9D5D65A469CD264C34>]  >>
+startxref
+1105
+%%EOF
