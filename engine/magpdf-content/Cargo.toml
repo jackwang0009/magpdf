@@ -1,0 +1,19 @@
+[package]
+name = "magpdf-content"
+description = "无损内容流读写层（P0 计划 V17）：最小 PDF 对象层、内容流分词器、操作符与 PDFium 页面对象的对应、按对象写回"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[dependencies]
+pdfium-sys.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+serde.workspace = true
+# 解开内容流的 FlateDecode（PNG 预测器）；写回时按原过滤器原样保留压缩数据，只在需要时重新压缩
+flate2.workspace = true
+
+[lints]
+workspace = true

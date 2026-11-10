@@ -2,6 +2,7 @@
 //! P0 期间在这里增加 `roundtrip`（V02）、`edit-test`（13.2 第 2 项）等子命令。
 #![forbid(unsafe_code)]
 
+mod content;
 mod edit_line;
 mod image;
 mod ocr;
@@ -52,6 +53,8 @@ enum Command {
     },
     /// 往返测试：每页对象全部标记为已修改、重新生成内容流并保存，渲染比对原件与保存结果（V02）
     Roundtrip(roundtrip::RoundtripArgs),
+    /// 自研内容流读写的往返对比（V17）
+    ContentRoundtrip(content::ContentArgs),
     /// `roundtrip --isolate` 的子进程入口：处理单个文件并把 JSON 结果写到标准输出
     #[command(hide = true)]
     RoundtripWorker(roundtrip::WorkerArgs),
@@ -94,6 +97,10 @@ fn main() -> Result<()> {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
     let cli = Cli::parse();
+    // content-roundtrip 在每个工作线程里自己建 Library。PDFium 一个进程只能有一个 Library。
+    if let Command::ContentRoundtrip(args) = cli.command {
+        return content::run(&args);
+    }
     let lib = Library::init()?;
     match cli.command {
         Command::Info { file, json } => info(&lib, &file, json),
@@ -106,6 +113,7 @@ fn main() -> Result<()> {
         } => render(&lib, &file, page, dpi, annots, &output),
         Command::Roundtrip(args) => roundtrip::run(&lib, &args),
         Command::RoundtripWorker(args) => roundtrip::run_worker(&lib, &args),
+        Command::ContentRoundtrip(args) => content::run(&args),
         Command::EditLine(args) => edit_line::run(&lib, args),
         Command::TextBlocks(args) => text_blocks::run(&lib, args),
         Command::Ocr(args) => ocr::ocr(&lib, args),

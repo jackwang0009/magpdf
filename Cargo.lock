@@ -406,6 +406,7 @@ dependencies = [
  "anyhow",
  "clap",
  "image",
+ "magpdf-content",
  "magpdf-engine",
  "magpdf-scan",
  "magpdf-text",
@@ -421,6 +422,17 @@ dependencies = [
 name = "magpdf-components"
 version = "0.1.0"
 dependencies = [
+ "serde",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
+name = "magpdf-content"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "pdfium-sys",
  "serde",
  "thiserror",
  "tracing",

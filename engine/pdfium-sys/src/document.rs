@@ -4,9 +4,23 @@ use std::path::Path;
 use std::ptr;
 
 use crate::error::{Error, LoadError, Result};
+use crate::geom::Rect;
 use crate::library::Library;
 use crate::page::Page;
 use crate::raw;
+
+/// 页面的几何信息（尺寸、旋转、边界框），不需要把页面对象留在内存里。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PageGeometry {
+    pub index: usize,
+    /// 按旋转后的显示尺寸（点）。
+    pub width: f32,
+    pub height: f32,
+    /// 0、1、2、3 对应 0°、90°、180°、270°。
+    pub rotation: i32,
+    /// `FPDF_GetPageBoundingBox` 的结果（`CropBox` 与 `MediaBox` 的交集）。
+    pub bounds: Option<Rect>,
+}
 
 /// 保存标志，对应 `fpdf_save.h`。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -95,6 +109,44 @@ impl<'lib> Document<'lib> {
         }
         // SAFETY: handle 是刚由 FPDF_LoadPage 返回的有效页面句柄，归 Page 所有。
         Ok(unsafe { Page::from_raw(handle, self) })
+    }
+
+    /// 页面尺寸与旋转。只加载页面读标量，读完立即关闭，不解析内容流对象。
+    pub fn page_geometry(&self, page_index: usize) -> Result<PageGeometry> {
+        let count = self.page_count();
+        if page_index >= count {
+            return Err(Error::PageIndex {
+                index: page_index,
+                count,
+            });
+        }
+        let idx = c_int::try_from(page_index).map_err(|_| Error::PageIndex {
+            index: page_index,
+            count,
+        })?;
+        // SAFETY: handle 有效，idx 已检查；返回的页面句柄在读完标量后立即关闭。
+        unsafe {
+            let handle = raw::FPDF_LoadPage(self.handle, idx);
+            if handle.is_null() {
+                return Err(Error::LoadPage(LoadError::last()));
+            }
+            let mut box_ = raw::FS_RECTF {
+                left: 0.0,
+                bottom: 0.0,
+                right: 0.0,
+                top: 0.0,
+            };
+            let has_box = raw::FPDF_GetPageBoundingBox(handle, &mut box_) != 0;
+            let geometry = PageGeometry {
+                index: page_index,
+                width: raw::FPDF_GetPageWidthF(handle),
+                height: raw::FPDF_GetPageHeightF(handle),
+                rotation: raw::FPDFPage_GetRotation(handle),
+                bounds: has_box.then(|| Rect::from_fs(box_)),
+            };
+            raw::FPDF_ClosePage(handle);
+            Ok(geometry)
+        }
     }
 
     /// 保存为新文件内容（`FPDF_SaveAsCopy`），返回字节。

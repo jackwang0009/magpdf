@@ -171,16 +171,24 @@ impl PageObject<'_> {
         }
     }
 
-    /// 在现有矩阵上叠加一个变换（`FPDFPageObj_TransformF`）。
+    /// 在现有矩阵上叠加一个变换。
+    ///
+    /// 使用 `FPDFPageObj_Transform`（六个 double）：对路径对象会变换路径点本身，
+    /// `TransformF`/`SetMatrix` 只改矩阵，部分 PDFium 版本渲染与 `GenerateContent` 仍按原路径点输出。
     pub fn transform(&self, matrix: Matrix) -> Result<()> {
-        let m = matrix.to_fs();
-        // SAFETY: handle 有效，m 在调用期间有效。
-        let ok = unsafe { raw::FPDFPageObj_TransformF(self.handle, &m) };
-        if ok == 0 {
-            Err(Error::PageObject)
-        } else {
-            Ok(())
+        // SAFETY: handle 有效；该 API 无返回值。
+        unsafe {
+            raw::FPDFPageObj_Transform(
+                self.handle,
+                matrix.a as f64,
+                matrix.b as f64,
+                matrix.c as f64,
+                matrix.d as f64,
+                matrix.e as f64,
+                matrix.f as f64,
+            );
         }
+        Ok(())
     }
 
     /// 把对象标记为"已修改"，使 [`Page::generate_content`](crate::Page::generate_content) 重写它所在的内容流。

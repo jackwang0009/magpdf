@@ -28,7 +28,7 @@ mod text;
 mod tile;
 
 pub use bitmap::Bitmap;
-pub use document::{Document, SaveFlags};
+pub use document::{Document, PageGeometry, SaveFlags};
 pub use edit::LoadedFont;
 pub use error::{Error, LoadError, Result};
 pub use font::Font;
