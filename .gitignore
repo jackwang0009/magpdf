@@ -25,6 +25,8 @@ __pycache__/
 
 # 测试输出
 /tests/out/
+# V08 样本生成与评测脚本的输出（改后的 PDF、结果 JSON、超过 1 MB 的完整嵌入样本）
+/out/
 
 # 编辑器与系统
 .vscode/

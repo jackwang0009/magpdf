@@ -79,6 +79,16 @@ impl std::fmt::Debug for Page<'_> {
 }
 
 impl<'doc> Page<'doc> {
+    /// 原始页面句柄。瓦片渲染和文字对象插入都在本 crate 内使用。
+    pub(crate) fn raw_handle(&self) -> raw::FPDF_PAGE {
+        self.handle
+    }
+
+    /// [`raw_handle`] 的别名，编辑模块沿用这个名字。
+    pub(crate) fn raw_page_handle(&self) -> raw::FPDF_PAGE {
+        self.handle
+    }
+
     /// # Safety
     /// `handle` 必须是 `FPDF_LoadPage` 刚返回、尚未关闭的页面句柄，且属于 `doc`。
     pub(crate) unsafe fn from_raw(handle: raw::FPDF_PAGE, doc: &'doc Document<'doc>) -> Self {
@@ -109,11 +119,6 @@ impl<'doc> Page<'doc> {
     pub fn rotation(&self) -> i32 {
         // SAFETY: handle 有效。
         unsafe { raw::FPDFPage_GetRotation(self.handle) }
-    }
-
-    /// 原始的 PDFium 页面句柄，仅供本 crate 内的瓦片渲染（[`crate::tile`]）使用。
-    pub(crate) fn raw_handle(&self) -> raw::FPDF_PAGE {
-        self.handle
     }
 
     /// 页面是否带透明（会影响像素比对的背景处理）。

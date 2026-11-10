@@ -12,6 +12,7 @@
 | `freight/` | 货代单证（提单、托书、装箱单、发票、面单、平台标签） |
 | `public/` | 公开测试集（PDF.js、PDFium 仓库自带的测试文件），按 `public/<仓库名>/<子目录>` 组织：`public/pdfium/resources`、`public/pdfium/pixel`、`public/pdfjs/`… |
 | `synthetic/` | 自制样本：针对生成器缺陷逐项构造（CMYK、专色、渐变、`TJ` 字距、`Tc/Tw`、Type3、文字裁剪、ExtGState、多内容流、内联图像等），分类 S |
+| `synthetic-text/` | 自制文字样本（V08"改一行字"）：`generate.py` 用本机系统字体生成中文、英文短句页面，覆盖子集嵌入、完整嵌入、未嵌入三种情况；`samples/manifest.json` 记录每份的字体和要改的文字，`eval_v08.py` 跑评测。超过 1 MB 的完整嵌入样本不入库 |
 
 规则：
 - 真实单证必须先按脱敏规范处理，未脱敏的文件不得入库，也不得上传到任何外部服务（《工程规范》11）。

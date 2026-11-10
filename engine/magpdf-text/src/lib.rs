@@ -19,11 +19,21 @@
 //! ```
 #![forbid(unsafe_code)]
 
+pub mod edit;
+pub mod error;
 pub mod eval;
+pub mod fontfile;
+pub mod fontmap;
+pub mod fontmatch;
 pub mod geom;
 pub mod glyph;
 pub mod layout;
+pub mod shaping;
+pub mod subset;
 
+pub use edit::{EditOutcome, EditRequest, EditTarget, EditTier, TierSkipped, edit_line};
+pub use error::{EditError, Result as EditResult};
+pub use fontfile::FontFace;
 pub use geom::{Point, Quadrant, Rect};
 pub use glyph::{FontInfo, Glyph, PageText, collect_rulings};
 pub use layout::{Alignment, Block, Layout, LayoutParams, Line, LinePitch, analyze};

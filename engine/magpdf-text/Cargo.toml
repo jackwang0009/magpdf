@@ -12,6 +12,15 @@ pdfium-sys.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 serde.workspace = true
+# 塑形（方案 5.3 的 HarfBuzz）：HarfBuzz 官方的纯 Rust 移植，移植自 HarfBuzz 15.0，MIT。
+# 不用 rustybuzz：已被维护者标记为停止维护（RUSTSEC-2026-0206），cargo deny 会失败。
+harfrust = "0.15.0"
+# 子集化（方案 5.4）：typst 的 subsetter，专为 PDF 嵌入设计，TrueType 与 CFF 轮廓都支持，
+# MIT OR Apache-2.0。它把字形重排为从 1 开始的连续 GID，并返回新旧映射。
+subsetter = "0.2.6"
+# 字形轮廓（PDFium 的 FPDFFont_GetGlyphPath 依赖 freetype，用子集字体的新 GID 取不到原字形的轮廓），
+# 直接读子集字体文件画字形，用 FPDFPageObj_CreateNewPath + 贝塞尔建路径对象。Apache-2.0 或 MIT。
+skrifa = "0.42.1"
 
 [dev-dependencies]
 serde_json.workspace = true

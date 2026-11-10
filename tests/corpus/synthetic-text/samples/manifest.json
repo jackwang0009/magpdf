@@ -1,0 +1,1962 @@
+[
+ {
+  "name": "zh-fang-tier1",
+  "lang": "zh",
+  "kind": "cidfonttype2",
+  "embedded": "subset",
+  "font_file": "simfang.ttf",
+  "font_index": 0,
+  "base_font": "ABCDEF+FangSong",
+  "pages": 1,
+  "lines": [
+   {
+    "index": 1,
+    "page": 1,
+    "text": "合同甲方乙方",
+    "size": 14
+   },
+   {
+    "index": 2,
+    "page": 1,
+    "text": "合同甲方乙方应按时付款",
+    "size": 10.5
+   }
+  ],
+  "edits": [
+   {
+    "page": 1,
+    "line": 1,
+    "new_text": "甲方乙方合同",
+    "case": "tier1",
+    "expected_tier": 1,
+    "expected_changed": false,
+    "variant": "none"
+   },
+   {
+    "page": 1,
+    "line": 2,
+    "new_text": "甲方乙方应按时付款合同",
+    "case": "tier1",
+    "expected_tier": 1,
+    "expected_changed": false,
+    "variant": "none"
+   }
+  ],
+  "note": "",
+  "warnings": [],
+  "bytes": 4205,
+  "committed": true,
+  "path": "samples\\zh-fang-tier1.pdf"
+ },
+ {
+  "name": "zh-hei-tier2-embed",
+  "lang": "zh",
+  "kind": "cidfonttype0",
+  "embedded": "subset",
+  "font_file": "simhei.ttf",
+  "font_index": 0,
+  "base_font": "ABCDEF+SimHei",
+  "pages": 1,
+  "lines": [
+   {
+    "index": 1,
+    "page": 1,
+    "text": "合同甲方乙方",
+    "size": 14
+   },
+   {
+    "index": 2,
+    "page": 1,
+    "text": "合同甲方乙方应按时付款",
+    "size": 10.5
+   }
+  ],
+  "edits": [
+   {
+    "page": 1,
+    "line": 1,
+    "new_text": "合同货物乙方",
+    "case": "tier2_embed",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "glyphs"
+   },
+   {
+    "page": 1,
+    "line": 2,
+    "new_text": "合同验收乙方应按时付款",
+    "case": "tier2_embed",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "glyphs"
+   }
+  ],
+  "note": "",
+  "warnings": [],
+  "bytes": 4055,
+  "committed": true,
+  "path": "samples\\zh-hei-tier2-embed.pdf"
+ },
+ {
+  "name": "zh-sun-tier2-system",
+  "lang": "zh",
+  "kind": "simple",
+  "embedded": "subset",
+  "font_file": "simsun.ttc",
+  "font_index": 0,
+  "base_font": "ABCDEF+SimSun",
+  "pages": 1,
+  "lines": [
+   {
+    "index": 1,
+    "page": 1,
+    "text": "合同甲方乙方",
+    "size": 14
+   },
+   {
+    "index": 2,
+    "page": 1,
+    "text": "合同甲方乙方应按时付款",
+    "size": 10.5
+   }
+  ],
+  "edits": [
+   {
+    "page": 1,
+    "line": 1,
+    "new_text": "合同价款乙方",
+    "case": "tier2_system",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "font"
+   },
+   {
+    "page": 1,
+    "line": 2,
+    "new_text": "合同款式乙方应按时付款",
+    "case": "tier2_system",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "font"
+   }
+  ],
+  "note": "",
+  "warnings": [],
+  "bytes": 6430,
+  "committed": true,
+  "path": "samples\\zh-sun-tier2-system.pdf"
+ },
+ {
+  "name": "zh-sun1-tier2-embed",
+  "lang": "zh",
+  "kind": "cidfonttype2",
+  "embedded": "full",
+  "font_file": "simsun.ttc",
+  "font_index": 1,
+  "base_font": "NSimSun",
+  "pages": 2,
+  "lines": [
+   {
+    "index": 1,
+    "page": 1,
+    "text": "合同甲方乙方",
+    "size": 14
+   },
+   {
+    "index": 2,
+    "page": 1,
+    "text": "合同甲方乙方应按时付款",
+    "size": 10.5
+   }
+  ],
+  "edits": [
+   {
+    "page": 1,
+    "line": 1,
+    "new_text": "合同货物乙方",
+    "case": "tier2_embed",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "glyphs"
+   },
+   {
+    "page": 1,
+    "line": 2,
+    "new_text": "合同验收乙方应按时付款",
+    "case": "tier2_embed",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "glyphs"
+   }
+  ],
+  "note": "",
+  "warnings": [],
+  "bytes": 10035623,
+  "committed": false,
+  "path": "D:\\workspace\\magpdf-wt\\v08-edit-line\\out\\v08-samples-large\\zh-sun1-tier2-embed.pdf"
+ },
+ {
+  "name": "zh-kai-tier2-system",
+  "lang": "zh",
+  "kind": "cidfonttype0",
+  "embedded": "none",
+  "font_file": "simkai.ttf",
+  "font_index": 0,
+  "base_font": "KaiTi",
+  "pages": 1,
+  "lines": [
+   {
+    "index": 1,
+    "page": 1,
+    "text": "合同甲方乙方",
+    "size": 14
+   },
+   {
+    "index": 2,
+    "page": 1,
+    "text": "合同甲方乙方应按时付款",
+    "size": 10.5
+   }
+  ],
+  "edits": [
+   {
+    "page": 1,
+    "line": 1,
+    "new_text": "合同价款乙方",
+    "case": "tier2_system",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "font"
+   },
+   {
+    "page": 1,
+    "line": 2,
+    "new_text": "合同款式乙方应按时付款",
+    "case": "tier2_system",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "font"
+   }
+  ],
+  "note": "",
+  "warnings": [],
+  "bytes": 266556,
+  "committed": true,
+  "path": "samples\\zh-kai-tier2-system.pdf"
+ },
+ {
+  "name": "zh-yahei-tier1",
+  "lang": "zh",
+  "kind": "cidfonttype2",
+  "embedded": "subset",
+  "font_file": "msyh.ttc",
+  "font_index": 0,
+  "base_font": "ABCDEF+MicrosoftYaHei",
+  "pages": 1,
+  "lines": [
+   {
+    "index": 1,
+    "page": 1,
+    "text": "合同甲方乙方",
+    "size": 14
+   },
+   {
+    "index": 2,
+    "page": 1,
+    "text": "合同甲方乙方应按时付款",
+    "size": 10.5
+   }
+  ],
+  "edits": [
+   {
+    "page": 1,
+    "line": 1,
+    "new_text": "甲方乙方合同",
+    "case": "tier1",
+    "expected_tier": 1,
+    "expected_changed": false,
+    "variant": "none"
+   },
+   {
+    "page": 1,
+    "line": 2,
+    "new_text": "甲方乙方应按时付款合同",
+    "case": "tier1",
+    "expected_tier": 1,
+    "expected_changed": false,
+    "variant": "none"
+   }
+  ],
+  "note": "",
+  "warnings": [],
+  "bytes": 9781,
+  "committed": true,
+  "path": "samples\\zh-yahei-tier1.pdf"
+ },
+ {
+  "name": "zh-yahei_bd-tier2-embed",
+  "lang": "zh",
+  "kind": "cidfonttype0",
+  "embedded": "subset",
+  "font_file": "msyhbd.ttc",
+  "font_index": 0,
+  "base_font": "ABCDEF+MicrosoftYaHei-Bold",
+  "pages": 1,
+  "lines": [
+   {
+    "index": 1,
+    "page": 1,
+    "text": "合同甲方乙方",
+    "size": 14
+   },
+   {
+    "index": 2,
+    "page": 1,
+    "text": "合同甲方乙方应按时付款",
+    "size": 10.5
+   }
+  ],
+  "edits": [
+   {
+    "page": 1,
+    "line": 1,
+    "new_text": "合同货物乙方",
+    "case": "tier2_embed",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "glyphs"
+   },
+   {
+    "page": 1,
+    "line": 2,
+    "new_text": "合同验收乙方应按时付款",
+    "case": "tier2_embed",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "glyphs"
+   }
+  ],
+  "note": "",
+  "warnings": [],
+  "bytes": 9371,
+  "committed": true,
+  "path": "samples\\zh-yahei_bd-tier2-embed.pdf"
+ },
+ {
+  "name": "zh-dengxian-tier3",
+  "lang": "zh",
+  "kind": "simple",
+  "embedded": "subset",
+  "font_file": "Deng.ttf",
+  "font_index": 0,
+  "base_font": "ABCDEF+DengXian",
+  "pages": 1,
+  "lines": [
+   {
+    "index": 1,
+    "page": 1,
+    "text": "合同甲方乙方",
+    "size": 14
+   },
+   {
+    "index": 2,
+    "page": 1,
+    "text": "合同甲方乙方应按时付款",
+    "size": 10.5
+   }
+  ],
+  "edits": [
+   {
+    "page": 1,
+    "line": 1,
+    "new_text": "货物验收乙方",
+    "case": "tier3",
+    "expected_tier": 3,
+    "expected_changed": true,
+    "variant": "font"
+   },
+   {
+    "page": 1,
+    "line": 2,
+    "new_text": "和号验收乙方应按时付款",
+    "case": "tier3",
+    "expected_tier": 3,
+    "expected_changed": true,
+    "variant": "font"
+   }
+  ],
+  "note": "",
+  "warnings": [],
+  "bytes": 7618,
+  "committed": true,
+  "path": "samples\\zh-dengxian-tier3.pdf"
+ },
+ {
+  "name": "zh-dengxian_bd-tier2-embed",
+  "lang": "zh",
+  "kind": "cidfonttype2",
+  "embedded": "full",
+  "font_file": "Dengb.ttf",
+  "font_index": 0,
+  "base_font": "DengXian-Bold",
+  "pages": 1,
+  "lines": [
+   {
+    "index": 1,
+    "page": 1,
+    "text": "合同甲方乙方",
+    "size": 14
+   },
+   {
+    "index": 2,
+    "page": 1,
+    "text": "合同甲方乙方应按时付款",
+    "size": 10.5
+   }
+  ],
+  "edits": [
+   {
+    "page": 1,
+    "line": 1,
+    "new_text": "合同货物乙方",
+    "case": "tier2_embed",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "glyphs"
+   },
+   {
+    "page": 1,
+    "line": 2,
+    "new_text": "合同验收乙方应按时付款",
+    "case": "tier2_embed",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "glyphs"
+   }
+  ],
+  "note": "",
+  "warnings": [],
+  "bytes": 11392063,
+  "committed": false,
+  "path": "D:\\workspace\\magpdf-wt\\v08-edit-line\\out\\v08-samples-large\\zh-dengxian_bd-tier2-embed.pdf"
+ },
+ {
+  "name": "zh-stzhongs-tier2-system",
+  "lang": "zh",
+  "kind": "cidfonttype0",
+  "embedded": "none",
+  "font_file": "STZHONGS.TTF",
+  "font_index": 0,
+  "base_font": "STZhongsong",
+  "pages": 1,
+  "lines": [
+   {
+    "index": 1,
+    "page": 1,
+    "text": "合同甲方乙方",
+    "size": 14
+   },
+   {
+    "index": 2,
+    "page": 1,
+    "text": "合同甲方乙方应按时付款",
+    "size": 10.5
+   }
+  ],
+  "edits": [
+   {
+    "page": 1,
+    "line": 1,
+    "new_text": "合同价款乙方",
+    "case": "tier2_system",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "font"
+   },
+   {
+    "page": 1,
+    "line": 2,
+    "new_text": "合同款式乙方应按时付款",
+    "case": "tier2_system",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "font"
+   }
+  ],
+  "note": "",
+  "warnings": [],
+  "bytes": 242935,
+  "committed": true,
+  "path": "samples\\zh-stzhongs-tier2-system.pdf"
+ },
+ {
+  "name": "zh-stkaiti-tier1",
+  "lang": "zh",
+  "kind": "cidfonttype2",
+  "embedded": "subset",
+  "font_file": "STKAITI.TTF",
+  "font_index": 0,
+  "base_font": "ABCDEF+STKaiti",
+  "pages": 2,
+  "lines": [
+   {
+    "index": 1,
+    "page": 1,
+    "text": "合同甲方乙方",
+    "size": 14
+   },
+   {
+    "index": 2,
+    "page": 1,
+    "text": "合同甲方乙方应按时付款",
+    "size": 10.5
+   }
+  ],
+  "edits": [
+   {
+    "page": 1,
+    "line": 1,
+    "new_text": "甲方乙方合同",
+    "case": "tier1",
+    "expected_tier": 1,
+    "expected_changed": false,
+    "variant": "none"
+   },
+   {
+    "page": 1,
+    "line": 2,
+    "new_text": "甲方乙方应按时付款合同",
+    "case": "tier1",
+    "expected_tier": 1,
+    "expected_changed": false,
+    "variant": "none"
+   }
+  ],
+  "note": "",
+  "warnings": [],
+  "bytes": 7618,
+  "committed": true,
+  "path": "samples\\zh-stkaiti-tier1.pdf"
+ },
+ {
+  "name": "zh-stfangsong-tier2-embed",
+  "lang": "zh",
+  "kind": "cidfonttype0",
+  "embedded": "subset",
+  "font_file": "STFANGSO.TTF",
+  "font_index": 0,
+  "base_font": "ABCDEF+STFangsong",
+  "pages": 1,
+  "lines": [
+   {
+    "index": 1,
+    "page": 1,
+    "text": "合同甲方乙方",
+    "size": 14
+   },
+   {
+    "index": 2,
+    "page": 1,
+    "text": "合同甲方乙方应按时付款",
+    "size": 10.5
+   }
+  ],
+  "edits": [
+   {
+    "page": 1,
+    "line": 1,
+    "new_text": "合同货物乙方",
+    "case": "tier2_embed",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "glyphs"
+   },
+   {
+    "page": 1,
+    "line": 2,
+    "new_text": "合同验收乙方应按时付款",
+    "case": "tier2_embed",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "glyphs"
+   }
+  ],
+  "note": "",
+  "warnings": [],
+  "bytes": 6889,
+  "committed": true,
+  "path": "samples\\zh-stfangsong-tier2-embed.pdf"
+ },
+ {
+  "name": "zh-stxihei-tier1",
+  "lang": "zh",
+  "kind": "simple",
+  "embedded": "subset",
+  "font_file": "STXIHEI.TTF",
+  "font_index": 0,
+  "base_font": "ABCDEF+STXihei",
+  "pages": 1,
+  "lines": [
+   {
+    "index": 1,
+    "page": 1,
+    "text": "合同甲方乙方",
+    "size": 14
+   },
+   {
+    "index": 2,
+    "page": 1,
+    "text": "合同甲方乙方应按时付款",
+    "size": 10.5
+   }
+  ],
+  "edits": [
+   {
+    "page": 1,
+    "line": 1,
+    "new_text": "甲方乙方合同",
+    "case": "tier1",
+    "expected_tier": 1,
+    "expected_changed": false,
+    "variant": "none"
+   },
+   {
+    "page": 1,
+    "line": 2,
+    "new_text": "甲方乙方应按时付款合同",
+    "case": "tier1",
+    "expected_tier": 1,
+    "expected_changed": false,
+    "variant": "none"
+   }
+  ],
+  "note": "",
+  "warnings": [],
+  "bytes": 5871,
+  "committed": true,
+  "path": "samples\\zh-stxihei-tier1.pdf"
+ },
+ {
+  "name": "zh-simyou-tier2-embed",
+  "lang": "zh",
+  "kind": "cidfonttype2",
+  "embedded": "full",
+  "font_file": "SIMYOU.TTF",
+  "font_index": 0,
+  "base_font": "SimYou",
+  "pages": 1,
+  "lines": [
+   {
+    "index": 1,
+    "page": 1,
+    "text": "合同甲方乙方",
+    "size": 14
+   },
+   {
+    "index": 2,
+    "page": 1,
+    "text": "合同甲方乙方应按时付款",
+    "size": 10.5
+   }
+  ],
+  "edits": [
+   {
+    "page": 1,
+    "line": 1,
+    "new_text": "合同货物乙方",
+    "case": "tier2_embed",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "glyphs"
+   },
+   {
+    "page": 1,
+    "line": 2,
+    "new_text": "合同验收乙方应按时付款",
+    "case": "tier2_embed",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "glyphs"
+   }
+  ],
+  "note": "",
+  "warnings": [],
+  "bytes": 3250661,
+  "committed": false,
+  "path": "D:\\workspace\\magpdf-wt\\v08-edit-line\\out\\v08-samples-large\\zh-simyou-tier2-embed.pdf"
+ },
+ {
+  "name": "zh-li-tier2-system",
+  "lang": "zh",
+  "kind": "cidfonttype0",
+  "embedded": "none",
+  "font_file": "simli.ttf",
+  "font_index": 0,
+  "base_font": "LiSu",
+  "pages": 1,
+  "lines": [
+   {
+    "index": 1,
+    "page": 1,
+    "text": "合同甲方乙方",
+    "size": 14
+   },
+   {
+    "index": 2,
+    "page": 1,
+    "text": "合同甲方乙方应按时付款",
+    "size": 10.5
+   }
+  ],
+  "edits": [
+   {
+    "page": 1,
+    "line": 1,
+    "new_text": "合同价款乙方",
+    "case": "tier2_system",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "font"
+   },
+   {
+    "page": 1,
+    "line": 2,
+    "new_text": "合同款式乙方应按时付款",
+    "case": "tier2_system",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "font"
+   }
+  ],
+  "note": "",
+  "warnings": [],
+  "bytes": 206054,
+  "committed": true,
+  "path": "samples\\zh-li-tier2-system.pdf"
+ },
+ {
+  "name": "zh-yahei_lt-tier1",
+  "lang": "zh",
+  "kind": "cidfonttype2",
+  "embedded": "subset",
+  "font_file": "msyhl.ttc",
+  "font_index": 0,
+  "base_font": "ABCDEF+MicrosoftYaHei-Light",
+  "pages": 1,
+  "lines": [
+   {
+    "index": 1,
+    "page": 1,
+    "text": "合同甲方乙方",
+    "size": 14
+   },
+   {
+    "index": 2,
+    "page": 1,
+    "text": "合同甲方乙方应按时付款",
+    "size": 10.5
+   }
+  ],
+  "edits": [
+   {
+    "page": 1,
+    "line": 1,
+    "new_text": "甲方乙方合同",
+    "case": "tier1",
+    "expected_tier": 1,
+    "expected_changed": false,
+    "variant": "none"
+   },
+   {
+    "page": 1,
+    "line": 2,
+    "new_text": "甲方乙方应按时付款合同",
+    "case": "tier1",
+    "expected_tier": 1,
+    "expected_changed": false,
+    "variant": "none"
+   }
+  ],
+  "note": "",
+  "warnings": [],
+  "bytes": 7188,
+  "committed": true,
+  "path": "samples\\zh-yahei_lt-tier1.pdf"
+ },
+ {
+  "name": "zh-dengxian_lt-tier2-embed",
+  "lang": "zh",
+  "kind": "cidfonttype0",
+  "embedded": "subset",
+  "font_file": "Dengl.ttf",
+  "font_index": 0,
+  "base_font": "ABCDEF+DengXian-Light",
+  "pages": 1,
+  "lines": [
+   {
+    "index": 1,
+    "page": 1,
+    "text": "合同甲方乙方",
+    "size": 14
+   },
+   {
+    "index": 2,
+    "page": 1,
+    "text": "合同甲方乙方应按时付款",
+    "size": 10.5
+   }
+  ],
+  "edits": [
+   {
+    "page": 1,
+    "line": 1,
+    "new_text": "合同货物乙方",
+    "case": "tier2_embed",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "glyphs"
+   },
+   {
+    "page": 1,
+    "line": 2,
+    "new_text": "合同验收乙方应按时付款",
+    "case": "tier2_embed",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "glyphs"
+   }
+  ],
+  "note": "",
+  "warnings": [],
+  "bytes": 7574,
+  "committed": true,
+  "path": "samples\\zh-dengxian_lt-tier2-embed.pdf"
+ },
+ {
+  "name": "zh-stxingkai-tier2-embed",
+  "lang": "zh",
+  "kind": "simple",
+  "embedded": "subset",
+  "font_file": "STXINGKA.TTF",
+  "font_index": 0,
+  "base_font": "ABCDEF+STXingkai",
+  "pages": 2,
+  "lines": [
+   {
+    "index": 1,
+    "page": 1,
+    "text": "合同甲方乙方",
+    "size": 14
+   },
+   {
+    "index": 2,
+    "page": 1,
+    "text": "合同甲方乙方应按时付款",
+    "size": 10.5
+   }
+  ],
+  "edits": [
+   {
+    "page": 1,
+    "line": 1,
+    "new_text": "合同货物乙方",
+    "case": "tier2_embed",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "glyphs"
+   },
+   {
+    "page": 1,
+    "line": 2,
+    "new_text": "合同验收乙方应按时付款",
+    "case": "tier2_embed",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "glyphs"
+   }
+  ],
+  "note": "",
+  "warnings": [],
+  "bytes": 7604,
+  "committed": true,
+  "path": "samples\\zh-stxingkai-tier2-embed.pdf"
+ },
+ {
+  "name": "zh-stxinwei-tier2-embed",
+  "lang": "zh",
+  "kind": "cidfonttype2",
+  "embedded": "full",
+  "font_file": "STXINWEI.TTF",
+  "font_index": 0,
+  "base_font": "STXinwei",
+  "pages": 1,
+  "lines": [
+   {
+    "index": 1,
+    "page": 1,
+    "text": "合同甲方乙方",
+    "size": 14
+   },
+   {
+    "index": 2,
+    "page": 1,
+    "text": "合同甲方乙方应按时付款",
+    "size": 10.5
+   }
+  ],
+  "edits": [
+   {
+    "page": 1,
+    "line": 1,
+    "new_text": "合同货物乙方",
+    "case": "tier2_embed",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "glyphs"
+   },
+   {
+    "page": 1,
+    "line": 2,
+    "new_text": "合同验收乙方应按时付款",
+    "case": "tier2_embed",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "glyphs"
+   }
+  ],
+  "note": "",
+  "warnings": [],
+  "bytes": 2872890,
+  "committed": false,
+  "path": "D:\\workspace\\magpdf-wt\\v08-edit-line\\out\\v08-samples-large\\zh-stxinwei-tier2-embed.pdf"
+ },
+ {
+  "name": "zh-stsong-tier2-system",
+  "lang": "zh",
+  "kind": "cidfonttype0",
+  "embedded": "none",
+  "font_file": "STSONG.TTF",
+  "font_index": 0,
+  "base_font": "STSong",
+  "pages": 1,
+  "lines": [
+   {
+    "index": 1,
+    "page": 1,
+    "text": "合同甲方乙方",
+    "size": 14
+   },
+   {
+    "index": 2,
+    "page": 1,
+    "text": "合同甲方乙方应按时付款",
+    "size": 10.5
+   }
+  ],
+  "edits": [
+   {
+    "page": 1,
+    "line": 1,
+    "new_text": "合同价款乙方",
+    "case": "tier2_system",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "font"
+   },
+   {
+    "page": 1,
+    "line": 2,
+    "new_text": "合同款式乙方应按时付款",
+    "case": "tier2_system",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "font"
+   }
+  ],
+  "note": "",
+  "warnings": [],
+  "bytes": 242919,
+  "committed": true,
+  "path": "samples\\zh-stsong-tier2-system.pdf"
+ },
+ {
+  "name": "en-times-tier2-system",
+  "lang": "en",
+  "kind": "cidfonttype2",
+  "embedded": "subset",
+  "font_file": "times.ttf",
+  "font_index": 0,
+  "base_font": "ABCDEF+TimesNewRoman",
+  "pages": 1,
+  "lines": [
+   {
+    "index": 1,
+    "page": 1,
+    "text": "Invoice No: ABC-123",
+    "size": 14
+   },
+   {
+    "index": 2,
+    "page": 1,
+    "text": "Total amount payable",
+    "size": 10.5
+   }
+  ],
+  "edits": [
+   {
+    "page": 1,
+    "line": 1,
+    "new_text": "Ref: xyz-987",
+    "case": "tier2_system",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "font"
+   },
+   {
+    "page": 1,
+    "line": 2,
+    "new_text": "Shipment XYZ",
+    "case": "tier2_system",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "font"
+   }
+  ],
+  "note": "",
+  "warnings": [],
+  "bytes": 22969,
+  "committed": true,
+  "path": "samples\\en-times-tier2-system.pdf"
+ },
+ {
+  "name": "en-timesbd-tier1",
+  "lang": "en",
+  "kind": "cidfonttype0",
+  "embedded": "subset",
+  "font_file": "timesbd.ttf",
+  "font_index": 0,
+  "base_font": "ABCDEF+TimesNewRoman-Bold",
+  "pages": 1,
+  "lines": [
+   {
+    "index": 1,
+    "page": 1,
+    "text": "Invoice No: ABC-123",
+    "size": 14
+   },
+   {
+    "index": 2,
+    "page": 1,
+    "text": "Total amount payable",
+    "size": 10.5
+   }
+  ],
+  "edits": [
+   {
+    "page": 1,
+    "line": 1,
+    "new_text": "oice No: ABC-123Inv",
+    "case": "tier1",
+    "expected_tier": 1,
+    "expected_changed": false,
+    "variant": "none"
+   },
+   {
+    "page": 1,
+    "line": 2,
+    "new_text": "al amount payableTot",
+    "case": "tier1",
+    "expected_tier": 1,
+    "expected_changed": false,
+    "variant": "none"
+   }
+  ],
+  "note": "",
+  "warnings": [],
+  "bytes": 18253,
+  "committed": true,
+  "path": "samples\\en-timesbd-tier1.pdf"
+ },
+ {
+  "name": "en-arial-tier2-system",
+  "lang": "en",
+  "kind": "simple",
+  "embedded": "subset",
+  "font_file": "arial.ttf",
+  "font_index": 0,
+  "base_font": "ABCDEF+Arial",
+  "pages": 2,
+  "lines": [
+   {
+    "index": 1,
+    "page": 1,
+    "text": "Invoice No: ABC-123",
+    "size": 14
+   },
+   {
+    "index": 2,
+    "page": 1,
+    "text": "Total amount payable",
+    "size": 10.5
+   }
+  ],
+  "edits": [
+   {
+    "page": 1,
+    "line": 1,
+    "new_text": "Ref: xyz-987",
+    "case": "tier2_system",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "font"
+   },
+   {
+    "page": 1,
+    "line": 2,
+    "new_text": "Shipment XYZ",
+    "case": "tier2_system",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "font"
+   }
+  ],
+  "note": "",
+  "warnings": [],
+  "bytes": 19009,
+  "committed": true,
+  "path": "samples\\en-arial-tier2-system.pdf"
+ },
+ {
+  "name": "en-arialbd-tier2-embed",
+  "lang": "en",
+  "kind": "cidfonttype2",
+  "embedded": "full",
+  "font_file": "arialbd.ttf",
+  "font_index": 0,
+  "base_font": "Arial-Bold",
+  "pages": 1,
+  "lines": [
+   {
+    "index": 1,
+    "page": 1,
+    "text": "Invoice No: ABC-123",
+    "size": 14
+   },
+   {
+    "index": 2,
+    "page": 1,
+    "text": "Total amount payable",
+    "size": 10.5
+   }
+  ],
+  "edits": [
+   {
+    "page": 1,
+    "line": 1,
+    "new_text": "Invoice No: xyz-987",
+    "case": "tier2_embed",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "glyphs"
+   },
+   {
+    "page": 1,
+    "line": 2,
+    "new_text": "Total XYZ payable",
+    "case": "tier2_embed",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "glyphs"
+   }
+  ],
+  "note": "",
+  "warnings": [],
+  "bytes": 552002,
+  "committed": true,
+  "path": "samples\\en-arialbd-tier2-embed.pdf"
+ },
+ {
+  "name": "en-calibri-tier2-system",
+  "lang": "en",
+  "kind": "cidfonttype0",
+  "embedded": "none",
+  "font_file": "calibri.ttf",
+  "font_index": 0,
+  "base_font": "Calibri",
+  "pages": 1,
+  "lines": [
+   {
+    "index": 1,
+    "page": 1,
+    "text": "Invoice No: ABC-123",
+    "size": 14
+   },
+   {
+    "index": 2,
+    "page": 1,
+    "text": "Total amount payable",
+    "size": 10.5
+   }
+  ],
+  "edits": [
+   {
+    "page": 1,
+    "line": 1,
+    "new_text": "Ref: xyz-987",
+    "case": "tier2_system",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "font"
+   },
+   {
+    "page": 1,
+    "line": 2,
+    "new_text": "Shipment XYZ",
+    "case": "tier2_system",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "font"
+   }
+  ],
+  "note": "",
+  "warnings": [],
+  "bytes": 35285,
+  "committed": true,
+  "path": "samples\\en-calibri-tier2-system.pdf"
+ },
+ {
+  "name": "en-calibrib-tier2-system",
+  "lang": "en",
+  "kind": "cidfonttype2",
+  "embedded": "subset",
+  "font_file": "calibrib.ttf",
+  "font_index": 0,
+  "base_font": "ABCDEF+Calibri-Bold",
+  "pages": 1,
+  "lines": [
+   {
+    "index": 1,
+    "page": 1,
+    "text": "Invoice No: ABC-123",
+    "size": 14
+   },
+   {
+    "index": 2,
+    "page": 1,
+    "text": "Total amount payable",
+    "size": 10.5
+   }
+  ],
+  "edits": [
+   {
+    "page": 1,
+    "line": 1,
+    "new_text": "Ref: xyz-987",
+    "case": "tier2_system",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "font"
+   },
+   {
+    "page": 1,
+    "line": 2,
+    "new_text": "Shipment XYZ",
+    "case": "tier2_system",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "font"
+   }
+  ],
+  "note": "",
+  "warnings": [],
+  "bytes": 12134,
+  "committed": true,
+  "path": "samples\\en-calibrib-tier2-system.pdf"
+ },
+ {
+  "name": "en-cour-tier1",
+  "lang": "en",
+  "kind": "cidfonttype0",
+  "embedded": "subset",
+  "font_file": "cour.ttf",
+  "font_index": 0,
+  "base_font": "ABCDEF+CourierNew",
+  "pages": 1,
+  "lines": [
+   {
+    "index": 1,
+    "page": 1,
+    "text": "Invoice No: ABC-123",
+    "size": 14
+   },
+   {
+    "index": 2,
+    "page": 1,
+    "text": "Total amount payable",
+    "size": 10.5
+   }
+  ],
+  "edits": [
+   {
+    "page": 1,
+    "line": 1,
+    "new_text": "oice No: ABC-123Inv",
+    "case": "tier1",
+    "expected_tier": 1,
+    "expected_changed": false,
+    "variant": "none"
+   },
+   {
+    "page": 1,
+    "line": 2,
+    "new_text": "al amount payableTot",
+    "case": "tier1",
+    "expected_tier": 1,
+    "expected_changed": false,
+    "variant": "none"
+   }
+  ],
+  "note": "",
+  "warnings": [],
+  "bytes": 15107,
+  "committed": true,
+  "path": "samples\\en-cour-tier1.pdf"
+ },
+ {
+  "name": "en-courbd-tier2-system",
+  "lang": "en",
+  "kind": "simple",
+  "embedded": "subset",
+  "font_file": "courbd.ttf",
+  "font_index": 0,
+  "base_font": "ABCDEF+CourierNew-Bold",
+  "pages": 1,
+  "lines": [
+   {
+    "index": 1,
+    "page": 1,
+    "text": "Invoice No: ABC-123",
+    "size": 14
+   },
+   {
+    "index": 2,
+    "page": 1,
+    "text": "Total amount payable",
+    "size": 10.5
+   }
+  ],
+  "edits": [
+   {
+    "page": 1,
+    "line": 1,
+    "new_text": "Ref: xyz-987",
+    "case": "tier2_system",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "font"
+   },
+   {
+    "page": 1,
+    "line": 2,
+    "new_text": "Shipment XYZ",
+    "case": "tier2_system",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "font"
+   }
+  ],
+  "note": "",
+  "warnings": [],
+  "bytes": 17895,
+  "committed": true,
+  "path": "samples\\en-courbd-tier2-system.pdf"
+ },
+ {
+  "name": "en-georgia-tier2-embed",
+  "lang": "en",
+  "kind": "cidfonttype2",
+  "embedded": "full",
+  "font_file": "georgia.ttf",
+  "font_index": 0,
+  "base_font": "Georgia",
+  "pages": 2,
+  "lines": [
+   {
+    "index": 1,
+    "page": 1,
+    "text": "Invoice No: ABC-123",
+    "size": 14
+   },
+   {
+    "index": 2,
+    "page": 1,
+    "text": "Total amount payable",
+    "size": 10.5
+   }
+  ],
+  "edits": [
+   {
+    "page": 1,
+    "line": 1,
+    "new_text": "Invoice No: xyz-987",
+    "case": "tier2_embed",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "glyphs"
+   },
+   {
+    "page": 1,
+    "line": 2,
+    "new_text": "Total XYZ payable",
+    "case": "tier2_embed",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "glyphs"
+   }
+  ],
+  "note": "",
+  "warnings": [],
+  "bytes": 142232,
+  "committed": true,
+  "path": "samples\\en-georgia-tier2-embed.pdf"
+ },
+ {
+  "name": "en-segoe-tier2-system",
+  "lang": "en",
+  "kind": "cidfonttype0",
+  "embedded": "none",
+  "font_file": "segoeui.ttf",
+  "font_index": 0,
+  "base_font": "SegoeUI",
+  "pages": 1,
+  "lines": [
+   {
+    "index": 1,
+    "page": 1,
+    "text": "Invoice No: ABC-123",
+    "size": 14
+   },
+   {
+    "index": 2,
+    "page": 1,
+    "text": "Total amount payable",
+    "size": 10.5
+   }
+  ],
+  "edits": [
+   {
+    "page": 1,
+    "line": 1,
+    "new_text": "Ref: xyz-987",
+    "case": "tier2_system",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "font"
+   },
+   {
+    "page": 1,
+    "line": 2,
+    "new_text": "Shipment XYZ",
+    "case": "tier2_system",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "font"
+   }
+  ],
+  "note": "",
+  "warnings": [],
+  "bytes": 36869,
+  "committed": true,
+  "path": "samples\\en-segoe-tier2-system.pdf"
+ },
+ {
+  "name": "en-seguibl-tier2-system",
+  "lang": "en",
+  "kind": "cidfonttype2",
+  "embedded": "subset",
+  "font_file": "seguibl.ttf",
+  "font_index": 0,
+  "base_font": "ABCDEF+SegoeUI-Black",
+  "pages": 1,
+  "lines": [
+   {
+    "index": 1,
+    "page": 1,
+    "text": "Invoice No: ABC-123",
+    "size": 14
+   },
+   {
+    "index": 2,
+    "page": 1,
+    "text": "Total amount payable",
+    "size": 10.5
+   }
+  ],
+  "edits": [
+   {
+    "page": 1,
+    "line": 1,
+    "new_text": "Ref: xyz-987",
+    "case": "tier2_system",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "font"
+   },
+   {
+    "page": 1,
+    "line": 2,
+    "new_text": "Shipment XYZ",
+    "case": "tier2_system",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "font"
+   }
+  ],
+  "note": "",
+  "warnings": [],
+  "bytes": 7696,
+  "committed": true,
+  "path": "samples\\en-seguibl-tier2-system.pdf"
+ },
+ {
+  "name": "en-cambria-tier1",
+  "lang": "en",
+  "kind": "cidfonttype0",
+  "embedded": "subset",
+  "font_file": "cambriab.ttf",
+  "font_index": 0,
+  "base_font": "ABCDEF+Cambria-Bold",
+  "pages": 1,
+  "lines": [
+   {
+    "index": 1,
+    "page": 1,
+    "text": "Invoice No: ABC-123",
+    "size": 14
+   },
+   {
+    "index": 2,
+    "page": 1,
+    "text": "Total amount payable",
+    "size": 10.5
+   }
+  ],
+  "edits": [
+   {
+    "page": 1,
+    "line": 1,
+    "new_text": "oice No: ABC-123Inv",
+    "case": "tier1",
+    "expected_tier": 1,
+    "expected_changed": false,
+    "variant": "none"
+   },
+   {
+    "page": 1,
+    "line": 2,
+    "new_text": "al amount payableTot",
+    "case": "tier1",
+    "expected_tier": 1,
+    "expected_changed": false,
+    "variant": "none"
+   }
+  ],
+  "note": "",
+  "warnings": [],
+  "bytes": 10091,
+  "committed": true,
+  "path": "samples\\en-cambria-tier1.pdf"
+ },
+ {
+  "name": "en-constan-tier2-system",
+  "lang": "en",
+  "kind": "simple",
+  "embedded": "subset",
+  "font_file": "constan.ttf",
+  "font_index": 0,
+  "base_font": "ABCDEF+Constantia",
+  "pages": 1,
+  "lines": [
+   {
+    "index": 1,
+    "page": 1,
+    "text": "Invoice No: ABC-123",
+    "size": 14
+   },
+   {
+    "index": 2,
+    "page": 1,
+    "text": "Total amount payable",
+    "size": 10.5
+   }
+  ],
+  "edits": [
+   {
+    "page": 1,
+    "line": 1,
+    "new_text": "Ref: xyz-987",
+    "case": "tier2_system",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "font"
+   },
+   {
+    "page": 1,
+    "line": 2,
+    "new_text": "Shipment XYZ",
+    "case": "tier2_system",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "font"
+   }
+  ],
+  "note": "",
+  "warnings": [],
+  "bytes": 7967,
+  "committed": true,
+  "path": "samples\\en-constan-tier2-system.pdf"
+ },
+ {
+  "name": "en-trebuc-tier2-embed",
+  "lang": "en",
+  "kind": "cidfonttype2",
+  "embedded": "full",
+  "font_file": "trebuc.ttf",
+  "font_index": 0,
+  "base_font": "TrebuchetMS",
+  "pages": 1,
+  "lines": [
+   {
+    "index": 1,
+    "page": 1,
+    "text": "Invoice No: ABC-123",
+    "size": 14
+   },
+   {
+    "index": 2,
+    "page": 1,
+    "text": "Total amount payable",
+    "size": 10.5
+   }
+  ],
+  "edits": [
+   {
+    "page": 1,
+    "line": 1,
+    "new_text": "Invoice No: xyz-987",
+    "case": "tier2_embed",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "glyphs"
+   },
+   {
+    "page": 1,
+    "line": 2,
+    "new_text": "Total XYZ payable",
+    "case": "tier2_embed",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "glyphs"
+   }
+  ],
+  "note": "",
+  "warnings": [],
+  "bytes": 150797,
+  "committed": true,
+  "path": "samples\\en-trebuc-tier2-embed.pdf"
+ },
+ {
+  "name": "en-verdana-tier2-system",
+  "lang": "en",
+  "kind": "cidfonttype0",
+  "embedded": "none",
+  "font_file": "verdana.ttf",
+  "font_index": 0,
+  "base_font": "Verdana",
+  "pages": 2,
+  "lines": [
+   {
+    "index": 1,
+    "page": 1,
+    "text": "Invoice No: ABC-123",
+    "size": 14
+   },
+   {
+    "index": 2,
+    "page": 1,
+    "text": "Total amount payable",
+    "size": 10.5
+   }
+  ],
+  "edits": [
+   {
+    "page": 1,
+    "line": 1,
+    "new_text": "Ref: xyz-987",
+    "case": "tier2_system",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "font"
+   },
+   {
+    "page": 1,
+    "line": 2,
+    "new_text": "Shipment XYZ",
+    "case": "tier2_system",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "font"
+   }
+  ],
+  "note": "",
+  "warnings": [],
+  "bytes": 9811,
+  "committed": true,
+  "path": "samples\\en-verdana-tier2-system.pdf"
+ },
+ {
+  "name": "en-tahoma-tier2-system",
+  "lang": "en",
+  "kind": "cidfonttype2",
+  "embedded": "subset",
+  "font_file": "tahoma.ttf",
+  "font_index": 0,
+  "base_font": "ABCDEF+Tahoma",
+  "pages": 1,
+  "lines": [
+   {
+    "index": 1,
+    "page": 1,
+    "text": "Invoice No: ABC-123",
+    "size": 14
+   },
+   {
+    "index": 2,
+    "page": 1,
+    "text": "Total amount payable",
+    "size": 10.5
+   }
+  ],
+  "edits": [
+   {
+    "page": 1,
+    "line": 1,
+    "new_text": "Ref: xyz-987",
+    "case": "tier2_system",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "font"
+   },
+   {
+    "page": 1,
+    "line": 2,
+    "new_text": "Shipment XYZ",
+    "case": "tier2_system",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "font"
+   }
+  ],
+  "note": "",
+  "warnings": [],
+  "bytes": 14839,
+  "committed": true,
+  "path": "samples\\en-tahoma-tier2-system.pdf"
+ },
+ {
+  "name": "en-comic-tier1",
+  "lang": "en",
+  "kind": "cidfonttype0",
+  "embedded": "subset",
+  "font_file": "comic.ttf",
+  "font_index": 0,
+  "base_font": "ABCDEF+ComicSansMS",
+  "pages": 1,
+  "lines": [
+   {
+    "index": 1,
+    "page": 1,
+    "text": "Invoice No: ABC-123",
+    "size": 14
+   },
+   {
+    "index": 2,
+    "page": 1,
+    "text": "Total amount payable",
+    "size": 10.5
+   }
+  ],
+  "edits": [
+   {
+    "page": 1,
+    "line": 1,
+    "new_text": "oice No: ABC-123Inv",
+    "case": "tier1",
+    "expected_tier": 1,
+    "expected_changed": false,
+    "variant": "none"
+   },
+   {
+    "page": 1,
+    "line": 2,
+    "new_text": "al amount payableTot",
+    "case": "tier1",
+    "expected_tier": 1,
+    "expected_changed": false,
+    "variant": "none"
+   }
+  ],
+  "note": "",
+  "warnings": [],
+  "bytes": 12885,
+  "committed": true,
+  "path": "samples\\en-comic-tier1.pdf"
+ },
+ {
+  "name": "en-pala-tier2-system",
+  "lang": "en",
+  "kind": "simple",
+  "embedded": "subset",
+  "font_file": "pala.ttf",
+  "font_index": 0,
+  "base_font": "ABCDEF+PalatinoLinotype",
+  "pages": 1,
+  "lines": [
+   {
+    "index": 1,
+    "page": 1,
+    "text": "Invoice No: ABC-123",
+    "size": 14
+   },
+   {
+    "index": 2,
+    "page": 1,
+    "text": "Total amount payable",
+    "size": 10.5
+   }
+  ],
+  "edits": [
+   {
+    "page": 1,
+    "line": 1,
+    "new_text": "Ref: xyz-987",
+    "case": "tier2_system",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "font"
+   },
+   {
+    "page": 1,
+    "line": 2,
+    "new_text": "Shipment XYZ",
+    "case": "tier2_system",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "font"
+   }
+  ],
+  "note": "",
+  "warnings": [],
+  "bytes": 23890,
+  "committed": true,
+  "path": "samples\\en-pala-tier2-system.pdf"
+ },
+ {
+  "name": "en-candara-tier2-embed",
+  "lang": "en",
+  "kind": "cidfonttype2",
+  "embedded": "full",
+  "font_file": "candara.ttf",
+  "font_index": 0,
+  "base_font": "Candara",
+  "pages": 1,
+  "lines": [
+   {
+    "index": 1,
+    "page": 1,
+    "text": "Invoice No: ABC-123",
+    "size": 14
+   },
+   {
+    "index": 2,
+    "page": 1,
+    "text": "Total amount payable",
+    "size": 10.5
+   }
+  ],
+  "edits": [
+   {
+    "page": 1,
+    "line": 1,
+    "new_text": "Invoice No: xyz-987",
+    "case": "tier2_embed",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "glyphs"
+   },
+   {
+    "page": 1,
+    "line": 2,
+    "new_text": "Total XYZ payable",
+    "case": "tier2_embed",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "glyphs"
+   }
+  ],
+  "note": "",
+  "warnings": [],
+  "bytes": 139284,
+  "committed": true,
+  "path": "samples\\en-candara-tier2-embed.pdf"
+ },
+ {
+  "name": "en-consola-tier2-system",
+  "lang": "en",
+  "kind": "cidfonttype0",
+  "embedded": "none",
+  "font_file": "consola.ttf",
+  "font_index": 0,
+  "base_font": "Consolas",
+  "pages": 1,
+  "lines": [
+   {
+    "index": 1,
+    "page": 1,
+    "text": "Invoice No: ABC-123",
+    "size": 14
+   },
+   {
+    "index": 2,
+    "page": 1,
+    "text": "Total amount payable",
+    "size": 10.5
+   }
+  ],
+  "edits": [
+   {
+    "page": 1,
+    "line": 1,
+    "new_text": "Ref: xyz-987",
+    "case": "tier2_system",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "font"
+   },
+   {
+    "page": 1,
+    "line": 2,
+    "new_text": "Shipment XYZ",
+    "case": "tier2_system",
+    "expected_tier": 2,
+    "expected_changed": true,
+    "variant": "font"
+   }
+  ],
+  "note": "",
+  "warnings": [],
+  "bytes": 24040,
+  "committed": true,
+  "path": "samples\\en-consola-tier2-system.pdf"
+ }
+]

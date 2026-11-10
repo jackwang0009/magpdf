@@ -16,6 +16,8 @@ pub mod raw;
 
 mod bitmap;
 mod document;
+/// 编辑相关（P0 V08）：文字对象读写、新建字体与文字对象、字形度量与路径对象。
+pub mod edit;
 mod error;
 mod font;
 mod geom;
@@ -27,6 +29,7 @@ mod tile;
 
 pub use bitmap::Bitmap;
 pub use document::{Document, SaveFlags};
+pub use edit::LoadedFont;
 pub use error::{Error, LoadError, Result};
 pub use font::Font;
 pub use geom::{Matrix, Rect, Rgba};

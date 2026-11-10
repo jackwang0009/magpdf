@@ -25,6 +25,11 @@ impl std::fmt::Debug for Font<'_> {
 }
 
 impl Font<'_> {
+    /// 句柄（crate 内使用）。
+    pub(crate) fn raw_font_handle(&self) -> raw::FPDF_FONT {
+        self.handle
+    }
+
     /// # Safety
     /// `handle` 必须是 `FPDFTextObj_GetFont` 返回的非空句柄，且其所属文字对象仍然存活。
     pub(crate) unsafe fn from_raw(handle: raw::FPDF_FONT) -> Self {
@@ -79,6 +84,28 @@ impl Font<'_> {
         // SAFETY: handle 有效；buffer 为 NULL、buflen 为 0 时只写 out_buflen。
         let ok = unsafe { raw::FPDFFont_GetFontData(self.handle, ptr::null_mut(), 0, &mut len) };
         (ok != 0).then_some(len)
+    }
+
+    /// 字体程序的字节：嵌入字体为其字体文件，未嵌入字体为 PDFium 所选替代字体。
+    /// Type3 没有字体程序，返回 None。
+    pub fn font_data(&self) -> Option<Vec<u8>> {
+        let mut len: usize = 0;
+        // SAFETY: handle 有效；buffer 为 NULL、buflen 为 0 时只写 out_buflen。
+        let ok = unsafe { raw::FPDFFont_GetFontData(self.handle, ptr::null_mut(), 0, &mut len) };
+        if ok == 0 || len == 0 {
+            return None;
+        }
+        let mut buf = vec![0u8; len];
+        let mut out = 0usize;
+        // SAFETY: buf 的长度至少是上一次查询到的字节数。
+        let ok = unsafe {
+            raw::FPDFFont_GetFontData(self.handle, buf.as_mut_ptr(), buf.len(), &mut out)
+        };
+        if ok == 0 {
+            return None;
+        }
+        buf.truncate(out);
+        Some(buf)
     }
 
     /// 是否 Type3 字体。公共 API 没有直接的字体类型查询；PDFium 的 `CPDF_Font::IsEmbedded()`
