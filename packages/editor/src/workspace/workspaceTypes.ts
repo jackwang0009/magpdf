@@ -40,6 +40,9 @@ export const DOC_PANEL_PREFIX = 'doc:';
 
 export const COMPONENT_PANEL_WIDTH = 240;
 export const RIGHT_DOCK_WIDTH = 280;
+/** 两侧（组件面板、右侧停靠组）宽度的上下限：拖分隔条不能超出，旧保存值超出时下次加载自动收进范围 */
+export const SIDE_PANEL_MIN_WIDTH = 200;
+export const SIDE_PANEL_MAX_WIDTH = 320;
 export const ICON_STRIP_WIDTH = 32;
 
 export type ComponentPanelMode = 'expanded' | 'collapsed' | 'hidden';
@@ -51,7 +54,7 @@ export interface SideWidths {
 
 /** 可序列化的工作区：dockview 布局（不含文档面板）+ 我们自己的几项状态 */
 export interface WorkspaceLayout {
-  readonly version: 1;
+  readonly version: 2;
   readonly id: WorkspaceId;
   readonly dockview: SerializedDockview;
   readonly componentPanelMode: ComponentPanelMode;

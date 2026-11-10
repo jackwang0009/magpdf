@@ -63,7 +63,6 @@ export const metrics = {
   documentTabsHeight: 28,
   rulerSize: 20,
   statusBarHeight: 22,
-  toolbarWidth: 40,
   dockPanelWidth: 280,
   collapsedDockWidth: 32,
   componentPanelWidth: 240,

@@ -29,6 +29,7 @@ import { OptionsBar } from './OptionsBar';
 import { ShellContext } from './shellContext';
 import type { ShellCommands } from './shellContext';
 import { StatusBar } from './StatusBar';
+import { Toolbar, ToolbarSwatches } from './Toolbar';
 import { Workbench } from './Workbench';
 import { builtinCounts, documentPreset } from './presets';
 
@@ -55,7 +56,8 @@ function fallbackSize(): { width: number; height: number } {
 
 /**
  * 编辑器外壳（方案 8.2）：
- * 菜单栏 28 / 选项栏 36 / 工作台（工具栏 40 + 组件面板 240 + 文档标签 28 + 画布 + 右侧停靠 280）/ 状态栏 22。
+ * 菜单栏 28 / 顶部工具栏与选项栏 36（同一行：7 个工具横排 + 工具选项，填充/描边色块在行尾）/ 工作台（组件面板 240 + 文档标签 28 + 画布 + 右侧停靠 280）/ 状态栏 22。
+ * 工具栏是外壳的普通横条，不再是 dockview 浮动面板。
  */
 export function EditorShell({
   store = editorStore,
@@ -337,7 +339,11 @@ export function EditorShell({
         ref={rootRef}
       >
         <MenuBar workspace={workspace} showRulers={showRulers} showFrameStats={showFrameStats} />
-        <OptionsBar workspace={workspace} />
+        <div className="mg-topbar">
+          <Toolbar />
+          <OptionsBar workspace={workspace} />
+          <ToolbarSwatches />
+        </div>
         <div className={`mg-body${componentMode === 'hidden' ? ' mg-hide-components' : ''}`}>
           <Workbench
             store={store}

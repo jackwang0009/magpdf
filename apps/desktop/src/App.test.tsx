@@ -50,6 +50,12 @@ describe('App', () => {
     const toolbar = container.querySelector('.mg-toolbar');
     expect(toolbar).not.toBeNull();
     expect(toolbar!.querySelectorAll('.mg-tool')).toHaveLength(7);
+    // 工具栏横排在顶部那一行里，不在工作台（dockview）里；填充/描边色块在行尾
+    const topbar = container.querySelector('.mg-topbar');
+    expect(topbar).not.toBeNull();
+    expect(topbar!.contains(toolbar)).toBe(true);
+    expect(topbar!.querySelector('.mg-swatches')).not.toBeNull();
+    expect(container.querySelector('.mg-workbench .mg-toolbar')).toBeNull();
     expect(container.querySelector('.mg-menubar')?.textContent).toContain('MagPDF');
     expect(container.querySelectorAll('.mg-menu')).toHaveLength(8);
     expect(container.querySelector('.mg-options')).not.toBeNull();

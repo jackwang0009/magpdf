@@ -13,7 +13,7 @@ function mm(value: number): string {
 }
 
 /**
- * 选项栏 36px，内容随工具变化（方案 8.2）。
+ * 选项栏：与工具栏同一行（36px，方案 8.2），内容随工具变化。
  * 选择工具显示对齐、X/Y/W/H（mm）；抓手/缩放显示缩放命令；其余工具给占位控件。
  */
 export function OptionsBar({ workspace }: { readonly workspace: WorkspaceId }) {

@@ -5,8 +5,10 @@ import { toolTooltip, v1Tools } from '../tools/tools';
 import type { ToolId } from '../tools/tools';
 
 /**
- * 左侧单列工具栏 40px：v1.0 的 7 个工具 + 填充/描边色块（方案 8.2）。
- * 作为 dockview 的浮动面板挂在网格左侧，不参与网格尺寸分配。
+ * 顶部横排工具栏（方案 8.2）：v1.0 的 7 个工具横排在菜单栏下方、
+ * 与选项栏同一行（36px）里，工具之间用竖分隔线分组。
+ * 是外壳的普通 flex 行，不再是 dockview 的浮动面板，不会盖住组件面板或画布。
+ * 填充/描边色块不在这里，见下面的 ToolbarSwatches，放在那一行的行尾。
  */
 export function Toolbar({ onPick }: { readonly onPick?: (tool: ToolId) => void }) {
   const activeTool = useEditorStore((s) => s.activeTool);
@@ -33,10 +35,16 @@ export function Toolbar({ onPick }: { readonly onPick?: (tool: ToolId) => void }
           {spec.separatorAfter ? <VerticalSeparator /> : null}
         </div>
       ))}
-      <div className="mg-swatches" title={t.toolbar.fillStroke}>
-        <span className="mg-swatch mg-swatch-fill" aria-hidden />
-        <span className="mg-swatch mg-swatch-stroke" aria-hidden />
-      </div>
+    </div>
+  );
+}
+
+/** 填充/描边色块：放在顶部那一行的行尾（纯展示，P0 无取色面板）。 */
+export function ToolbarSwatches() {
+  return (
+    <div className="mg-swatches" title={t.toolbar.fillStroke}>
+      <span className="mg-swatch mg-swatch-fill" aria-hidden />
+      <span className="mg-swatch mg-swatch-stroke" aria-hidden />
     </div>
   );
 }

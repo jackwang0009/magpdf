@@ -139,6 +139,32 @@
   background: var(--mg-accent) !important;
 }
 
+/* ---- 顶部工具栏与选项栏（同一行 36px） ---- */
+.mg-topbar {
+  height: var(--mg-options-bar-height);
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  background: var(--mg-panel);
+  border-bottom: 1px solid var(--mg-separator);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.mg-topbar .mg-options {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  background: transparent;
+  border-bottom: none;
+}
+.mg-topbar .mg-swatches {
+  flex: none;
+  margin: 0;
+}
+
 /* ---- 选项栏 ---- */
 .mg-options {
   height: var(--mg-options-bar-height);
@@ -221,31 +247,22 @@
   font-family: var(--mg-mono-font-family);
 }
 
-/* ---- 工具栏（浮动面板，40px 单列） ---- */
+/* ---- 工具栏（顶部横排，在 .mg-topbar 行内） ---- */
 .mg-toolbar {
-  width: var(--mg-toolbar-width);
-  height: 100%;
+  flex: none;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
-  padding: 4px 0;
   gap: 2px;
-  background: var(--mg-shell);
-  border: 1px solid var(--mg-line);
-  border-radius: 4px;
-  box-shadow: 0 2px 8px var(--mg-page-outline);
+  height: 28px;
+  background: transparent;
   overflow: hidden;
 }
 .mg-tool-slot {
   position: relative;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
-}
-.mg-tool-slot .mg-vsep {
-  margin: 3px 0;
-  width: 24px;
-  height: 1px;
 }
 .mg-tool {
   width: 32px;
@@ -278,7 +295,7 @@
   position: relative;
   width: 28px;
   height: 28px;
-  margin-top: 8px;
+  margin: 0;
 }
 .mg-swatch {
   position: absolute;

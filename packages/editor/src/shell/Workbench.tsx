@@ -14,14 +14,12 @@ import { PagesPanel } from './panels/PagesPanel';
 import { CollapsedStrip, HistoryPanel, PlaceholderPanel } from './panels/PlaceholderPanels';
 import { useShellCommands } from './shellContext';
 import { PropertiesPanel } from './panels/PropertiesPanel';
-import { Toolbar } from './Toolbar';
 import {
   applyWorkspace,
   captureWorkspace,
   COMPONENTS_GROUP,
   DOC_PANEL_PREFIX,
   MAGPDF_THEME,
-  TOOLBAR_PANEL,
 } from './workbenchState';
 import type { PanelId, WorkspaceLayout } from '../workspace/workspaceTypes';
 
@@ -53,7 +51,6 @@ const COMPONENTS: Record<string, React.FunctionComponent<IDockviewPanelProps>> =
   info: () => <Placeholder name={t.panels.info} />,
   strip: ComponentStrip,
   'right-strip': RightStrip,
-  toolbar: () => <Toolbar />,
 };
 
 /** 右侧图标条：点图标把面板浮到右侧（命令由 EditorShell 提供） */
@@ -123,15 +120,6 @@ export function Workbench({ store, workspace, onLayoutChange, onReady }: Workben
         if (panel.id.startsWith(DOC_PANEL_PREFIX)) api.removePanel(panel);
       }
       syncDocuments(api);
-      const toolbar = api.getPanel(TOOLBAR_PANEL);
-      if (toolbar) {
-        api.addFloatingGroup(toolbar, {
-          x: 0,
-          y: 40,
-          width: 40,
-          height: Math.min(560, height - 120),
-        });
-      }
     },
     [syncDocuments],
   );

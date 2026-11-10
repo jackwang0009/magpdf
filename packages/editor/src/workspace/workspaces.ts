@@ -8,6 +8,8 @@ import {
   ICON_STRIP_WIDTH,
   PANEL_IDS,
   RIGHT_DOCK_WIDTH,
+  SIDE_PANEL_MAX_WIDTH,
+  SIDE_PANEL_MIN_WIDTH,
   STRIP_GROUP_ID,
   STRIP_PANEL_ID,
   isPanelId,
@@ -75,6 +77,12 @@ function panelStates(ids: readonly PanelId[]): SerializedDockview['panels'] {
   return panels;
 }
 
+/** 两侧组的宽度约束：组件面板展开时和右侧停靠组共用（默认左 240px、右 280px，都在 200–320px 内） */
+const SIDE_PANEL_CONSTRAINTS: NonNullable<WorkspaceGroupState['constraints']> = {
+  minimumWidth: SIDE_PANEL_MIN_WIDTH,
+  maximumWidth: SIDE_PANEL_MAX_WIDTH,
+};
+
 /** 组件面板组：展开 240px；折叠成 32px 图标条（隐藏标签头、不接受拖放） */
 export function componentsLeaf(mode: 'expanded' | 'collapsed', width: number): WorkspaceGridNode {
   if (mode === 'collapsed') {
@@ -85,7 +93,7 @@ export function componentsLeaf(mode: 'expanded' | 'collapsed', width: number): W
     });
   }
   return leaf(COMPONENTS_GROUP_ID, ['components'], width, {
-    constraints: { minimumWidth: 200, maximumWidth: 400 },
+    constraints: SIDE_PANEL_CONSTRAINTS,
   });
 }
 
@@ -124,8 +132,10 @@ function freightWorkspace(size: WorkspaceSize): WorkspaceLayout {
           leaf(DOCUMENTS_GROUP_ID, [], center),
           branch(
             [
-              leaf('right-top', rightTop, topHeight),
-              leaf('right-bottom', rightBottom, size.height - topHeight),
+              leaf('right-top', rightTop, topHeight, { constraints: SIDE_PANEL_CONSTRAINTS }),
+              leaf('right-bottom', rightBottom, size.height - topHeight, {
+                constraints: SIDE_PANEL_CONSTRAINTS,
+              }),
             ],
             widths.rightDock,
           ),
@@ -140,7 +150,7 @@ function freightWorkspace(size: WorkspaceSize): WorkspaceLayout {
     activeGroup: DOCUMENTS_GROUP_ID,
   };
   return {
-    version: 1,
+    version: 2,
     id: 'freight',
     dockview,
     componentPanelMode: 'expanded',
@@ -160,7 +170,7 @@ function basicWorkspace(size: WorkspaceSize): WorkspaceLayout {
         [
           componentsLeaf('collapsed', widths.components),
           leaf(DOCUMENTS_GROUP_ID, [], center),
-          leaf('right', right, widths.rightDock),
+          leaf('right', right, widths.rightDock, { constraints: SIDE_PANEL_CONSTRAINTS }),
         ],
         size.width,
       ),
@@ -172,7 +182,7 @@ function basicWorkspace(size: WorkspaceSize): WorkspaceLayout {
     activeGroup: DOCUMENTS_GROUP_ID,
   };
   return {
-    version: 1,
+    version: 2,
     id: 'basic',
     dockview,
     componentPanelMode: 'collapsed',
@@ -226,6 +236,155 @@ export function stripDocumentPanels(layout: SerializedDockview): SerializedDockv
   return result;
 }
 
+/**
+ * 即使视图为空也保留的结构组 id：文档组在内置布局里本来就是空的（文档面板由
+ * Workbench 的同步逻辑随后补上）；组件组和右侧组是外壳结构。图标条组（'strip'）
+ * 目前没有内置叶节点，列在这里是防止以后内置布局里出现它时被误删。
+ */
+const STRUCTURAL_GROUP_IDS: readonly string[] = [
+  COMPONENTS_GROUP_ID,
+  DOCUMENTS_GROUP_ID,
+  STRIP_GROUP_ID,
+  'right-top',
+  'right-bottom',
+  'right',
+];
+
+function collectLeafIds(root: WorkspaceGridNode, into: Set<string>): void {
+  if (root.type === 'branch') {
+    for (const child of root.data as WorkspaceGridNode[]) collectLeafIds(child, into);
+    return;
+  }
+  into.add((root.data as WorkspaceGroupState).id);
+}
+
+/**
+ * 清理序列化的 dockview 布局：去掉文档面板，并丢弃变空的非结构组。
+ *
+ * 背景：旧的 captureWorkspace() 只从面板表和浮动组里去掉文档面板，网格叶节
+ * 点的视图里还留着 `doc:*`；dockview 8.8.3 在 fromJSON 时会跳过面板表里没
+ * 有的视图、把组留空，而 closeEmptyGroups={false} 时空组不自动消失，只显示
+ * “没有打开的文档”水印——旧保存值里的空组会在每次刷新后复活。右侧图标条
+ * 也是同类问题：ensureStrip() 每次加载都在 components 组右侧新建一组放图
+ * 标条，上一轮的组在保存值里只剩 `['strip']` 视图，面板表里又没有它，下次
+ * 加载就多一个空组。
+ *
+ * 清理分三步：先用 stripDocumentPanels() 去掉文档面板；再把每个叶节点的
+ * 视图过滤到面板表里还存在的（面板表里没有的视图在 fromJSON 时同样会被
+ * 跳过）；最后删掉视图已空的非结构叶节点（变空的分支一并删掉，根分支除外）。
+ * 结构组即使视图为空也保留。activeGroup 指向被删的组时改指文档组，文档
+ * 组也不存在时删掉。输入不改动，返回新对象。
+ */
+export function cleanDockviewLayout(layout: SerializedDockview): SerializedDockview {
+  const stripped = stripDocumentPanels(layout);
+  const panels = stripped.panels;
+  const cleanLeaf = (data: WorkspaceGroupState): WorkspaceGroupState => {
+    const views = data.views.filter((v) => panels[v]);
+    const next: WorkspaceGroupState = { ...data, views };
+    if (next.activeView && !views.includes(next.activeView)) {
+      if (views.length > 0) next.activeView = views[0]!;
+      else delete next.activeView;
+    }
+    return next;
+  };
+  const prune = (node: WorkspaceGridNode): WorkspaceGridNode | null => {
+    if (node.type === 'branch') {
+      const children = (node.data as WorkspaceGridNode[])
+        .map(prune)
+        .filter((child): child is WorkspaceGridNode => child !== null);
+      return children.length > 0 ? { ...node, data: children } : null;
+    }
+    const data = cleanLeaf(node.data as WorkspaceGroupState);
+    if (data.views.length === 0 && !STRUCTURAL_GROUP_IDS.includes(data.id)) return null;
+    return { ...node, data };
+  };
+  const root = stripped.grid.root as unknown as WorkspaceGridNode;
+  const pruned = prune(root);
+  // 极端情况：所有叶节点都被删掉时保留原网格，不造出一个空根分支
+  const nextRoot = pruned ?? root;
+  const result: SerializedDockview = {
+    ...stripped,
+    grid: { ...stripped.grid, root: nextRoot as unknown as SerializedDockview['grid']['root'] },
+  };
+  if (stripped.floatingGroups) {
+    result.floatingGroups = stripped.floatingGroups.filter(
+      (group) => (group.data?.views ?? []).length > 0,
+    );
+  }
+  const remaining = new Set<string>();
+  collectLeafIds(nextRoot, remaining);
+  if (result.activeGroup && !remaining.has(result.activeGroup)) {
+    if (remaining.has(DOCUMENTS_GROUP_ID)) result.activeGroup = DOCUMENTS_GROUP_ID;
+    else delete result.activeGroup;
+  }
+  return result;
+}
+
+/** 两侧组的 id：组件面板组和右侧停靠组（货代单证的右上/右下、基础的右侧组） */
+const SIDE_GROUP_IDS: readonly string[] = [
+  COMPONENTS_GROUP_ID,
+  'right-top',
+  'right-bottom',
+  'right',
+];
+
+function clampSideWidth(width: number): number {
+  return Math.min(SIDE_PANEL_MAX_WIDTH, Math.max(SIDE_PANEL_MIN_WIDTH, width));
+}
+
+function subtreeHasSideLeaf(node: WorkspaceGridNode): boolean {
+  if (node.type === 'branch') {
+    return (node.data as WorkspaceGridNode[]).some(subtreeHasSideLeaf);
+  }
+  return SIDE_GROUP_IDS.includes((node.data as WorkspaceGroupState).id);
+}
+
+/**
+ * 把两侧宽度收进 200–320px：给组件面板组和右侧停靠组写上宽度约束，横向尺寸超出范围的夹到范围内。
+ *
+ * 背景：右侧组之前没有宽度约束，拖分隔条能把它拉到 368px 甚至更宽，挤占画布；旧保存值里的
+ * 宽度下次加载也会原样恢复。内置布局的约束只管新布局，保存值要靠这里在 fromJSON 之前夹一次，
+ * 运行时再由 workbenchState.enforceSideWidths() 兜底。竖向尺寸（右上/右下两组的高度）不动；
+ * 折叠成 32px 图标条的组（locked: 'no-drop-target'）也不动。输入不改动，返回新对象。
+ */
+export function clampSideWidths(layout: SerializedDockview): SerializedDockview {
+  const visit = (
+    node: WorkspaceGridNode,
+    parentHorizontal: boolean,
+    isRoot: boolean,
+  ): WorkspaceGridNode => {
+    if (node.type === 'branch') {
+      // 子节点的 size 沿本分支的朝向度量：根分支的朝向就是网格的 orientation；
+      // 子分支的朝向与父分支相反，也就是与本节点 size 的度量轴相反
+      const childHorizontal = isRoot ? parentHorizontal : !parentHorizontal;
+      const children = (node.data as WorkspaceGridNode[]).map((child) =>
+        visit(child, childHorizontal, false),
+      );
+      // 横向分支里装着右侧组的分支（如货代单证的右上/右下容器），它的 size 就是右侧宽度
+      if (!isRoot && parentHorizontal && node.size !== undefined && subtreeHasSideLeaf(node)) {
+        return { ...node, data: children, size: clampSideWidth(node.size) };
+      }
+      return { ...node, data: children };
+    }
+    const data = node.data as WorkspaceGroupState;
+    if (!SIDE_GROUP_IDS.includes(data.id) || data.locked === 'no-drop-target') return node;
+    const next: WorkspaceGroupState = {
+      ...data,
+      constraints: { ...SIDE_PANEL_CONSTRAINTS },
+    };
+    if (!parentHorizontal || node.size === undefined) return { ...node, data: next };
+    return { ...node, data: next, size: clampSideWidth(node.size) };
+  };
+  const root = layout.grid.root as unknown as WorkspaceGridNode;
+  // 根网格的方向：没写时按横向算（两个内置工作区都是横向根网格）
+  const horizontal = layout.grid.orientation !== 'VERTICAL';
+  const nextRoot = visit(root, horizontal, true);
+  return {
+    ...layout,
+    grid: { ...layout.grid, root: nextRoot as unknown as SerializedDockview['grid']['root'] },
+  };
+}
+
 /** 布局里出现的全部面板 id（含浮动组） */
 export function panelsInLayout(layout: SerializedDockview): string[] {
   return Object.keys(layout.panels);
@@ -256,7 +415,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isWorkspaceLayout(value: unknown): value is WorkspaceLayout {
   if (!isRecord(value)) return false;
-  if (value.version !== 1) return false;
+  // 版本 2：工具栏已移到外壳顶部，不再是浮动面板；旧版 v1 保存值解析为无效，自动回落到内置布局
+  if (value.version !== 2) return false;
   if (!WORKSPACE_IDS.includes(value.id as WorkspaceId)) return false;
   if (!['expanded', 'collapsed', 'hidden'].includes(value.componentPanelMode as string))
     return false;
