@@ -29,6 +29,7 @@ mod text;
 pub use bitmap::Bitmap;
 pub use document::{Document, SaveFlags};
 pub use error::{Error, LoadError, Result};
+pub use edit::LoadedFont;
 pub use font::Font;
 pub use geom::{Matrix, Rect, Rgba};
 pub use library::Library;

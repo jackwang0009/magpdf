@@ -75,9 +75,7 @@ pub fn subset_face(
             codepoint
                 .entry(new)
                 .and_modify(|c: &mut char| {
-                    if *c > *ch {
-                        *c = *ch;
-                    }
+                    *c = crate::fontfile::preferred_codepoint(*c, *ch);
                 })
                 .or_insert(*ch);
         }

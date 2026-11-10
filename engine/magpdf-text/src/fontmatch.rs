@@ -111,6 +111,8 @@ pub struct Candidate {
     pub italic: bool,
     /// 字体文件里的 PS 名。
     pub name: String,
+    /// name 表家族名（如 "Times New Roman"），用于同名匹配。
+    pub family_name: String,
     /// 是否内置（`assets/fonts` 或 `MAGPDF_FONT_DIR`）。
     pub builtin: bool,
     /// OS/2 fsType；`None` 表示字体没有 OS/2 表。
@@ -203,6 +205,7 @@ impl FontLibrary {
                         weight,
                         italic,
                         name: face.postscript_name().to_owned(),
+                        family_name: face.family_name(),
                         builtin,
                         fs_type: face.fs_type(),
                     });

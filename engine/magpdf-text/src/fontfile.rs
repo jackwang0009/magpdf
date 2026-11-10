@@ -162,15 +162,15 @@ impl FontFace {
         let cmap = font.charmap();
         let mut best: Option<char> = None;
         for (code, g) in cmap.mappings() {
-            if g.to_u32() != u32::from(gid) || code < 0x20 {
+            if g.to_u32() != u32::from(gid) {
                 continue;
             }
             let Some(ch) = char::from_u32(code) else {
                 continue;
             };
             best = Some(match best {
-                Some(b) if b < ch => b,
-                _ => ch,
+                Some(prev) => preferred_codepoint(prev, ch),
+                None => ch,
             });
         }
         best
@@ -236,6 +236,36 @@ impl FontFace {
 }
 
 /// 字形覆盖检查的结果。
+
+/// 同一 GID 对应多个码点时，选提取 / ToUnicode 应使用的那个。
+///
+/// 优先 ASCII（空格保持 U+0020，避免被 NBSP 覆盖后 SetText 反查失败写成 NUL），
+/// 其次 CJK 统一汉字（避免康熙部首 U+2F45 盖住「方」U+65B9），不选控制字符。
+pub fn preferred_codepoint(a: char, b: char) -> char {
+    if unicode_rank(b) < unicode_rank(a) {
+        b
+    } else {
+        a
+    }
+}
+
+fn unicode_rank(ch: char) -> (u8, u32) {
+    let cp = ch as u32;
+    if cp < 0x20 || (0x7F..0xA0).contains(&cp) {
+        (5, cp)
+    } else if (0x20..=0x7E).contains(&cp) {
+        (0, cp)
+    } else if (0x4E00..=0x9FFF).contains(&cp) {
+        (1, cp)
+    } else if (0x3400..=0x4DBF).contains(&cp) || (0x20000..=0x2A6DF).contains(&cp) {
+        (2, cp)
+    } else if (0x2F00..=0x2FDF).contains(&cp) || (0xF900..=0xFAFF).contains(&cp) {
+        (4, cp)
+    } else {
+        (3, cp)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CoverageReport {
     /// 缺字形的字符（按出现顺序、去重）。

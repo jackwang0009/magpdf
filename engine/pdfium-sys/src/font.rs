@@ -86,6 +86,28 @@ impl Font<'_> {
         (ok != 0).then_some(len)
     }
 
+    /// 字体程序的字节：嵌入字体为其字体文件，未嵌入字体为 PDFium 所选替代字体。
+    /// Type3 没有字体程序，返回 None。
+    pub fn font_data(&self) -> Option<Vec<u8>> {
+        let mut len: usize = 0;
+        // SAFETY: handle 有效；buffer 为 NULL、buflen 为 0 时只写 out_buflen。
+        let ok = unsafe { raw::FPDFFont_GetFontData(self.handle, ptr::null_mut(), 0, &mut len) };
+        if ok == 0 || len == 0 {
+            return None;
+        }
+        let mut buf = vec![0u8; len];
+        let mut out = 0usize;
+        // SAFETY: buf 的长度至少是上一次查询到的字节数。
+        let ok = unsafe {
+            raw::FPDFFont_GetFontData(self.handle, buf.as_mut_ptr(), buf.len(), &mut out)
+        };
+        if ok == 0 {
+            return None;
+        }
+        buf.truncate(out);
+        Some(buf)
+    }
+
     /// 是否 Type3 字体。公共 API 没有直接的字体类型查询；PDFium 的 `CPDF_Font::IsEmbedded()`
     /// 对 Type3 恒为真，而 Type3 又是唯一没有字体程序的"嵌入"字体，两者结合即可判定。
     /// 方案 2.1：原版生成器遇到 Type3 文字会留下未闭合的 `q`、`BT`，是往返测试要单独统计的一类。

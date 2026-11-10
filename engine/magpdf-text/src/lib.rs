@@ -31,6 +31,7 @@ pub mod layout;
 pub mod shaping;
 pub mod subset;
 
+pub use edit::{edit_line, EditOutcome, EditRequest, EditTarget, EditTier, TierSkipped};
 pub use error::{EditError, Result as EditResult};
 pub use fontfile::FontFace;
 pub use geom::{Point, Quadrant, Rect};

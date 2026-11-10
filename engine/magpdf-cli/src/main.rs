@@ -5,6 +5,7 @@
 mod image;
 mod ocr;
 mod roundtrip;
+mod edit_line;
 mod text_blocks;
 
 use std::path::{Path, PathBuf};
@@ -54,6 +55,8 @@ enum Command {
     /// `roundtrip --isolate` 的子进程入口：处理单个文件并把 JSON 结果写到标准输出
     #[command(hide = true)]
     RoundtripWorker(roundtrip::WorkerArgs),
+    /// 改一行字（V08）：三级回退后保存并抽查提取
+    EditLine(edit_line::EditLineArgs),
     /// 文字行/块聚类（V07）：统计、JSON、与标注比对
     TextBlocks(text_blocks::Args),
     /// 对图片、图片目录或 PDF 页做 OCR（V09）
@@ -103,6 +106,7 @@ fn main() -> Result<()> {
         } => render(&lib, &file, page, dpi, annots, &output),
         Command::Roundtrip(args) => roundtrip::run(&lib, &args),
         Command::RoundtripWorker(args) => roundtrip::run_worker(&lib, &args),
+        Command::EditLine(args) => edit_line::run(&lib, args),
         Command::TextBlocks(args) => text_blocks::run(&lib, args),
         Command::Ocr(args) => ocr::ocr(&lib, args),
         Command::OcrEval(args) => ocr::ocr_eval(args),
