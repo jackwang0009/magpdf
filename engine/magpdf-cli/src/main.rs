@@ -47,6 +47,10 @@ enum Command {
         /// 同时渲染批注外观
         #[arg(long)]
         annots: bool,
+        /// 按打印输出渲染（`FPDF_PRINTING`）：可选内容按打印状态取舍，
+        /// `/PrintState /OFF` 的图层不输出（方案 9.4、10.6）
+        #[arg(long)]
+        print: bool,
         /// 输出 PNG 路径
         #[arg(short, long)]
         output: PathBuf,
@@ -109,8 +113,9 @@ fn main() -> Result<()> {
             page,
             dpi,
             annots,
+            print,
             output,
-        } => render(&lib, &file, page, dpi, annots, &output),
+        } => render(&lib, &file, page, dpi, render_flags(annots, print), &output),
         Command::Roundtrip(args) => roundtrip::run(&lib, &args),
         Command::RoundtripWorker(args) => roundtrip::run_worker(&lib, &args),
         Command::ContentRoundtrip(args) => content::run(&args),
@@ -190,23 +195,30 @@ fn info(lib: &Library, file: &Path, json: bool) -> Result<()> {
     Ok(())
 }
 
+/// `render` 子命令的开关换成 PDFium 的渲染标志。
+fn render_flags(annots: bool, print: bool) -> RenderFlags {
+    let mut flags = RenderFlags::NONE;
+    if annots {
+        flags = flags.union(RenderFlags::ANNOT);
+    }
+    if print {
+        flags = flags.union(RenderFlags::PRINTING);
+    }
+    flags
+}
+
 fn render(
     lib: &Library,
     file: &Path,
     page_no: usize,
     dpi: f32,
-    annots: bool,
+    flags: RenderFlags,
     output: &Path,
 ) -> Result<()> {
     anyhow::ensure!(page_no >= 1, "页码从 1 开始");
     let doc =
         Document::load_file(lib, file, None).with_context(|| format!("打开 {}", file.display()))?;
     let page = doc.page(page_no - 1)?;
-    let flags = if annots {
-        RenderFlags::ANNOT
-    } else {
-        RenderFlags::NONE
-    };
     let bmp = page.render(RenderOptions::dpi(dpi).with_flags(flags))?;
     write_png(&bmp, output).with_context(|| format!("写入 {}", output.display()))?;
     println!(
@@ -218,4 +230,22 @@ fn render(
         bmp.height()
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use pdfium_sys::RenderFlags;
+
+    use super::render_flags;
+
+    #[test]
+    fn render_flags_follow_the_switches() {
+        assert_eq!(render_flags(false, false), RenderFlags::NONE);
+        assert_eq!(render_flags(true, false), RenderFlags::ANNOT);
+        assert_eq!(render_flags(false, true), RenderFlags::PRINTING);
+        assert_eq!(
+            render_flags(true, true),
+            RenderFlags::ANNOT.union(RenderFlags::PRINTING)
+        );
+    }
 }

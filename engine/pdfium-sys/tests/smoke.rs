@@ -6,7 +6,9 @@
 use std::io::Read;
 use std::sync::Mutex;
 
-use pdfium_sys::{Document, Library, ObjectKind, RenderOptions, SaveFlags, TextRenderMode};
+use pdfium_sys::{
+    Bitmap, Document, Library, ObjectKind, RenderFlags, RenderOptions, SaveFlags, TextRenderMode,
+};
 
 static SERIAL: Mutex<()> = Mutex::new(());
 
@@ -295,6 +297,49 @@ fn mark_modified_rewrites_content_stream() {
         assert!(
             text.contains(" rg") && text.contains(" re") && text.contains(" f"),
             "重写后的流应仍含填色、矩形与填充操作符：{text:?}"
+        );
+    });
+}
+
+/// 打印渲染（方案 9.4、10.6，P0 计划 V16 的前提）：带 `FPDF_PRINTING` 时，`/PrintState /OFF` 的图层
+/// 不输出、`/ViewState /OFF` 的图层输出；屏幕渲染正好相反。样本是 V14 的 S-0053：浅黄底的背景图层
+/// 只在屏幕上显示，红框图层只在打印时输出。
+#[test]
+fn printing_flag_follows_ocg_print_state() {
+    fn red_pixels(bmp: &Bitmap) -> usize {
+        let mut n = 0;
+        for y in 0..bmp.height() {
+            for x in 0..bmp.width() {
+                // BGRA
+                let px = bmp.pixel(x, y);
+                if px[2] > 200 && px[1] < 60 && px[0] < 60 {
+                    n += 1;
+                }
+            }
+        }
+        n
+    }
+
+    with_library(|lib| {
+        let sample = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/corpus/synthetic/struct-ocg-layers.pdf");
+        let doc = Document::load_file(lib, &sample, None).expect("load");
+        let page = doc.page(0).expect("page");
+        let screen = page.render(RenderOptions::default()).expect("screen");
+        let print = page
+            .render(RenderOptions::default().with_flags(RenderFlags::PRINTING))
+            .expect("print");
+
+        // 左上角在背景图层的底色里，离所有文字都远。
+        let white = [255, 255, 255, 255];
+        assert_ne!(screen.pixel(4, 4), white, "屏幕渲染应看到背景图层的底色");
+        assert_eq!(print.pixel(4, 4), white, "打印渲染不应输出背景图层");
+
+        assert_eq!(red_pixels(&screen), 0, "屏幕渲染不应出现只供打印的红框");
+        assert!(
+            red_pixels(&print) > 100,
+            "打印渲染应输出红框图层，红色像素 {}",
+            red_pixels(&print)
         );
     });
 }
