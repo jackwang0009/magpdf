@@ -1,5 +1,6 @@
 use std::ffi::c_int;
 use std::marker::PhantomData;
+use std::ptr;
 
 use crate::bitmap::Bitmap;
 use crate::document::Document;
@@ -7,6 +8,30 @@ use crate::error::{Error, Result};
 use crate::object::PageObject;
 use crate::raw;
 use crate::text::TextPage;
+
+/// 已从页面摘下、由调用方持有的对象。丢弃时销毁；[`Page::attach`] 成功后不再销毁。
+pub struct DetachedObject {
+    handle: raw::FPDF_PAGEOBJECT,
+}
+
+impl std::fmt::Debug for DetachedObject {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DetachedObject")
+            .field("live", &!self.handle.is_null())
+            .finish()
+    }
+}
+
+impl Drop for DetachedObject {
+    fn drop(&mut self) {
+        if self.handle.is_null() {
+            return;
+        }
+        // SAFETY: 句柄是摘下后尚未插入页面的对象，只销毁一次。
+        unsafe { raw::FPDFPageObj_Destroy(self.handle) };
+        self.handle = ptr::null_mut();
+    }
+}
 
 /// 渲染标志，对应 `fpdfview.h` 的 `FPDF_*` 渲染位。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -148,7 +173,7 @@ impl<'doc> Page<'doc> {
         };
         let format = c_int::try_from(raw::FPDFBitmap_BGRA).unwrap_or(4);
         // SAFETY: 尺寸为正；first_scan 为 NULL 时 PDFium 自己分配缓冲区，stride 传 0 由它计算。
-        let bitmap = unsafe { raw::FPDFBitmap_CreateEx(w, h, format, std::ptr::null_mut(), 0) };
+        let bitmap = unsafe { raw::FPDFBitmap_CreateEx(w, h, format, ptr::null_mut(), 0) };
         if bitmap.is_null() {
             return Err(Error::Bitmap { width, height });
         }
@@ -209,6 +234,36 @@ impl<'doc> Page<'doc> {
         } else {
             Ok(())
         }
+    }
+
+    /// 从页面摘下对象，所有权交给调用方。撤销删除时用 [`Page::attach`] 放回原位（方案 4.2）。
+    ///
+    /// 摘下后对象不再属于页面；[`DetachedObject`] 在丢弃时销毁它。
+    pub fn detach_at(&self, index: usize) -> Result<DetachedObject> {
+        let Some(object) = self.object(index) else {
+            return Err(Error::PageObject);
+        };
+        let handle = object.raw_handle();
+        // SAFETY: handle 属于本页面；成功后所有权转给 DetachedObject，页面不再释放它。
+        let ok = unsafe { raw::FPDFPage_RemoveObject(self.handle, handle) };
+        if ok == 0 {
+            return Err(Error::PageObject);
+        }
+        Ok(DetachedObject { handle })
+    }
+
+    /// 把摘下的对象插回 `index`。成功后 `object` 不再拥有句柄。
+    pub fn attach(&self, object: &mut DetachedObject, index: usize) -> Result<()> {
+        if object.handle.is_null() {
+            return Err(Error::PageObject);
+        }
+        // SAFETY: object 是本进程摘下、尚未销毁的对象；插入成功后归页面所有。
+        let ok = unsafe { raw::FPDFPage_InsertObjectAtIndex(self.handle, object.handle, index) };
+        if ok == 0 {
+            return Err(Error::PageObject);
+        }
+        object.handle = ptr::null_mut();
+        Ok(())
     }
 
     /// 从页面移除对象并销毁它。移除文字对象后，本页已有的 [`TextPage`] 失效，需重新加载。

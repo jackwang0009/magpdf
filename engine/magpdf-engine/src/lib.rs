@@ -1,8 +1,21 @@
 //! 引擎进程的服务层（方案 3.1"编辑服务"）：命令与撤销、页面保真校验、命中测试索引、
-//! 分层渲染、保存与恢复。P0 阶段先承载往返测试需要的像素比对与保真判定。
+//! 分层渲染、保存与恢复。
 #![forbid(unsafe_code)]
 
+pub mod edit;
 pub mod roundtrip;
+
+/// 同一进程只能有一个 PDFium `Library`。所有用到它的测试都先拿这把锁。
+#[cfg(test)]
+pub(crate) mod pdfium_lock {
+    use std::sync::{Mutex, MutexGuard};
+
+    static SERIAL: Mutex<()> = Mutex::new(());
+
+    pub(crate) fn lock() -> MutexGuard<'static, ()> {
+        SERIAL.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
 
 /// 往返测试与保真校验共用的像素比对（方案 2.3、13.2；P0 计划 V02 的判定规则）。
 pub mod compare {

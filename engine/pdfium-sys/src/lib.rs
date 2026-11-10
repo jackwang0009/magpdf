@@ -35,6 +35,6 @@ pub use font::Font;
 pub use geom::{Matrix, Rect, Rgba};
 pub use library::Library;
 pub use object::{ObjectKind, PageObject, TextRenderMode};
-pub use page::{Page, RenderFlags, RenderOptions};
+pub use page::{DetachedObject, Page, RenderFlags, RenderOptions};
 pub use text::{CharInfo, TextPage};
 pub use tile::{PageSurface, PixelRect, TILE_SIZE, render_rect};

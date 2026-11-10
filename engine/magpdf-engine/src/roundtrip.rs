@@ -800,17 +800,12 @@ fn elapsed_ms(since: Instant) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Mutex;
-
     use pdfium_sys::Rgba;
 
     use super::*;
 
-    /// 同一进程只能有一个 Library，用互斥锁把用到 PDFium 的测试串行化。
-    static SERIAL: Mutex<()> = Mutex::new(());
-
     fn with_library(f: impl FnOnce(&Library)) {
-        let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::pdfium_lock::lock();
         let lib = Library::init().expect("init pdfium");
         f(&lib);
     }

@@ -76,6 +76,43 @@ impl<'lib> Document<'lib> {
         })
     }
 
+    /// 新建一份空文档（还没有页面）。
+    pub fn create(_lib: &'lib Library) -> Result<Self> {
+        // SAFETY: 库已初始化；返回的文档句柄归 Document 所有。
+        let handle = unsafe { raw::FPDF_CreateNewDocument() };
+        if handle.is_null() {
+            return Err(Error::Load(LoadError::last()));
+        }
+        Ok(Self {
+            handle,
+            _data: Vec::new(),
+            _lib: PhantomData,
+        })
+    }
+
+    /// 插入一张空白页，尺寸单位是点。`index` 可以等于当前页数，表示追加。
+    pub fn add_blank_page(&self, index: usize, width: f32, height: f32) -> Result<Page<'_>> {
+        if !(width.is_finite() && height.is_finite() && width > 0.0 && height > 0.0) {
+            return Err(Error::InvalidSize {
+                width: 0,
+                height: 0,
+            });
+        }
+        let count = self.page_count();
+        if index > count {
+            return Err(Error::PageIndex { index, count });
+        }
+        let idx = c_int::try_from(index).map_err(|_| Error::PageIndex { index, count })?;
+        // SAFETY: handle 有效；宽高已检查为正数。返回的页面句柄归 Page 所有。
+        let handle =
+            unsafe { raw::FPDFPage_New(self.handle, idx, f64::from(width), f64::from(height)) };
+        if handle.is_null() {
+            return Err(Error::LoadPage(LoadError::last()));
+        }
+        // SAFETY: handle 是刚由 FPDFPage_New 返回的有效页面句柄，归 Page 所有。
+        Ok(unsafe { Page::from_raw(handle, self) })
+    }
+
     /// 句柄（crate 内使用，给 `edit` 模块的新接口用）。
     pub(crate) fn raw_handle(&self) -> raw::FPDF_DOCUMENT {
         self.handle

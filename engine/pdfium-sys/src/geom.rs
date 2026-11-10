@@ -18,6 +18,13 @@ impl Rect {
         self.top - self.bottom
     }
 
+    /// 点是否落在矩形内（含边界）。左右或上下颠倒时按规范化后的范围判断。
+    pub fn contains(&self, x: f32, y: f32) -> bool {
+        let (left, right) = ordered(self.left, self.right);
+        let (bottom, top) = ordered(self.bottom, self.top);
+        x >= left && x <= right && y >= bottom && y <= top
+    }
+
     pub(crate) fn from_fs(r: raw::FS_RECTF) -> Self {
         Self {
             left: r.left,
@@ -65,6 +72,23 @@ impl Matrix {
         }
     }
 
+    /// 仿射逆。行列式接近 0 时返回 `None`。
+    pub fn inverse(self) -> Option<Self> {
+        let det = self.a * self.d - self.b * self.c;
+        if !det.is_finite() || det.abs() < 1e-8 {
+            return None;
+        }
+        let inv = 1.0 / det;
+        Some(Self {
+            a: self.d * inv,
+            b: -self.b * inv,
+            c: -self.c * inv,
+            d: self.a * inv,
+            e: (self.c * self.f - self.d * self.e) * inv,
+            f: (self.b * self.e - self.a * self.f) * inv,
+        })
+    }
+
     pub(crate) fn from_fs(m: raw::FS_MATRIX) -> Self {
         Self {
             a: m.a,
@@ -91,6 +115,54 @@ impl Matrix {
 impl Default for Matrix {
     fn default() -> Self {
         Self::IDENTITY
+    }
+}
+
+fn ordered(a: f32, b: f32) -> (f32, f32) {
+    if a <= b { (a, b) } else { (b, a) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Matrix, Rect};
+
+    #[test]
+    fn rect_contains_inclusive_and_normalizes() {
+        let r = Rect {
+            left: 10.0,
+            bottom: 20.0,
+            right: 0.0,
+            top: 5.0,
+        };
+        assert!(r.contains(0.0, 5.0));
+        assert!(r.contains(10.0, 20.0));
+        assert!(!r.contains(10.1, 12.0));
+    }
+
+    #[test]
+    fn translation_inverse_restores_origin() {
+        let m = Matrix::translation(12.0, -4.0);
+        let inv = m.inverse().expect("平移可逆");
+        assert!((inv.e + 12.0).abs() < 1e-5);
+        assert!((inv.f - 4.0).abs() < 1e-5);
+        let back = m.inverse().map(|i| {
+            // 平移再逆平移应回到单位矩阵的平移分量。
+            let composed_e = m.a * i.e + m.c * i.f + m.e;
+            let composed_f = m.b * i.e + m.d * i.f + m.f;
+            (composed_e, composed_f)
+        });
+        let (e, f) = back.expect("可逆");
+        assert!(e.abs() < 1e-4 && f.abs() < 1e-4);
+    }
+
+    #[test]
+    fn singular_matrix_has_no_inverse() {
+        let m = Matrix {
+            a: 0.0,
+            d: 0.0,
+            ..Matrix::IDENTITY
+        };
+        assert!(m.inverse().is_none());
     }
 }
 

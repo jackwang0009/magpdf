@@ -224,6 +224,21 @@ impl PageObject<'_> {
         Ok(())
     }
 
+    /// 路径的填充规则。`winding` 为真时用非零缠绕，否则用奇偶规则；`stroke` 决定是否描边。
+    pub fn set_path_fill(&self, winding: bool, stroke: bool) -> Result<()> {
+        if self.kind() != ObjectKind::Path {
+            return Err(Error::PageObject);
+        }
+        let mode: c_int = if winding { 2 } else { 1 };
+        // SAFETY: handle 是路径对象；fillmode 取 PDFium 的 ALTERNATE(1) / WINDING(2)。
+        let ok = unsafe { raw::FPDFPath_SetDrawMode(self.raw_handle(), mode, i32::from(stroke)) };
+        if ok == 0 {
+            Err(Error::PageObject)
+        } else {
+            Ok(())
+        }
+    }
+
     /// 闭合当前子路径（`FPDFPath_Close`）。
     pub fn close_path(&self) -> Result<()> {
         // SAFETY: handle 有效且是路径对象。
