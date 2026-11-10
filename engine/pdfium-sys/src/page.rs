@@ -111,6 +111,11 @@ impl<'doc> Page<'doc> {
         unsafe { raw::FPDFPage_GetRotation(self.handle) }
     }
 
+    /// 原始的 PDFium 页面句柄，仅供本 crate 内的瓦片渲染（[`crate::tile`]）使用。
+    pub(crate) fn raw_handle(&self) -> raw::FPDF_PAGE {
+        self.handle
+    }
+
     /// 页面是否带透明（会影响像素比对的背景处理）。
     pub fn has_transparency(&self) -> bool {
         // SAFETY: handle 有效。

@@ -7,6 +7,9 @@ members = [
   "engine/magpdf-components",
   "engine/magpdf-scan",
   "engine/magpdf-cli",
+  "engine/magpdf-ipc",
+  "engine/magpdf-engine-proc",
+  "apps/desktop/src-tauri",
 ]
 
 [workspace.package]
@@ -23,6 +26,7 @@ magpdf-engine = { path = "engine/magpdf-engine" }
 magpdf-text = { path = "engine/magpdf-text" }
 magpdf-components = { path = "engine/magpdf-components" }
 magpdf-scan = { path = "engine/magpdf-scan" }
+magpdf-ipc = { path = "engine/magpdf-ipc" }
 
 # 通用（《工程规范》4：库用 thiserror，应用层用 anyhow，日志用 tracing）
 anyhow = "1"
@@ -40,6 +44,19 @@ flate2 = "1"
 ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "load-dynamic", "tracing", "api-31"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 sha2 = "0.10"
+# V06 进程架构：命名管道（tokio）、共享内存（windows crate）、协议类型生成（ts-rs）、I1 对照（rmp-serde）
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "time", "sync", "macros"] }
+ts-rs = "12"
+rmp-serde = "1"
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_System_Memory",
+  "Win32_System_Threading",
+  "Win32_Security",
+  "Win32_Security_Authorization",
+  "Win32_Security_Cryptography",
+  "Win32_System_SystemInformation",
+] }
 
 [workspace.lints.rust]
 missing_debug_implementations = "warn"

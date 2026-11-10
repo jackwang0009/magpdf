@@ -9,3 +9,5 @@ Cargo.lock
 *.md
 models/manifest.json
 tests/corpus/synthetic/manifest.json
+# ts-rs 生成的协议类型，cargo test 时重写
+engine/magpdf-ipc/bindings/

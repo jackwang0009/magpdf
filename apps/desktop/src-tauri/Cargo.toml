@@ -1,0 +1,28 @@
+[package]
+name = "magpdf-desktop"
+description = "主进程：监督引擎、IPC、V06 基准（Tauri WebView 后续接入）"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "magpdf-desktop"
+path = "src/main.rs"
+
+[dependencies]
+magpdf-ipc.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows.workspace = true
+
+[lints]
+workspace = true

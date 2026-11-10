@@ -23,6 +23,7 @@ mod library;
 mod object;
 mod page;
 mod text;
+mod tile;
 
 pub use bitmap::Bitmap;
 pub use document::{Document, SaveFlags};
@@ -33,3 +34,4 @@ pub use library::Library;
 pub use object::{ObjectKind, PageObject, TextRenderMode};
 pub use page::{Page, RenderFlags, RenderOptions};
 pub use text::{CharInfo, TextPage};
+pub use tile::{PageSurface, PixelRect, TILE_SIZE, render_rect};
