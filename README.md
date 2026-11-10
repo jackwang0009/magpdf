@@ -11,9 +11,12 @@
 apps/desktop/          Tauri 2 主进程（Rust）+ 界面入口（React 19 + Vite）
 packages/ui            通用界面控件
 packages/editor        画布、工具状态机、选择与变换、快捷键、工作区
-packages/protocol      界面与引擎之间的命令和数据类型（由 Rust 生成）
-engine/pdfium-sys      PDFium 与 MAG_* 扩展的 Rust 绑定（工作区里唯一允许 unsafe 的 crate）
-engine/magpdf-engine   引擎进程：命令与撤销、保真校验、命中测试、渲染调度、保存与恢复
+packages/protocol      界面与引擎之间的命令和数据类型（由 Rust 生成，cargo test -p magpdf-ipc 时更新）
+engine/pdfium-sys      PDFium 与 MAG_* 扩展的 Rust 绑定（unsafe 只允许出现在这里和 magpdf-ipc 里调用 Windows 接口的模块）
+engine/magpdf-engine   引擎服务：命令与撤销、保真校验、命中测试、渲染调度、保存与恢复
+engine/magpdf-engine-proc  引擎进程 magpdf-engine：管道通信、PDFium 专用线程、共享内存瓦片
+engine/magpdf-ipc      主进程与引擎之间的帧格式、消息和共享内存
+engine/magpdf-content  自研内容流读写层原型（P0 的 V17）
 engine/magpdf-text     文字块识别、排版、字体匹配、子集化
 engine/magpdf-components  组件、条码、校验位、批量生成、打印
 engine/magpdf-scan     OCR、版面分析、样式估计、背景修补
