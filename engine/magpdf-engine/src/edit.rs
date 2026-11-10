@@ -11,7 +11,7 @@
 use std::collections::BTreeMap;
 
 use pdfium_sys::{
-    DetachedObject, Document, Library, Matrix, ObjectKind, Page, PageObject, Rect, Rgba,
+    DetachedObject, Document, Library, Matrix, ObjectKind, Page, PageObject, Rect, Rgba, SaveFlags,
 };
 
 /// 对象在一次会话内的稳定编号（《接口协议》5.1）。只在会话内有效，不写进文件。
@@ -67,6 +67,9 @@ pub enum EditError {
     NoObject(ObjectId),
     #[error("命令没有指定对象")]
     NoTarget,
+    /// 这一页重新生成内容流后对象会变，不能修改原有对象（方案 2.3 的降级）。
+    #[error("第 {} 页不能修改原有对象：{reason}", .page + 1)]
+    PageNotEditable { page: usize, reason: &'static str },
     #[error("变换矩阵不可逆")]
     SingularMatrix,
     #[error("对象没有可恢复的填充色")]
@@ -131,10 +134,15 @@ impl ChangeLog {
 
 /// 一份打开的文档和它的撤销栈。文档是数据的唯一来源（方案 3.1）。
 pub struct Session<'lib> {
+    lib: &'lib Library,
     doc: Document<'lib>,
     /// 已经列过对象的页：页序号 → 按层级排列的对象编号。
     ids: BTreeMap<usize, Vec<ObjectId>>,
     next_id: u64,
+    /// 保真校验用的文档副本，第一次校验时从当前文档存一份出来。`Err` 表示副本建不出来。
+    scratch: Option<std::result::Result<Document<'lib>, ()>>,
+    /// 校验过的页：`None` 表示可以修改，`Some` 是不能修改的原因。
+    fidelity: BTreeMap<usize, Option<&'static str>>,
     undo: Vec<Command>,
     redo: Vec<Command>,
     limit: usize,
@@ -176,22 +184,26 @@ impl<'lib> Session<'lib> {
         path: &std::path::Path,
         password: Option<&str>,
     ) -> Result<Self> {
-        Ok(Self::from_document(Document::load_file(
-            lib, path, password,
-        )?))
+        Ok(Self::from_document(
+            lib,
+            Document::load_file(lib, path, password)?,
+        ))
     }
 
     /// 空文档，用来建测试页或以后的“新建”。
     pub fn create(lib: &'lib Library) -> Result<Self> {
-        Ok(Self::from_document(Document::create(lib)?))
+        Ok(Self::from_document(lib, Document::create(lib)?))
     }
 
     /// 接管一份已经打开的文档。
-    pub fn from_document(doc: Document<'lib>) -> Self {
+    pub fn from_document(lib: &'lib Library, doc: Document<'lib>) -> Self {
         Self {
+            lib,
             doc,
             ids: BTreeMap::new(),
             next_id: 0,
+            scratch: None,
+            fidelity: BTreeMap::new(),
             undo: Vec::new(),
             redo: Vec::new(),
             limit: DEFAULT_LIMIT,
@@ -284,6 +296,33 @@ impl<'lib> Session<'lib> {
             }
         }
         Ok(hits)
+    }
+
+    /// 一页能不能修改原有对象（方案 2.3 保真校验里的对象比对）。返回 `None` 表示可以，`Some` 是原因。
+    ///
+    /// 做法：在文档的副本上把这一页的对象全部标记为已修改、重新生成内容流，再重新加载，比较前后
+    /// 对象的个数、种类和包围盒。PDFium 的生成器写不出来的对象会消失或挪位置，这样的页一旦改了
+    /// 任何对象就会坏掉，编号表也会对不上，所以只允许在上面叠加内容。结果按页记住，只校验一次。
+    ///
+    /// 这只是对象比对。颜色空间被换算成等价 RGB 这类变化包围盒看不出来，要靠像素和操作符级比对，
+    /// 这里还没有做。
+    pub fn check_fidelity(&mut self, page: usize) -> Result<Option<&'static str>> {
+        if let Some(known) = self.fidelity.get(&page) {
+            return Ok(*known);
+        }
+        if self.scratch.is_none() {
+            let copy = self
+                .doc
+                .save_to_vec(SaveFlags::NO_INCREMENTAL)
+                .and_then(|bytes| Document::load_bytes(self.lib, bytes, None));
+            self.scratch = Some(copy.map_err(|_| ()));
+        }
+        let verdict = match &self.scratch {
+            Some(Ok(scratch)) => roundtrip_verdict(scratch, page)?,
+            _ => Some("校验用的文档副本建不出来"),
+        };
+        self.fidelity.insert(page, verdict);
+        Ok(verdict)
     }
 
     /// 把矩阵左乘到每个对象上。撤销时用逆矩阵再变一次。
@@ -379,9 +418,18 @@ impl<'lib> Session<'lib> {
         if targets.is_empty() {
             return Err(EditError::NoTarget);
         }
-        // 先确认对象都在，再动文档。
+        // 先确认对象都在、所在的页都能改，再动文档。
+        let mut pages: Vec<usize> = Vec::new();
         for id in &targets {
-            self.locate(*id)?;
+            let (page, _) = self.locate(*id)?;
+            if !pages.contains(&page) {
+                pages.push(page);
+            }
+        }
+        for page in pages {
+            if let Some(reason) = self.check_fidelity(page)? {
+                return Err(EditError::PageNotEditable { page, reason });
+            }
         }
         let mut atoms: Vec<Atom> = targets.into_iter().map(make).collect();
         let mut log = ChangeLog::default();
@@ -505,6 +553,51 @@ impl<'lib> Session<'lib> {
             self.undo.remove(0);
         }
     }
+}
+
+/// 包围盒各边允许的偏差（pt）。生成器把坐标写成十进制小数再读回，会有很小的舍入误差。
+const BOUNDS_TOLERANCE: f32 = 0.5;
+
+fn page_shape(page: &Page<'_>) -> Vec<(ObjectKind, Option<Rect>)> {
+    page.objects().map(|o| (o.kind(), o.bounds())).collect()
+}
+
+/// 在副本上重写一页的内容流，比较前后的对象。`None` 表示没有变化。
+fn roundtrip_verdict(scratch: &Document<'_>, page: usize) -> Result<Option<&'static str>> {
+    let before = {
+        let page_obj = scratch.page(page)?;
+        let shape = page_shape(&page_obj);
+        for object in page_obj.objects() {
+            object.mark_modified()?;
+        }
+        page_obj.generate_content()?;
+        shape
+    };
+    let after = page_shape(&scratch.page(page)?);
+    if before.len() != after.len() {
+        return Ok(Some("重新生成内容流后对象的个数变了"));
+    }
+    for ((kind_a, bounds_a), (kind_b, bounds_b)) in before.iter().zip(&after) {
+        if kind_a != kind_b {
+            return Ok(Some("重新生成内容流后对象的种类变了"));
+        }
+        let same = match (bounds_a, bounds_b) {
+            (None, None) => true,
+            (Some(a), Some(b)) => [
+                a.left - b.left,
+                a.bottom - b.bottom,
+                a.right - b.right,
+                a.top - b.top,
+            ]
+            .iter()
+            .all(|d| d.abs() <= BOUNDS_TOLERANCE),
+            _ => false,
+        };
+        if !same {
+            return Ok(Some("重新生成内容流后对象的位置变了"));
+        }
+    }
+    Ok(None)
 }
 
 fn summary(id: ObjectId, page: usize, z: usize, object: &PageObject<'_>) -> ObjectSummary {
@@ -775,6 +868,45 @@ mod tests {
                 Err(EditError::NoObject(_))
             ));
         });
+    }
+
+    /// 渐变对象是生成器写不出来的（方案 2.1），带渐变的页重写后对象会少。这样的页必须拒绝修改，
+    /// 否则改一个对象就丢掉渐变，编号表也跟着错位。生成器以后修好了，这一页就应该能正常编辑。
+    #[test]
+    fn a_page_the_generator_cannot_rewrite_is_not_editable() {
+        let _guard = crate::pdfium_lock::lock();
+        let lib = Library::init().expect("PDFium");
+        let sample = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/corpus/synthetic/shading-axial.pdf");
+        let mut session = Session::open(&lib, &sample, None).expect("打开样本");
+        let before = session.objects(0).unwrap();
+        assert!(!before.is_empty());
+        let target = before[0].id;
+
+        let verdict = session.check_fidelity(0).unwrap();
+        let outcome = session.transform(&[target], Matrix::translation(3.0, 0.0));
+        match verdict {
+            Some(reason) => {
+                assert!(
+                    matches!(
+                        outcome,
+                        Err(EditError::PageNotEditable { page: 0, reason: got }) if got == reason
+                    ),
+                    "{outcome:?}"
+                );
+                assert_eq!(session.version(), 0);
+                assert!(!session.can_undo());
+            }
+            None => {
+                outcome.expect("校验通过的页可以修改");
+            }
+        }
+        // 不管哪种情况，对象的个数和编号都没有乱。
+        let after = session.objects(0).unwrap();
+        assert_eq!(
+            after.iter().map(|o| o.id).collect::<Vec<_>>(),
+            before.iter().map(|o| o.id).collect::<Vec<_>>()
+        );
     }
 
     #[test]
