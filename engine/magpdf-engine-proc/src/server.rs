@@ -4,17 +4,19 @@
 //! `bench.*`、`tile.fetch`）在通信线程上直接应答；渲染请求立即应答 `requestIds`，瓦片在后台渲染完成后
 //! 以 `render.tileReady` 事件送达。
 
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use magpdf_ipc::frame::{self, Incoming};
 use magpdf_ipc::messages::{
-    self, BenchEngineParams, DocInfo, DocOpenParams, EchoParams, ErrorCode, HelloParams,
-    HelloResult, JsonValue, PingParams, RenderTilesParams, RenderTilesResult, RequestId, Response,
-    RoundtripParams, RoundtripResult, RpcError, TileCoord, TileFetchParams, TileFetchResult,
-    method,
+    self, BenchEngineParams, DocCloseParams, DocInfo, DocOpenParams, EchoParams, ErrorCode,
+    HelloParams, HelloResult, JsonValue, PingParams, RenderTilesParams, RenderTilesResult, Request,
+    RequestId, Response, RoundtripParams, RoundtripResult, RpcError, TileCoord, TileFetchParams,
+    TileFetchResult, method,
 };
 use magpdf_ipc::shm::{self, Layout, MappedRegion};
 use magpdf_ipc::{PROTOCOL_VERSION, pipe, pump};
@@ -63,9 +65,11 @@ impl EngineConfig {
     }
 }
 
-/// 后台任务发给主进程的消息。目前只有事件（通知）；请求的响应由读循环直接编码排队。
+/// 后台任务发给主进程的消息：要等 PDFium 线程的请求的响应，或事件（通知）。
+/// 不等 PDFium 的请求由读循环直接应答，不走这里。
 #[derive(Debug)]
 pub enum Outgoing {
+    Response(Response),
     Event(String, JsonValue),
 }
 
@@ -77,7 +81,9 @@ pub struct Engine {
     pub shm: Mutex<MappedRegion>,
     pub slots: Mutex<SlotTable>,
     pub recovery: Mutex<RecoveryFile>,
-    /// 引擎启动时从恢复文件读回的文档（`engine.restored` 的内容）。
+    /// 已打开文档的路径（docId → 路径）。恢复文件按路径记账，通信线程查它就行，不用去等 PDFium 线程。
+    pub doc_paths: Mutex<HashMap<u32, String>>,
+    /// 引擎启动时从恢复文件读回的文档，在 `session.hello` 的返回值里告诉主进程。
     pub restored: Mutex<Vec<DocInfo>>,
     /// 渲染期间的测量开关：为 true 时把"渲染 + 写入共享内存"的耗时记进 `bench_samples`。
     pub measure: AtomicBool,
@@ -163,6 +169,10 @@ impl Engine {
         if !restored.is_empty() {
             let _ = recovery.save();
         }
+        let doc_paths = restored
+            .iter()
+            .map(|d| (d.doc_id, d.path.clone()))
+            .collect();
         Ok(Self {
             pipe: config.pipe,
             session_id: config.session,
@@ -170,6 +180,7 @@ impl Engine {
             shm: Mutex::new(region),
             slots: Mutex::new(SlotTable::new(config.slots)),
             recovery: Mutex::new(recovery),
+            doc_paths: Mutex::new(doc_paths),
             restored: Mutex::new(restored),
             measure: AtomicBool::new(false),
             bench_samples: Mutex::new(Vec::new()),
@@ -180,25 +191,63 @@ impl Engine {
     }
 }
 
+/// 读循环能立刻应答的方法：不等 PDFium 线程。其余方法（包括不认识的）交给本连接的工作任务。
+fn answered_inline(method_name: &str) -> bool {
+    matches!(
+        method_name,
+        method::SESSION_HELLO
+            | method::SESSION_PING
+            | method::SESSION_SHUTDOWN
+            | method::RENDER_TILES
+            | method::RENDER_CANCEL
+            | method::TILE_FETCH
+            | method::BENCH_ECHO
+    )
+}
+
+/// 把一条待发消息编码成帧，排进写队列。
+fn enqueue(msg: &Outgoing, pending: &mut VecDeque<Vec<u8>>) {
+    let framed = match msg {
+        Outgoing::Response(resp) => frame::encode(resp),
+        Outgoing::Event(name, params) => frame::encode(&frame::notification(name, params)),
+    };
+    match framed {
+        Ok(bytes) => pending.push_back(bytes),
+        Err(e) => tracing::error!("编码消息失败：{e}"),
+    }
+}
+
 /// 服务一条连接。命名管道是半双工的，读写放在同一个事件循环里（pump）：可读时把完整帧取出来处理，
 /// 可写时把排队的响应与事件写出去。
 ///
-/// 不碰 PDFium 的请求（`session.*`、`tile.fetch`、`bench.*` 的一部分）在 pump 里直接应答；碰 PDFium 的
-/// 请求投递到 PDFium 线程后立即应答（`doc.open` 等 PDFium 完成），渲染请求立即应答 requestId、瓦片
-/// 完成时以 `render.tileReady` 事件发出。
+/// 不等 PDFium 的请求（见 [`answered_inline`]）在读循环里直接应答：渲染请求立即应答 requestId，瓦片
+/// 完成时以 `render.tileReady` 事件发出。要等 PDFium 线程的请求（`doc.open` 等）按到达顺序交给一个
+/// 工作任务，响应经 `out_tx` 送回；读循环不等它们，所以 PDFium 忙的时候 `session.ping` 照样有应答。
 async fn serve_connection(engine: Arc<Engine>, conn: NamedPipeServer) {
     let (out_tx, mut out_rx) = mpsc::unbounded_channel::<Outgoing>();
+    let (slow_tx, mut slow_rx) = mpsc::unbounded_channel::<Request>();
+    let worker = tokio::spawn({
+        let engine = engine.clone();
+        let out = out_tx.clone();
+        async move {
+            while let Some(req) = slow_rx.recv().await {
+                let resp = dispatch(&engine, req.id, &req.method, req.params.as_ref(), &out).await;
+                if let Some(resp) = resp
+                    && out.send(Outgoing::Response(resp)).is_err()
+                {
+                    break;
+                }
+            }
+        }
+    });
     let mut reader = pump::FrameReader::new();
-    let mut pending: std::collections::VecDeque<Vec<u8>> = std::collections::VecDeque::new();
+    let mut pending: VecDeque<Vec<u8>> = VecDeque::new();
     let mut written = 0usize;
     let mut closed = false;
     loop {
-        // 1. 收事件与响应，编码后排队。
-        while let Ok(Outgoing::Event(name, params)) = out_rx.try_recv() {
-            match frame::encode(&frame::notification(&name, &params)) {
-                Ok(bytes) => pending.push_back(bytes),
-                Err(e) => tracing::error!("编码消息失败：{e}"),
-            }
+        // 1. 后台任务送来的响应与事件，编码后排队。
+        while let Ok(msg) = out_rx.try_recv() {
+            enqueue(&msg, &mut pending);
         }
         // 2. 尽量写。
         while let Some(front) = pending.front() {
@@ -217,6 +266,10 @@ async fn serve_connection(engine: Arc<Engine>, conn: NamedPipeServer) {
         if closed {
             break;
         }
+        // 收到 session.shutdown 之后，等它的应答写出去再退出。
+        if engine.shutdown.load(Ordering::SeqCst) && pending.is_empty() {
+            break;
+        }
         // 3. 尽量读，取完整帧。
         if let Err(e) = reader.pump(&conn) {
             tracing::info!("主进程断开连接：{e}");
@@ -228,14 +281,16 @@ async fn serve_connection(engine: Arc<Engine>, conn: NamedPipeServer) {
                 continue;
             };
             match Incoming::from_value(value) {
-                Ok(Incoming::Request(req)) => {
+                Ok(Incoming::Request(req)) if answered_inline(&req.method) => {
                     let resp =
                         dispatch(&engine, req.id, &req.method, req.params.as_ref(), &out_tx).await;
                     if let Some(resp) = resp {
-                        match frame::encode(&resp) {
-                            Ok(bytes) => pending.push_back(bytes),
-                            Err(e) => tracing::error!("编码响应失败：{e}"),
-                        }
+                        enqueue(&Outgoing::Response(resp), &mut pending);
+                    }
+                }
+                Ok(Incoming::Request(req)) => {
+                    if slow_tx.send(req).is_err() {
+                        tracing::error!("处理队列已经关闭，请求被丢弃");
                     }
                 }
                 Ok(Incoming::Notification(_)) => {}
@@ -243,23 +298,20 @@ async fn serve_connection(engine: Arc<Engine>, conn: NamedPipeServer) {
                 Err(e) => tracing::warn!("无法解析的消息：{e}"),
             }
         }
-        // 4. 没有待写的消息了就等可读；有就在可读或可写任一事件上醒来。
-        if pending.is_empty() {
-            tokio::select! {
-                _ = conn.readable() => {}
-                _ = tokio::time::sleep(std::time::Duration::from_millis(500)) => {}
+        // 4. 等下一件事：管道可读；后台任务送来了响应或事件；还有没写完的帧而管道可写。
+        //    定时醒一次只是兜底。
+        tokio::select! {
+            _ = conn.readable() => {}
+            msg = out_rx.recv() => {
+                if let Some(msg) = msg {
+                    enqueue(&msg, &mut pending);
+                }
             }
-        } else {
-            tokio::select! {
-                _ = conn.readable() => {}
-                _ = conn.writable() => {}
-                _ = tokio::time::sleep(std::time::Duration::from_millis(500)) => {}
-            }
-        }
-        if engine.shutdown.load(Ordering::SeqCst) {
-            break;
+            _ = conn.writable(), if !pending.is_empty() => {}
+            _ = tokio::time::sleep(Duration::from_millis(500)) => {}
         }
     }
+    worker.abort();
 }
 
 /// 派发一条请求；`None` 表示不需要应答。
@@ -311,6 +363,9 @@ async fn handle_request(
                 .open(p.path.clone(), p.password)
                 .await
                 .map_err(map_engine_error)?;
+            if let Ok(mut paths) = engine.doc_paths.lock() {
+                paths.insert(info.doc_id, info.path.clone());
+            }
             if let Ok(mut recovery) = engine.recovery.lock() {
                 recovery.upsert(DocRecovery {
                     path: info.path.clone(),
@@ -322,6 +377,34 @@ async fn handle_request(
                 let _ = recovery.save();
             }
             Ok(Some(frame::response_ok(id, &info)))
+        }
+        method::DOC_CLOSE => {
+            let p: DocCloseParams = decode(params)?;
+            if !engine.engine.close_doc(p.doc_id).await {
+                return Err(
+                    ErrorCode::InvalidArgument.error_with(format!("文档 {} 不存在", p.doc_id))
+                );
+            }
+            let path = engine
+                .doc_paths
+                .lock()
+                .ok()
+                .and_then(|mut paths| paths.remove(&p.doc_id));
+            // 同一个文件可能打开了两次；还有别的 docId 指着它时，恢复文件里的记录要留着。
+            let still_open = path.as_ref().is_some_and(|path| {
+                engine
+                    .doc_paths
+                    .lock()
+                    .is_ok_and(|paths| paths.values().any(|other| other == path))
+            });
+            if let Some(path) = path
+                && !still_open
+                && let Ok(mut recovery) = engine.recovery.lock()
+            {
+                recovery.remove(&path);
+                let _ = recovery.save();
+            }
+            Ok(Some(frame::response_ok(id, &())))
         }
         method::RENDER_TILES => {
             let p: RenderTilesParams = decode(params)?;
@@ -378,6 +461,11 @@ fn hello_result(engine: &Engine) -> HelloResult {
         pdfium_revision: engine.pdfium_revision.clone(),
         capabilities: vec!["shm.tiles".to_owned(), "bench.engine".to_owned()],
         pid: std::process::id(),
+        restored: engine
+            .restored
+            .lock()
+            .map(|r| r.clone())
+            .unwrap_or_default(),
     }
 }
 
@@ -408,12 +496,16 @@ fn record_view(engine: &Engine, p: &RenderTilesParams) {
     let Some(first) = p.tiles.first() else {
         return;
     };
-    let snap = engine.engine.list_docs_snapshot();
-    let Some(doc) = snap.iter().find(|d| d.doc_id == p.doc_id) else {
+    let Some(path) = engine
+        .doc_paths
+        .lock()
+        .ok()
+        .and_then(|paths| paths.get(&p.doc_id).cloned())
+    else {
         return;
     };
     let doc = DocRecovery {
-        path: doc.path.clone(),
+        path,
         page_id: p.page_id,
         scale: p.scale,
         origin_x: first.x,

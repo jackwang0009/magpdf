@@ -209,6 +209,7 @@ names! {
         SESSION_PING = "session.ping";
         SESSION_SHUTDOWN = "session.shutdown";
         DOC_OPEN = "doc.open";
+        DOC_CLOSE = "doc.close";
         RENDER_TILES = "render.tiles";
         RENDER_CANCEL = "render.cancel";
         /// 不在《接口协议》里：主进程请引擎核对槽位的代数（V06 原型加的，见 V06 报告）。
@@ -261,6 +262,10 @@ pub struct HelloResult {
     pub capabilities: Vec<String>,
     /// 本进程的 PID（恢复演示里用来结束进程）。
     pub pid: u32,
+    /// 引擎启动时按恢复文件重新打开的文档。主进程据此向界面发 `engine.restored`（方案 9.3）；
+    /// 文档的 `docId` 是新分配的，界面要丢掉旧快照重新拉取。
+    #[serde(default)]
+    pub restored: Vec<DocInfo>,
 }
 
 /// `session.ping` 的参数与返回值（同一结构）。
@@ -304,6 +309,17 @@ pub struct DocInfo {
 
 /// `doc.open` 的返回值。
 pub type DocOpenResult = DocInfo;
+
+/// `doc.close` 的参数（《接口协议》6.1）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct DocCloseParams {
+    pub doc_id: u32,
+    /// 放弃未保存的修改。原型还没有修改命令，这个字段暂时不起作用。
+    #[serde(default)]
+    pub discard: bool,
+}
 
 // ---- 瓦片 ----
 

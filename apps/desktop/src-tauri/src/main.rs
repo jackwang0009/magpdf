@@ -52,6 +52,12 @@ fn run_bench() -> Result<()> {
         p.tile_fetch_under_5ms, p.ping_p95_under_2ms, p.restart_under_5s
     );
     println!(
+        "render.tiles 到 render.tileReady：中位数 {:.3} ms，P95 {:.3} ms；重启后恢复的文档 {}",
+        report.tile_event_median_ms,
+        report.tile_event_p95_ms,
+        report.restored_docs.unwrap_or(0)
+    );
+    println!(
         "I1 json占比={:.3} msgpack/json字节={:.3}  | I2 total_memory_mb={}",
         report.json_share_of_roundtrip, report.msgpack_vs_json_bytes, report.shm_total_mb
     );

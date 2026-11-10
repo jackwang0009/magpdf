@@ -9,6 +9,7 @@ export const METHOD = {
   SESSION_PING: 'session.ping',
   SESSION_SHUTDOWN: 'session.shutdown',
   DOC_OPEN: 'doc.open',
+  DOC_CLOSE: 'doc.close',
   RENDER_TILES: 'render.tiles',
   RENDER_CANCEL: 'render.cancel',
   TILE_FETCH: 'tile.fetch',

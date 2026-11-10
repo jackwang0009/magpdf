@@ -6,6 +6,7 @@
  */
 export type { BenchEngineParams } from './generated/BenchEngineParams';
 export type { BenchEngineResult } from './generated/BenchEngineResult';
+export type { DocCloseParams } from './generated/DocCloseParams';
 export type { DocInfo } from './generated/DocInfo';
 export type { DocOpenParams } from './generated/DocOpenParams';
 export type { HelloParams } from './generated/HelloParams';

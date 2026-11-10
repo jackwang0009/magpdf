@@ -47,9 +47,10 @@ pub enum Job {
     ListDocs {
         reply: oneshot::Sender<Vec<DocInfo>>,
     },
-    #[expect(dead_code, reason = "V06 原型还没有 doc.close，文档只开不关")]
+    /// 关闭文档；应答是否找到了这份文档。
     CloseDoc {
         doc_id: u32,
+        reply: oneshot::Sender<bool>,
     },
     Shutdown,
 }
@@ -78,10 +79,13 @@ impl EngineHandle {
                         return;
                     }
                 };
+                // Library 与本线程同寿命。把它泄漏成 'static 借用，文档句柄才能和它放进同一个状态里；
+                // 进程退出时由系统回收，不再调用 FPDF_DestroyLibrary。
+                let lib: &'static Library = Box::leak(Box::new(lib));
                 let mut state = PdfiumState {
                     docs: Vec::new(),
                     next_doc_id: 1,
-                    _lib: lib,
+                    lib,
                 };
                 // 专用线程里同步取任务；通信线程不依赖这条线程的响应速度来处理心跳。
                 while let Some(job) = rx.blocking_recv() {
@@ -183,23 +187,13 @@ impl EngineHandle {
         rx.await.unwrap_or_default()
     }
 
-    /// 同步取已打开文档的快照（引擎启动时用，通信线程还没起来）。
-    pub fn list_docs_snapshot(&self) -> Vec<DocInfo> {
+    /// 关闭文档。返回 `false` 表示没有这份文档。
+    pub async fn close_doc(&self, doc_id: u32) -> bool {
         let (reply, rx) = oneshot::channel();
-        if self.send(Job::ListDocs { reply }).is_err() {
-            return Vec::new();
+        if self.send(Job::CloseDoc { doc_id, reply }).is_err() {
+            return false;
         }
-        let recv = if tokio::runtime::Handle::try_current().is_ok() {
-            tokio::task::block_in_place(|| rx.blocking_recv())
-        } else {
-            rx.blocking_recv()
-        };
-        recv.unwrap_or_default()
-    }
-
-    #[expect(dead_code, reason = "V06 原型还没有 doc.close，文档只开不关")]
-    pub fn close_doc(&self, doc_id: u32) {
-        let _ = self.send(Job::CloseDoc { doc_id });
+        rx.await.unwrap_or(false)
     }
 
     pub fn shutdown(&self) {
@@ -210,8 +204,7 @@ impl EngineHandle {
 struct PdfiumState {
     docs: Vec<OpenDoc>,
     next_doc_id: u32,
-    // `docs` 声明的顺序在 `_lib` 之前：析构时文档先于 Library 释放。
-    _lib: Library,
+    lib: &'static Library,
 }
 
 impl PdfiumState {
@@ -245,7 +238,11 @@ impl PdfiumState {
             Job::ListDocs { reply } => {
                 let _ = reply.send(self.docs.iter().map(info).collect());
             }
-            Job::CloseDoc { doc_id } => self.docs.retain(|d| d.doc_id != doc_id),
+            Job::CloseDoc { doc_id, reply } => {
+                let before = self.docs.len();
+                self.docs.retain(|d| d.doc_id != doc_id);
+                let _ = reply.send(self.docs.len() != before);
+            }
             Job::Shutdown => {}
         }
     }
@@ -255,12 +252,7 @@ impl PdfiumState {
         path: String,
         password: Option<&str>,
     ) -> std::result::Result<DocInfo, EngineError> {
-        // 文档借用的 Library 由本结构体持有，与线程同寿命；`docs` 在 `_lib` 之前析构。
-        let lib: &Library = &self._lib;
-        // SAFETY: `lib` 指向 self._lib，在本线程整个生命周期内有效，且 `docs` 先于它析构；
-        // 延长出的 &'static 只存在本线程内，不跨线程传递。
-        let lib: &'static Library = unsafe { &*std::ptr::from_ref(lib) };
-        let doc = Document::load_file(lib, std::path::Path::new(&path), password)
+        let doc = Document::load_file(self.lib, std::path::Path::new(&path), password)
             .map_err(|e| EngineError::Open(e.to_string()))?;
         let doc_id = self.next_doc_id;
         self.next_doc_id += 1;

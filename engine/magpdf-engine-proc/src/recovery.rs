@@ -76,7 +76,7 @@ impl RecoveryFile {
         }
     }
 
-    #[expect(dead_code, reason = "V06 原型还没有 doc.close，文档只开不关")]
+    /// 文档关闭后不再需要恢复它。
     pub fn remove(&mut self, path: &str) {
         self.state.docs.retain(|d| d.path != path);
     }

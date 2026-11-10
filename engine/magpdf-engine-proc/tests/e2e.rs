@@ -1,0 +1,421 @@
+//! 引擎进程的端到端测试：启动 `magpdf-engine` 可执行文件，像主进程那样用命名管道和共享内存与它对话
+//! （《接口协议》第 3、4、6、7 节）。每个测试起一个自己的引擎进程，管道名和会话 ID 各不相同。
+// 测试代码允许 unwrap/expect（《工程规范》4）；集成测试不在 #[cfg(test)] 下，需显式放开。
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
+use std::path::PathBuf;
+use std::process::{Child, Command, Stdio};
+use std::time::{Duration, Instant};
+
+use magpdf_ipc::messages::{ErrorCode, PROTOCOL_VERSION, event, method};
+use magpdf_ipc::{frame, pipe, shm};
+use serde_json::{Value, json};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::windows::named_pipe::NamedPipeClient;
+
+/// 单次等待的上限。正常情况下每一步都是毫秒级，超时说明引擎卡住了。
+const STEP_TIMEOUT: Duration = Duration::from_secs(30);
+
+fn sample(name: &str) -> String {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/corpus/synthetic")
+        .join(name)
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// 一个被测的引擎进程，加上测试这一侧（扮演主进程）的连接。
+struct Engine {
+    child: Child,
+    client: NamedPipeClient,
+    session: String,
+    recovery: PathBuf,
+    next_id: u64,
+    /// 已经读到、还没被取走的响应：`(id, 到达时刻, result 或 error)`。
+    responses: Vec<(u64, Instant, Result<Value, Value>)>,
+    /// 已经读到、还没被取走的事件：`(到达时刻, 事件名, 参数)`。
+    events: Vec<(Instant, String, Value)>,
+}
+
+impl Drop for Engine {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        let _ = std::fs::remove_file(&self.recovery);
+    }
+}
+
+impl Engine {
+    /// 启动引擎并连上管道。`recovery` 为 `None` 时用一个本测试独有的恢复文件。
+    async fn start(recovery: Option<PathBuf>) -> Self {
+        let token = pipe::random_token(8).unwrap();
+        let pipe_name = pipe::pipe_name(std::process::id(), &token);
+        let session = format!("e2e-{}-{token}", std::process::id());
+        let recovery =
+            recovery.unwrap_or_else(|| std::env::temp_dir().join(format!("magpdf-{session}.json")));
+        let child = Command::new(env!("CARGO_BIN_EXE_magpdf-engine"))
+            .args(["--pipe", &pipe_name, "--session", &session, "--slots", "16"])
+            .arg("--recovery")
+            .arg(&recovery)
+            .env("MAGPDF_LOG", "warn")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .expect("启动 magpdf-engine");
+        let started = Instant::now();
+        let client = loop {
+            match pipe::connect_client(&pipe_name) {
+                Ok(client) => break client,
+                Err(e) if started.elapsed() < STEP_TIMEOUT => {
+                    let _ = e;
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+                Err(e) => panic!("连不上引擎的管道：{e}"),
+            }
+        };
+        Self {
+            child,
+            client,
+            session,
+            recovery,
+            next_id: 1,
+            responses: Vec::new(),
+            events: Vec::new(),
+        }
+    }
+
+    /// 发一条请求，不等响应。
+    async fn send(&mut self, method: &str, params: Value) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        let request = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
+        let framed = frame::encode(&request).unwrap();
+        self.client.write_all(&framed).await.unwrap();
+        id
+    }
+
+    /// 从管道读一条消息，按种类记进 `responses` 或 `events`。
+    async fn read_one(&mut self) {
+        let read = async {
+            let mut len = [0u8; 4];
+            self.client.read_exact(&mut len).await.unwrap();
+            let mut body = vec![0u8; u32::from_le_bytes(len) as usize];
+            self.client.read_exact(&mut body).await.unwrap();
+            body
+        };
+        let body = tokio::time::timeout(STEP_TIMEOUT, read)
+            .await
+            .expect("等引擎的消息超时");
+        let at = Instant::now();
+        let value: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["jsonrpc"], "2.0", "{value}");
+        if let Some(id) = value.get("id").and_then(Value::as_u64) {
+            let outcome = match value.get("error") {
+                Some(error) => Err(error.clone()),
+                None => Ok(value.get("result").cloned().unwrap_or(Value::Null)),
+            };
+            self.responses.push((id, at, outcome));
+        } else {
+            let name = value["method"]
+                .as_str()
+                .expect("事件要有 method")
+                .to_owned();
+            self.events.push((at, name, value["params"].clone()));
+        }
+    }
+
+    fn has_response(&self, id: u64) -> bool {
+        self.responses.iter().any(|(got, ..)| *got == id)
+    }
+
+    /// 等某条请求的响应，返回到达时刻和结果。
+    async fn response(&mut self, id: u64) -> (Instant, Result<Value, Value>) {
+        loop {
+            if let Some(i) = self.responses.iter().position(|(got, ..)| *got == id) {
+                let (_, at, outcome) = self.responses.remove(i);
+                return (at, outcome);
+            }
+            self.read_one().await;
+        }
+    }
+
+    /// 发请求并等成功的响应。
+    async fn call(&mut self, method: &str, params: Value) -> Value {
+        let id = self.send(method, params).await;
+        match self.response(id).await.1 {
+            Ok(result) => result,
+            Err(error) => panic!("{method} 失败：{error}"),
+        }
+    }
+
+    /// 发请求并等错误响应。
+    async fn call_err(&mut self, method: &str, params: Value) -> Value {
+        let id = self.send(method, params).await;
+        match self.response(id).await.1 {
+            Ok(result) => panic!("{method} 应该失败，却返回了 {result}"),
+            Err(error) => error,
+        }
+    }
+
+    /// 等一条指定名字的事件，返回到达时刻和参数。
+    async fn event(&mut self, name: &str) -> (Instant, Value) {
+        loop {
+            if let Some(i) = self.events.iter().position(|(_, got, _)| got == name) {
+                let (at, _, params) = self.events.remove(i);
+                return (at, params);
+            }
+            self.read_one().await;
+        }
+    }
+
+    async fn hello(&mut self) -> Value {
+        let dir = std::env::temp_dir().to_string_lossy().into_owned();
+        self.call(
+            method::SESSION_HELLO,
+            json!({
+                "protocol": PROTOCOL_VERSION,
+                "appVersion": env!("CARGO_PKG_VERSION"),
+                "locale": "zh-CN",
+                "userDataDir": dir,
+                "cacheDir": dir,
+                "sessionId": self.session,
+                "recoveryFile": self.recovery.to_string_lossy(),
+            }),
+        )
+        .await
+    }
+
+    async fn open(&mut self, name: &str) -> u64 {
+        let doc = self
+            .call(method::DOC_OPEN, json!({ "path": sample(name) }))
+            .await;
+        doc["docId"].as_u64().expect("docId")
+    }
+
+    /// 请求渲染一块瓦片，等它的 `render.tileReady`。返回（从发请求到事件到达的时间，事件参数）。
+    async fn render_tile(&mut self, doc_id: u64, scale: f64, x: u32, y: u32) -> (Duration, Value) {
+        let sent = Instant::now();
+        let result = self
+            .call(
+                method::RENDER_TILES,
+                json!({
+                    "docId": doc_id,
+                    "pageId": 0,
+                    "scale": scale,
+                    "tiles": [{ "x": x, "y": y }],
+                    "priority": "visible",
+                }),
+            )
+            .await;
+        let request_id = result["requestIds"][0].as_u64().expect("requestIds");
+        let (at, ready) = self.event(event::RENDER_TILE_READY).await;
+        assert_eq!(ready["requestId"], request_id, "{ready}");
+        (at.duration_since(sent), ready)
+    }
+
+    /// 恢复文件里记了几份文档。
+    fn recovery_docs(&self) -> usize {
+        let Ok(bytes) = std::fs::read(&self.recovery) else {
+            return 0;
+        };
+        let state: Value = serde_json::from_slice(&bytes).unwrap();
+        state["docs"].as_array().map_or(0, Vec::len)
+    }
+}
+
+#[tokio::test]
+async fn hello_open_render_and_read_the_tile_from_shared_memory() {
+    let mut engine = Engine::start(None).await;
+    let hello = engine.hello().await;
+    assert_eq!(hello["protocol"], PROTOCOL_VERSION);
+    assert_eq!(hello["restored"], json!([]));
+    assert!(
+        hello["pdfiumRevision"]
+            .as_str()
+            .is_some_and(|s| s.starts_with("pdfium ")),
+        "{hello}"
+    );
+
+    let doc = engine
+        .call(
+            method::DOC_OPEN,
+            json!({ "path": sample("freight-bl-composite.pdf") }),
+        )
+        .await;
+    assert_eq!(doc["pageCount"], 1, "{doc}");
+    let doc_id = doc["docId"].as_u64().unwrap();
+
+    // 1 倍缩放下左上角那块瓦片盖住大半页，里面一定有内容。
+    let region = shm::open(&engine.session).unwrap();
+    let (_, ready) = engine.render_tile(doc_id, 1.0, 0, 0).await;
+    assert_eq!(
+        (&ready["docId"], &ready["pageId"], &ready["x"], &ready["y"]),
+        (&json!(doc_id), &json!(0), &json!(0), &json!(0)),
+        "{ready}"
+    );
+    assert_eq!(ready["scale"], 1.0);
+    assert_eq!(ready["version"], 0);
+    let slot = u32::try_from(ready["slot"].as_u64().unwrap()).unwrap();
+    let generation = u32::try_from(ready["generation"].as_u64().unwrap()).unwrap();
+    let pixels = region.read_tile(slot, generation).unwrap();
+    assert_eq!(pixels.len(), shm::TILE_BYTES);
+    let inked = pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .filter(|px| px[0] < 250 || px[1] < 250 || px[2] < 250)
+        .count();
+    assert!(
+        inked > 1000,
+        "瓦片里应该有页面内容，非白像素只有 {inked} 个"
+    );
+
+    // 代数对不上的读取被拒绝，主进程据此返回 410。
+    assert!(region.read_tile(slot, generation + 2).is_err());
+    let stale = engine
+        .call_err(
+            method::TILE_FETCH,
+            json!({ "slot": slot, "generation": generation + 2 }),
+        )
+        .await;
+    assert_eq!(stale["code"], ErrorCode::TileGenerationStale.code());
+}
+
+/// 瓦片渲染完，事件要马上发出去，不能等读循环的定时器（修复前最坏要等 500 ms）。
+#[tokio::test]
+async fn tile_ready_event_is_not_held_back_on_an_idle_pipe() {
+    let mut engine = Engine::start(None).await;
+    engine.hello().await;
+    let doc_id = engine.open("freight-bl-composite.pdf").await;
+    let mut worst = Duration::ZERO;
+    for i in 0..6u32 {
+        // 每次都等上一块完全结束再发下一块，让管道在渲染期间是空闲的。
+        let (elapsed, _) = engine.render_tile(doc_id, 4.0, i * 512, 512).await;
+        worst = worst.max(elapsed);
+    }
+    assert!(
+        worst < Duration::from_millis(250),
+        "从发出 render.tiles 到收到 render.tileReady 最慢 {worst:?}"
+    );
+}
+
+/// PDFium 线程忙着的时候，心跳照样有应答（《接口协议》第 4 节）。
+#[tokio::test]
+async fn ping_is_answered_while_pdfium_is_busy() {
+    let mut engine = Engine::start(None).await;
+    engine.hello().await;
+    engine.open("freight-bl-composite.pdf").await;
+
+    // bench.engine 要在 PDFium 线程上渲染几百块瓦片，足够慢。
+    let iterations = 600;
+    let bench = engine
+        .send(
+            method::BENCH_ENGINE,
+            json!({ "runs": 1, "iterations": iterations }),
+        )
+        .await;
+    let mut worst = Duration::ZERO;
+    for t in 0..5u64 {
+        let sent = Instant::now();
+        let id = engine.send(method::SESSION_PING, json!({ "t": t })).await;
+        let (at, pong) = engine.response(id).await;
+        assert_eq!(pong.unwrap()["t"], t);
+        worst = worst.max(at.duration_since(sent));
+    }
+    assert!(
+        worst < Duration::from_millis(100),
+        "PDFium 忙的时候 ping 最慢 {worst:?}"
+    );
+    // bench.engine 要是已经结束了，上面的断言就什么也没验证到。
+    assert!(
+        !engine.has_response(bench),
+        "5 次 ping 回来的时候 bench.engine 应该还在跑，否则要加大 iterations"
+    );
+
+    let result = engine.response(bench).await.1.unwrap();
+    assert_eq!(result["renderTile"]["samples"], iterations);
+}
+
+#[tokio::test]
+async fn doc_close_forgets_the_document() {
+    let mut engine = Engine::start(None).await;
+    engine.hello().await;
+    let doc_id = engine.open("freight-bl-composite.pdf").await;
+    assert_eq!(engine.recovery_docs(), 1);
+
+    let closed = engine
+        .call(
+            method::DOC_CLOSE,
+            json!({ "docId": doc_id, "discard": false }),
+        )
+        .await;
+    assert_eq!(closed, Value::Null);
+    assert_eq!(
+        engine.recovery_docs(),
+        0,
+        "关闭后恢复文件里不该再有这份文档"
+    );
+
+    let again = engine
+        .call_err(method::DOC_CLOSE, json!({ "docId": doc_id }))
+        .await;
+    assert_eq!(again["code"], ErrorCode::InvalidArgument.code());
+}
+
+/// 引擎被强制结束后，新引擎按恢复文件把文档重新打开，并在 `session.hello` 里报告（方案 9.3）。
+#[tokio::test]
+async fn a_new_engine_reopens_documents_from_the_recovery_file() {
+    let recovery = std::env::temp_dir().join(format!(
+        "magpdf-e2e-recovery-{}-{}.json",
+        std::process::id(),
+        pipe::random_token(6).unwrap()
+    ));
+    let mut first = Engine::start(Some(recovery.clone())).await;
+    assert_eq!(first.hello().await["restored"], json!([]));
+    first.open("freight-bl-composite.pdf").await;
+    // 结束进程，但留下恢复文件。
+    first.child.kill().unwrap();
+    first.child.wait().unwrap();
+    first.recovery = PathBuf::new();
+    drop(first);
+
+    let mut second = Engine::start(Some(recovery)).await;
+    let hello = second.hello().await;
+    let restored = hello["restored"].as_array().expect("restored");
+    assert_eq!(restored.len(), 1, "{hello}");
+    assert_eq!(restored[0]["path"], sample("freight-bl-composite.pdf"));
+    assert_eq!(restored[0]["pageCount"], 1);
+
+    // 恢复出来的文档直接可用。
+    let doc_id = restored[0]["docId"].as_u64().unwrap();
+    let (_, ready) = second.render_tile(doc_id, 1.0, 0, 0).await;
+    assert_eq!(ready["docId"], doc_id);
+}
+
+#[tokio::test]
+async fn unknown_method_is_rejected_and_shutdown_exits_cleanly() {
+    let mut engine = Engine::start(None).await;
+    engine.hello().await;
+    let error = engine.call_err("no.such.method", json!({})).await;
+    assert_eq!(error["code"], ErrorCode::Protocol.code());
+
+    let bad = engine
+        .call_err(method::DOC_OPEN, json!({ "path": 42 }))
+        .await;
+    assert_eq!(bad["code"], ErrorCode::InvalidArgument.code());
+
+    assert_eq!(engine.call(method::SESSION_SHUTDOWN, json!({})).await, true);
+    let deadline = Instant::now() + STEP_TIMEOUT;
+    let status = loop {
+        if let Some(status) = engine.child.try_wait().unwrap() {
+            break status;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "session.shutdown 之后引擎没有退出"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
+    assert!(status.success(), "{status}");
+}

@@ -8,7 +8,8 @@ use anyhow::{Context, Result, bail};
 use magpdf_ipc::frame::{self};
 use magpdf_ipc::messages::{
     self, BenchEngineParams, BenchEngineResult, DocOpenParams, HelloParams, HelloResult,
-    PROTOCOL_VERSION, PingParams, Stats,
+    PROTOCOL_VERSION, PingParams, RenderPriority, RenderTilesParams, RenderTilesResult, Stats,
+    TileCoord,
 };
 use magpdf_ipc::{pipe, shm};
 use serde::Serialize;
@@ -29,10 +30,16 @@ pub struct BenchReport {
     pub ping_p95_us: f64,
     pub tile_fetch_median_ms: f64,
     pub tile_fetch_p95_ms: f64,
+    /// 从发出 `render.tiles`（一块瓦片）到收到它的 `render.tileReady`。
+    pub tile_event_median_ms: f64,
+    pub tile_event_p95_ms: f64,
     pub json_share_of_roundtrip: f64,
     pub msgpack_vs_json_bytes: f64,
     pub engine: BenchEngineResult,
+    /// 强制结束引擎到新引擎应答 `session.hello` 的时间。
     pub restart_ms: Option<f64>,
+    /// 新引擎按恢复文件重新打开的文档数。
+    pub restored_docs: Option<usize>,
     pub pass: BenchPass,
 }
 
@@ -155,11 +162,8 @@ impl Host {
         }
     }
 
-    async fn rpc<P: Serialize, R: DeserializeOwned>(
-        &mut self,
-        method: &str,
-        params: &P,
-    ) -> Result<R> {
+    /// 发一条请求，返回它的 id。
+    async fn send_request<P: Serialize>(&mut self, method: &str, params: &P) -> Result<u64> {
         let id = self.next_id;
         self.next_id += 1;
         // 直接走 serde_json::Value，避免 messages::JsonValue 把整数收成 f64 后
@@ -174,11 +178,13 @@ impl Host {
         let bytes = frame::encode_body(&body);
         let client = self.client.as_mut().context("尚未连接引擎")?;
         client.write_all(&bytes).await.context("写管道失败")?;
-        let deadline = Instant::now() + Duration::from_secs(30);
-        loop {
-            if Instant::now() > deadline {
-                bail!("等待 {method} 响应超时");
-            }
+        Ok(id)
+    }
+
+    /// 读一条消息：响应或事件。
+    async fn read_message(&mut self) -> Result<serde_json::Value> {
+        let client = self.client.as_mut().context("尚未连接引擎")?;
+        let read = async {
             let mut len_buf = [0u8; 4];
             client
                 .read_exact(&mut len_buf)
@@ -190,30 +196,91 @@ impl Host {
             }
             let mut body = vec![0u8; len];
             client.read_exact(&mut body).await.context("读帧正文失败")?;
-            let value: serde_json::Value =
-                serde_json::from_slice(&body).context("解码 JSON 失败")?;
-            // 跳过通知（无 id），只收下匹配的响应。
-            if value.get("method").is_some() && value.get("id").is_none() {
+            serde_json::from_slice(&body).context("解码 JSON 失败")
+        };
+        tokio::time::timeout(Duration::from_secs(30), read)
+            .await
+            .context("等引擎的消息超时")?
+    }
+
+    /// 从一条响应里取出 `result`，错误响应转成 `Err`。
+    fn result_of(method: &str, value: &serde_json::Value) -> Result<serde_json::Value> {
+        if let Some(err) = value.get("error") {
+            let code = err.get("code").and_then(|c| c.as_i64()).unwrap_or(0);
+            let message = err
+                .get("message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("(无消息)");
+            bail!("RPC {method} 失败：[{code}] {message}");
+        }
+        value.get("result").cloned().context("响应缺少 result")
+    }
+
+    async fn rpc<P: Serialize, R: DeserializeOwned>(
+        &mut self,
+        method: &str,
+        params: &P,
+    ) -> Result<R> {
+        let id = self.send_request(method, params).await?;
+        loop {
+            let value = self.read_message().await?;
+            // 跳过事件（没有 id）和别的请求的响应，只收下匹配的响应。
+            if value.get("id").and_then(|v| v.as_u64()) != Some(id) {
                 continue;
             }
-            let resp_id = value
-                .get("id")
-                .and_then(|v| v.as_u64())
-                .context("响应缺少 id")?;
-            if resp_id != id {
-                continue;
-            }
-            if let Some(err) = value.get("error") {
-                let code = err.get("code").and_then(|c| c.as_i64()).unwrap_or(0);
-                let message = err
-                    .get("message")
-                    .and_then(|m| m.as_str())
-                    .unwrap_or("(无消息)");
-                bail!("RPC {method} 失败：[{code}] {message}");
-            }
-            let result = value.get("result").cloned().context("响应缺少 result")?;
+            let result = Self::result_of(method, &value)?;
             return serde_json::from_value(result).context("解析 result 失败");
         }
+    }
+
+    /// 请求渲染一块瓦片，等到它的 `render.tileReady`，返回从发出请求到收到事件的时间（微秒）。
+    async fn render_tile_us(&mut self, doc_id: u32, scale: f32, x: u32, y: u32) -> Result<f64> {
+        let t0 = Instant::now();
+        let id = self
+            .send_request(
+                messages::method::RENDER_TILES,
+                &RenderTilesParams {
+                    doc_id,
+                    page_id: 0,
+                    scale,
+                    tiles: vec![TileCoord { x, y }],
+                    priority: RenderPriority::Visible,
+                },
+            )
+            .await?;
+        let mut request_id = None;
+        let mut ready = Vec::new();
+        loop {
+            let value = self.read_message().await?;
+            if value.get("id").and_then(|v| v.as_u64()) == Some(id) {
+                let result = Self::result_of(messages::method::RENDER_TILES, &value)?;
+                let result: RenderTilesResult =
+                    serde_json::from_value(result).context("解析 render.tiles 的结果失败")?;
+                request_id = result.request_ids.first().copied();
+            } else if value.get("method").and_then(|m| m.as_str())
+                == Some(messages::event::RENDER_TILE_READY)
+                && let Some(params) = value.get("params")
+                && let Some(got) = params.get("requestId").and_then(|v| v.as_u64())
+            {
+                ready.push(got);
+            }
+            if let Some(request_id) = request_id
+                && ready.contains(&u64::from(request_id))
+            {
+                return Ok(t0.elapsed().as_secs_f64() * 1e6);
+            }
+        }
+    }
+
+    /// 测量 `render.tiles` 到 `render.tileReady` 的端到端时间：每次一块 4 倍缩放的瓦片，位置各不相同。
+    pub async fn measure_tile_event_us(&mut self, doc_id: u32, n: usize) -> Result<Stats> {
+        let mut samples = Vec::with_capacity(n);
+        for i in 0..n {
+            let i = u32::try_from(i).unwrap_or(0);
+            let (x, y) = ((i % 4) * shm::TILE_SIZE, (i / 4 % 6) * shm::TILE_SIZE);
+            samples.push(self.render_tile_us(doc_id, 4.0, x, y).await?);
+        }
+        Ok(Stats::from_samples(samples))
     }
 
     pub async fn hello(&mut self) -> Result<HelloResult> {
@@ -290,21 +357,21 @@ impl Host {
         Ok(Stats::from_samples(samples))
     }
 
-    /// 强制结束引擎后重新拉起并完成 hello + 打开样本，测量恢复耗时。
-    pub async fn force_restart_ms(&mut self) -> Result<f64> {
-        // 确保恢复文件里有文档。
-        let sample = self.cfg.sample_pdf.clone();
-        if sample.is_file() {
-            let _ = self.open_doc(&sample).await;
-        }
+    /// 强制结束引擎后重新拉起并完成 hello，测量恢复耗时。调用前要已经打开过文档（恢复文件里有记录）。
+    ///
+    /// 返回（耗时毫秒，引擎按恢复文件重新打开的文档数）。引擎一份文档都没恢复时，退回到由主进程
+    /// 重新打开样本，这段时间也计入。
+    pub async fn force_restart(&mut self) -> Result<(f64, usize)> {
         let t0 = Instant::now();
         self.shutdown_engine();
         let _ = self.start_engine().await?;
-        let _ = self.hello().await?;
-        if sample.is_file() {
+        let hello = self.hello().await?;
+        let restored = hello.restored.len();
+        let sample = self.cfg.sample_pdf.clone();
+        if restored == 0 && sample.is_file() {
             let _ = self.open_doc(&sample).await?;
         }
-        Ok(t0.elapsed().as_secs_f64() * 1e3)
+        Ok((t0.elapsed().as_secs_f64() * 1e3, restored))
     }
 
     pub async fn run_bench(&mut self) -> Result<BenchReport> {
@@ -321,15 +388,16 @@ impl Host {
         if !sample.is_file() {
             bail!("样本不存在：{}", sample.display());
         }
-        let _ = self.open_doc(&sample).await?;
+        let doc = self.open_doc(&sample).await?;
         let ping = self.measure_ping_us(1000).await?;
         let engine = self.bench_engine(200).await?;
         let tile = self.measure_tile_fetch_ms(200).await?;
-        let restart_ms = match self.force_restart_ms().await {
-            Ok(ms) => Some(ms),
+        let tile_event = self.measure_tile_event_us(doc.doc_id, 200).await?;
+        let (restart_ms, restored_docs) = match self.force_restart().await {
+            Ok((ms, restored)) => (Some(ms), Some(restored)),
             Err(e) => {
                 tracing::warn!("重启测量失败：{e:#}");
-                None
+                (None, None)
             }
         };
         let json_share = if engine.engine_roundtrip.median_us > 0.0 {
@@ -350,7 +418,9 @@ impl Host {
         let pass = BenchPass {
             tile_fetch_under_5ms: tile_ok,
             ping_p95_under_2ms: ping.p95_us < 2000.0,
-            restart_under_5s: restart_ms.map(|ms| ms < 5000.0).unwrap_or(false),
+            // 重启够快还不够：引擎要真的按恢复文件把文档重新打开了才算恢复。
+            restart_under_5s: restart_ms.is_some_and(|ms| ms < 5000.0)
+                && restored_docs.is_some_and(|n| n > 0),
         };
         Ok(BenchReport {
             protocol_version: PROTOCOL_VERSION,
@@ -364,10 +434,13 @@ impl Host {
             ping_p95_us: ping.p95_us,
             tile_fetch_median_ms: tile.median_us / 1000.0,
             tile_fetch_p95_ms: tile_p95_ms,
+            tile_event_median_ms: tile_event.median_us / 1000.0,
+            tile_event_p95_ms: tile_event.p95_us / 1000.0,
             json_share_of_roundtrip: json_share,
             msgpack_vs_json_bytes: msgpack_vs_json,
             engine,
             restart_ms,
+            restored_docs,
             pass,
         })
     }
