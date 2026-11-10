@@ -1,0 +1,98 @@
+From 0868e1776e38dc8aced7d5180f7ad4fe7d14182c Mon Sep 17 00:00:00 2001
+From: jackwang0009 <93422958+jackwang0009@users.noreply.github.com>
+Date: Mon, 9 Nov 2026 11:12:55 +0800
+Subject: [PATCH 2/3] [upstream-candidate] Write Tc and Tw when generating
+ content streams
+
+CPDF_PageContentGenerator::ProcessText() only wrote Tm, Tf, Tr and TJ, so text that relied on non-zero character or word spacing was written back with zero spacing and shifted glyphs.
+
+Both parameters are part of the text state. ProcessGraphics() already wraps every object in q/Q, and q/Q saves and restores the text state, so writing the non-default values inside the BT/ET block cannot leak into later objects. Add a unit test that covers non-default values and the default (nothing written) case.
+---
+ .../edit/cpdf_pagecontentgenerator.cpp        | 12 +++++
+ .../cpdf_pagecontentgenerator_unittest.cpp    | 47 +++++++++++++++++++
+ 2 files changed, 59 insertions(+)
+
+diff --git a/core/fpdfapi/edit/cpdf_pagecontentgenerator.cpp b/core/fpdfapi/edit/cpdf_pagecontentgenerator.cpp
+index 207468f9b4..4e80e03734 100644
+--- a/core/fpdfapi/edit/cpdf_pagecontentgenerator.cpp
++++ b/core/fpdfapi/edit/cpdf_pagecontentgenerator.cpp
+@@ -997,6 +997,18 @@ void CPDF_PageContentGenerator::ProcessText(fxcrt::ostringstream* buf,
+ 
+   *buf << "/" << PDF_NameEncode(dict_name) << " ";
+   WriteFloat(*buf, pTextObj->GetFontSize()) << " Tf ";
++
++  // Tc and Tw are part of the graphics state, so the enclosing q/Q pair
++  // restores them. Only write non-default values to avoid bloating the stream.
++  float char_space = pTextObj->text_state().GetCharSpace();
++  if (char_space != 0.0f) {
++    WriteFloat(*buf, char_space) << " Tc ";
++  }
++  float word_space = pTextObj->text_state().GetWordSpace();
++  if (word_space != 0.0f) {
++    WriteFloat(*buf, word_space) << " Tw ";
++  }
++
+   *buf << static_cast<int>(pTextObj->GetTextRenderMode()) << " Tr ";
+ 
+   *buf << "[";
+diff --git a/core/fpdfapi/edit/cpdf_pagecontentgenerator_unittest.cpp b/core/fpdfapi/edit/cpdf_pagecontentgenerator_unittest.cpp
+index 031d7edecb..aa3a2c6f90 100644
+--- a/core/fpdfapi/edit/cpdf_pagecontentgenerator_unittest.cpp
++++ b/core/fpdfapi/edit/cpdf_pagecontentgenerator_unittest.cpp
+@@ -447,6 +447,53 @@ TEST_F(CPDFPageContentGeneratorTest, ProcessText) {
+   EXPECT_EQ("Helvetica", font_desc->GetNameFor("FontName"));
+ }
+ 
++TEST_F(CPDFPageContentGeneratorTest, ProcessTextCharAndWordSpace) {
++  auto doc = std::make_unique<CPDF_TestDocument>();
++  doc->CreateNewDoc();
++
++  RetainPtr<CPDF_Dictionary> pPageDict(doc->CreateNewPage(0));
++  auto pTestPage = pdfium::MakeRetain<CPDF_Page>(doc.get(), pPageDict);
++  CPDF_PageContentGenerator generator(pTestPage.Get());
++
++  // Non-default Tc and Tw must be written before the text showing operator.
++  {
++    auto pTextObj = std::make_unique<CPDF_TextObject>();
++    pTextObj->mutable_text_state().SetFont(
++        CPDF_Font::GetStockFont(doc.get(), "Times-Roman"));
++    pTextObj->mutable_text_state().SetFontSize(10.0f);
++    pTextObj->mutable_text_state().SetCharSpace(0.5f);
++    pTextObj->mutable_text_state().SetWordSpace(-1.25f);
++    pTextObj->SetText("ab");
++
++    fxcrt::ostringstream buf;
++    TestProcessText(&generator, &buf, pTextObj.get());
++    ByteString text_string(buf);
++    // The q/Q pair encloses the whole text object, so Tc and Tw are restored
++    // and cannot leak into the objects that follow.
++    EXPECT_TRUE(text_string.Contains(" 10 Tf .5 Tc -1.25 Tw 0 Tr "));
++    EXPECT_EQ('q', text_string[0]);
++    EXPECT_EQ("Q\n", text_string.Last(2));
++    EXPECT_EQ('q', text_string[0]);
++    EXPECT_EQ("Q\n", text_string.Last(2));
++  }
++
++  // Default values are not written.
++  {
++    auto pTextObj = std::make_unique<CPDF_TextObject>();
++    pTextObj->mutable_text_state().SetFont(
++        CPDF_Font::GetStockFont(doc.get(), "Times-Roman"));
++    pTextObj->mutable_text_state().SetFontSize(10.0f);
++    pTextObj->SetText("ab");
++
++    fxcrt::ostringstream buf;
++    TestProcessText(&generator, &buf, pTextObj.get());
++    ByteString text_string(buf);
++    EXPECT_FALSE(text_string.Contains(" Tc "));
++    EXPECT_FALSE(text_string.Contains(" Tw "));
++    EXPECT_TRUE(text_string.Contains(" 10 Tf 0 Tr "));
++  }
++}
++
+ TEST_F(CPDFPageContentGeneratorTest, ProcessEmptyForm) {
+   auto doc = std::make_unique<CPDF_TestDocument>();
+   doc->CreateNewDoc();
+-- 
+2.51.2.windows.1
+

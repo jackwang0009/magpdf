@@ -1,0 +1,1216 @@
+From 200341c2e995388b413b578d24dd708112e605a0 Mon Sep 17 00:00:00 2001
+From: jackwang0009 <93422958+jackwang0009@users.noreply.github.com>
+Date: Mon, 9 Nov 2026 19:10:14 +0800
+Subject: [PATCH 4/5] [upstream-candidate] Write colors in their own color space
+
+CPDF_PageContentGenerator wrote every non-gray color as DeviceRGB,
+dropping the color space (Separation, Lab, ICCBased, Indexed, DeviceN,
+Pattern, CalGray/CalRGB) and, for Separation /None, painting a black
+block where the original is blank. Write the color in the space it was
+set in: device spaces keep g/G, rg/RG, k/K with the raw components;
+CalGray/CalRGB/Lab/ICCBased write `/Name cs` + components + `sc`/`SC`;
+Separation/DeviceN/Indexed write `/Name cs` + components + `scn`/`SCN`;
+patterns write the pattern color space, the underlying color for
+uncolored tiling patterns, and `/Name scn`/`SCN`. Resource names are
+reused when they still refer to the same space, otherwise the array is
+realized as a new FXC resource (FXP for patterns). A color space that
+cannot be referred to by name falls back to the equivalent RGB color.
+
+The parser now keeps the resource name that selected a CalGray/CalRGB/
+Lab/ICCBased color space instead of clobbering it with the family name,
+and threads the pattern resource name through the color state, so the
+generator can reuse the names.
+
+Tests: CPDFPageContentGeneratorTest.ProcessColorSpaces covers Lab
+(stored name), DeviceCMYK/DeviceGray (raw components) and Separation
+/None (written back faithfully).
+
+Verification (ops_diff.py): synthetic colour diffs 259 -> 0, public
+1303 -> 0; no-diff pages 38/67 -> 54/67 synthetic, 373/388 -> 384/388
+public.
+---
+ .../edit/cpdf_pagecontentgenerator.cpp        | 281 ++++++++++++++++--
+ core/fpdfapi/edit/cpdf_pagecontentgenerator.h |  41 +++
+ .../cpdf_pagecontentgenerator_unittest.cpp    | 117 ++++++++
+ core/fpdfapi/page/cpdf_basedcs.cpp            |   4 +
+ core/fpdfapi/page/cpdf_basedcs.h              |   3 +
+ core/fpdfapi/page/cpdf_color.cpp              |  18 ++
+ core/fpdfapi/page/cpdf_color.h                |   9 +
+ core/fpdfapi/page/cpdf_colorspace.cpp         |  42 ++-
+ core/fpdfapi/page/cpdf_colorspace.h           |  14 +
+ core/fpdfapi/page/cpdf_colorstate.cpp         |  77 ++++-
+ core/fpdfapi/page/cpdf_colorstate.h           |  41 ++-
+ core/fpdfapi/page/cpdf_pattern.h              |   4 +
+ .../fpdfapi/page/cpdf_streamcontentparser.cpp |  87 +++++-
+ core/fpdfapi/page/cpdf_streamcontentparser.h  |   6 +
+ 14 files changed, 687 insertions(+), 57 deletions(-)
+
+diff --git a/core/fpdfapi/edit/cpdf_pagecontentgenerator.cpp b/core/fpdfapi/edit/cpdf_pagecontentgenerator.cpp
+index 9db44a74db..5c8cd17055 100644
+--- a/core/fpdfapi/edit/cpdf_pagecontentgenerator.cpp
++++ b/core/fpdfapi/edit/cpdf_pagecontentgenerator.cpp
+@@ -19,6 +19,8 @@
+ #include "core/fpdfapi/edit/cpdf_stringarchivestream.h"
+ #include "core/fpdfapi/font/cpdf_truetypefont.h"
+ #include "core/fpdfapi/font/cpdf_type1font.h"
++#include "core/fpdfapi/page/cpdf_color.h"
++#include "core/fpdfapi/page/cpdf_colorspace.h"
+ #include "core/fpdfapi/page/cpdf_contentmarks.h"
+ #include "core/fpdfapi/page/cpdf_docpagedata.h"
+ #include "core/fpdfapi/page/cpdf_form.h"
+@@ -28,7 +30,9 @@
+ #include "core/fpdfapi/page/cpdf_page.h"
+ #include "core/fpdfapi/page/cpdf_path.h"
+ #include "core/fpdfapi/page/cpdf_pathobject.h"
++#include "core/fpdfapi/page/cpdf_pattern.h"
+ #include "core/fpdfapi/page/cpdf_textobject.h"
++#include "core/fpdfapi/page/cpdf_tilingpattern.h"
+ #include "core/fpdfapi/parser/cpdf_array.h"
+ #include "core/fpdfapi/parser/cpdf_dictionary.h"
+ #include "core/fpdfapi/parser/cpdf_document.h"
+@@ -60,22 +64,6 @@ constexpr const char* kResourceKeys[] = {"ExtGState", "Font", "XObject"};
+ // Value: The resource names of a given type.
+ using ResourcesMap = std::map<ByteString, std::set<ByteString>>;
+ 
+-// Returns whether it wrote to `buf` or not.
+-bool WriteColorToStream(fxcrt::ostringstream& buf, const CPDF_Color* color) {
+-  if (!color || (!color->IsColorSpaceRGB() && !color->IsColorSpaceGray())) {
+-    return false;
+-  }
+-
+-  std::optional<FX_RGB_STRUCT<float>> colors = color->GetRGB();
+-  if (!colors.has_value()) {
+-    return false;
+-  }
+-
+-  WriteFloat(buf, colors.value().red) << " ";
+-  WriteFloat(buf, colors.value().green) << " ";
+-  WriteFloat(buf, colors.value().blue);
+-  return true;
+-}
+ 
+ // Balances the "q" operator ProcessGraphics() emitted.
+ void EndProcessGraphics(fxcrt::ostringstream& buf) {
+@@ -814,15 +802,264 @@ void CPDF_PageContentGenerator::ProcessPath(fxcrt::ostringstream* buf,
+ // "W" and "W*" modify the clipping path using the nonzero winding rule and
+ // even-odd rules, respectively.
+ // "q" saves the graphics state, so that the settings can later be reversed
++bool CPDF_PageContentGenerator::WriteColorToStream(
++    fxcrt::ostringstream& buf,
++    const CPDF_Color* color,
++    ByteString colorspace_name,
++    ByteString pattern_name,
++    bool is_fill) {
++  if (!color || color->IsNull()) {
++    return false;
++  }
++
++  RetainPtr<CPDF_ColorSpace> colorspace = color->GetColorSpace();
++  if (!colorspace) {
++    return false;
++  }
++
++  if (color->IsPattern()) {
++    return WritePatternColorToStream(buf, color, colorspace_name, pattern_name,
++                                     is_fill);
++  }
++
++  pdfium::span<const float> components = color->GetComponents();
++  if (components.size() < colorspace->ComponentCount()) {
++    // A malformed color with fewer components than its color space needs.
++    // There is nothing safe to write for it.
++    return false;
++  }
++
++  switch (colorspace->GetFamily()) {
++    case CPDF_ColorSpace::Family::kDeviceGray:
++      WriteFloat(buf, components[0]) << (is_fill ? " g " : " G ");
++      return true;
++    case CPDF_ColorSpace::Family::kDeviceRGB:
++      WriteFloat(buf, components[0]) << " ";
++      WriteFloat(buf, components[1]) << " ";
++      WriteFloat(buf, components[2]) << (is_fill ? " rg " : " RG ");
++      return true;
++    case CPDF_ColorSpace::Family::kDeviceCMYK:
++      WriteFloat(buf, components[0]) << " ";
++      WriteFloat(buf, components[1]) << " ";
++      WriteFloat(buf, components[2]) << " ";
++      WriteFloat(buf, components[3]) << (is_fill ? " k " : " K ");
++      return true;
++    case CPDF_ColorSpace::Family::kSeparation:
++      // A Separation color space named /None paints nothing: its tint
++      // transform is never applied (CPDF_SeparationCS::GetRGB() returns
++      // nullopt), so writing the `cs`/`scn` operators back preserves the
++      // blank area exactly. Converting it to an equivalent RGB color would
++      // invent ink where the original has none.
++      [[fallthrough]];
++    case CPDF_ColorSpace::Family::kDeviceN:
++    case CPDF_ColorSpace::Family::kIndexed:
++      if (WriteNamedColorToStream(buf, colorspace, colorspace_name,
++                                  components, /*use_names=*/true, is_fill)) {
++        return true;
++      }
++      break;
++    case CPDF_ColorSpace::Family::kCalGray:
++    case CPDF_ColorSpace::Family::kCalRGB:
++    case CPDF_ColorSpace::Family::kLab:
++    case CPDF_ColorSpace::Family::kICCBased:
++      if (WriteNamedColorToStream(buf, colorspace, colorspace_name,
++                                  components, /*use_names=*/false, is_fill)) {
++        return true;
++      }
++      break;
++    default:
++      break;
++  }
++
++  // A color space this generator does not know how to write, or one that
++  // cannot be referred to by name: keep the previous behavior of writing
++  // the equivalent RGB color, so the rendering is preserved even though the
++  // color space itself is lost.
++  std::optional<FX_RGB_STRUCT<float>> rgb = color->GetRGB();
++  if (!rgb.has_value()) {
++    return false;
++  }
++  WriteFloat(buf, rgb.value().red) << " ";
++  WriteFloat(buf, rgb.value().green) << " ";
++  WriteFloat(buf, rgb.value().blue) << (is_fill ? " rg " : " RG ");
++  return true;
++}
++
++bool CPDF_PageContentGenerator::WriteNamedColorToStream(
++    fxcrt::ostringstream& buf,
++    RetainPtr<CPDF_ColorSpace> colorspace,
++    ByteString stored_name,
++    pdfium::span<const float> components,
++    bool use_names,
++    bool is_fill) {
++  ByteString name = GetColorSpaceResourceName(colorspace, stored_name);
++  if (name.IsEmpty()) {
++    return false;
++  }
++  buf << "/" << PDF_NameEncode(name) << (is_fill ? " cs " : " CS ");
++  const uint32_t count = colorspace->ComponentCount();
++  for (uint32_t i = 0; i < count; ++i) {
++    if (i > 0) {
++      buf << " ";
++    }
++    WriteFloat(buf, components[i]);
++  }
++  if (use_names) {
++    buf << (is_fill ? " scn " : " SCN ");
++  } else {
++    buf << (is_fill ? " sc " : " SC ");
++  }
++  return true;
++}
++
++ByteString CPDF_PageContentGenerator::GetColorSpaceResourceName(
++    RetainPtr<CPDF_ColorSpace> colorspace,
++    ByteString stored_name) const {
++  if (!stored_name.IsEmpty()) {
++    // A `cs` operand of one of the device names resolves through
++    // FindColorSpace() to the default color space when one is defined, and
++    // to the stock device space otherwise. The stored name is the name the
++    // `cs` operator used, so writing it back selects the same color space.
++    if (stored_name == "DeviceGray" || stored_name == "DeviceRGB" ||
++        stored_name == "DeviceCMYK") {
++      return stored_name;
++    }
++    if (stored_name == "Pattern" &&
++        colorspace->GetFamily() == CPDF_ColorSpace::Family::kPattern &&
++        !colorspace->GetBaseColorSpace()) {
++      return stored_name;
++    }
++    RetainPtr<const CPDF_Dictionary> resources = obj_holder_->GetResources();
++    if (colorspace->NameIsDefinedInResources(resources.Get(),
++                                             stored_name.AsStringView())) {
++      return stored_name;
++    }
++  }
++
++  // Otherwise, realize the color space array as a new resource. Stock color
++  // spaces have no array and cannot be realized; they are always selected by
++  // their predefined name, handled above.
++  RetainPtr<const CPDF_Array> array = colorspace->GetArray();
++  if (!array || !document_) {
++    return ByteString();
++  }
++  if (array->GetObjNum()) {
++    return RealizeResource(array.Get(), "ColorSpace");
++  }
++  // Inline arrays cannot be referenced from the resources dictionary. Give
++  // the array its own indirect object first.
++  RetainPtr<CPDF_Object> array_copy = array->Clone();
++  document_->AddIndirectObject(array_copy);
++  return RealizeResource(array_copy.Get(), "ColorSpace");
++}
++
++bool CPDF_PageContentGenerator::WritePatternColorToStream(
++    fxcrt::ostringstream& buf,
++    const CPDF_Color* color,
++    ByteString colorspace_name,
++    ByteString pattern_name,
++    bool is_fill) {
++  RetainPtr<CPDF_Pattern> pattern = color->GetPattern();
++  if (!pattern) {
++    return false;
++  }
++  RetainPtr<CPDF_ColorSpace> colorspace = color->GetColorSpace();
++  if (!colorspace) {
++    return false;
++  }
++
++  // An uncolored tiling pattern takes the underlying color before the
++  // pattern name; a colored tiling pattern and a shading pattern do not.
++  // Resolve everything before writing, so a failure leaves `buf` untouched.
++  pdfium::span<const float> underlay;
++  size_t underlay_count = 0;
++  CPDF_TilingPattern* tiling = pattern->AsTilingPattern();
++  if (tiling && !tiling->colored()) {
++    RetainPtr<CPDF_ColorSpace> base = colorspace->GetBaseColorSpace();
++    underlay_count = base ? base->ComponentCount() : 0;
++    underlay = color->GetPatternComponents();
++    if (underlay.size() < underlay_count) {
++      return false;
++    }
++  }
++
++  ByteString cs_name = GetColorSpaceResourceName(colorspace, colorspace_name);
++  if (cs_name.IsEmpty()) {
++    return false;
++  }
++  ByteString name = GetPatternResourceName(pattern, pattern_name);
++  if (name.IsEmpty()) {
++    return false;
++  }
++
++  buf << "/" << PDF_NameEncode(cs_name) << (is_fill ? " cs " : " CS ");
++  for (size_t i = 0; i < underlay_count; ++i) {
++    if (i > 0) {
++      buf << " ";
++    }
++    WriteFloat(buf, underlay[i]);
++  }
++  if (underlay_count > 0) {
++    buf << " ";
++  }
++  buf << "/" << PDF_NameEncode(name) << (is_fill ? " scn " : " SCN ");
++  return true;
++}
++
++ByteString CPDF_PageContentGenerator::GetPatternResourceName(
++    RetainPtr<CPDF_Pattern> pattern,
++    ByteString stored_name) const {
++  RetainPtr<const CPDF_Dictionary> resources = obj_holder_->GetResources();
++  if (resources) {
++    RetainPtr<const CPDF_Dictionary> patterns =
++        resources->GetDictFor("Pattern");
++    if (patterns) {
++      RetainPtr<const CPDF_Object> pattern_obj = pattern->GetPatternObj();
++      RetainPtr<const CPDF_Object> pattern_direct =
++          pattern_obj ? pattern_obj->GetDirect() : nullptr;
++      if (pattern_direct) {
++        if (!stored_name.IsEmpty()) {
++          RetainPtr<const CPDF_Object> entry =
++              patterns->GetDirectObjectFor(stored_name.AsStringView());
++          if (entry && entry == pattern_direct) {
++            return stored_name;
++          }
++        }
++        for (const ByteString& key : patterns->GetKeys()) {
++          RetainPtr<const CPDF_Object> entry =
++              patterns->GetDirectObjectFor(key.AsStringView());
++          if (entry && entry == pattern_direct) {
++            return key;
++          }
++        }
++      }
++    }
++  }
++  if (!document_) {
++    return ByteString();
++  }
++  RetainPtr<CPDF_Object> pattern_obj = pattern->GetPatternObj();
++  if (!pattern_obj) {
++    return ByteString();
++  }
++  if (!pattern_obj->GetObjNum()) {
++    RetainPtr<CPDF_Object> pattern_copy = pattern_obj->Clone();
++    document_->AddIndirectObject(pattern_copy);
++    return RealizeResource(pattern_copy.Get(), "Pattern");
++  }
++  return RealizeResource(pattern_obj.Get(), "Pattern");
++}
++
+ void CPDF_PageContentGenerator::ProcessGraphics(fxcrt::ostringstream* buf,
+                                                 CPDF_PageObject* pPageObj) {
+   *buf << "q ";
+-  if (WriteColorToStream(*buf, pPageObj->color_state().GetFillColor())) {
+-    *buf << " rg ";
+-  }
+-  if (WriteColorToStream(*buf, pPageObj->color_state().GetStrokeColor())) {
+-    *buf << " RG ";
+-  }
++  const CPDF_ColorState& color_state = pPageObj->color_state();
++  WriteColorToStream(*buf, color_state.GetFillColor(),
++                     color_state.GetFillColorSpaceName(),
++                     color_state.GetFillPatternName(), /*is_fill=*/true);
++  WriteColorToStream(*buf, color_state.GetStrokeColor(),
++                     color_state.GetStrokeColorSpaceName(),
++                     color_state.GetStrokePatternName(), /*is_fill=*/false);
+   float line_width = pPageObj->graph_state().GetLineWidth();
+   if (line_width != 1.0f) {
+     WriteFloat(*buf, line_width) << " w ";
+diff --git a/core/fpdfapi/edit/cpdf_pagecontentgenerator.h b/core/fpdfapi/edit/cpdf_pagecontentgenerator.h
+index b37d06bb3a..e11e95bf69 100644
+--- a/core/fpdfapi/edit/cpdf_pagecontentgenerator.h
++++ b/core/fpdfapi/edit/cpdf_pagecontentgenerator.h
+@@ -14,8 +14,12 @@
+ 
+ #include "core/fxcrt/bytestring.h"
+ #include "core/fxcrt/fx_string_wrappers.h"
++#include "core/fxcrt/retain_ptr.h"
++#include "core/fxcrt/span.h"
+ #include "core/fxcrt/unowned_ptr.h"
+ 
++class CPDF_Color;
++class CPDF_ColorSpace;
+ class CPDF_ContentMarks;
+ class CPDF_Document;
+ class CPDF_FormObject;
+@@ -25,6 +29,7 @@ class CPDF_PageObject;
+ class CPDF_PageObjectHolder;
+ class CPDF_Path;
+ class CPDF_PathObject;
++class CPDF_Pattern;
+ class CPDF_TextObject;
+ 
+ class CPDF_PageContentGenerator {
+@@ -49,6 +54,42 @@ class CPDF_PageContentGenerator {
+   ByteString GetOrCreateDefaultGraphics() const;
+   ByteString RealizeResource(const CPDF_Object* pResource,
+                              ByteStringView type) const;
++  // Writes the fill or stroke color of `color` to `buf`, using the color
++  // space the color was set in rather than an equivalent RGB color.
++  // `colorspace_name`/`pattern_name` are the resource names that selected
++  // the color space/pattern, as recorded by the parser. Returns whether
++  // anything was written.
++  bool WriteColorToStream(fxcrt::ostringstream& buf,
++                          const CPDF_Color* color,
++                          ByteString colorspace_name,
++                          ByteString pattern_name,
++                          bool is_fill);
++  // Writes a color in a named color space: `/Name cs`/`CS` followed by the
++  // components and `sc`/`SC` (`use_names` selects `scn`/`SCN` instead, for
++  // the color spaces whose colors need names). Returns false when the color
++  // space cannot be referred to by name.
++  bool WriteNamedColorToStream(fxcrt::ostringstream& buf,
++                               RetainPtr<CPDF_ColorSpace> colorspace,
++                               ByteString stored_name,
++                               pdfium::span<const float> components,
++                               bool use_names,
++                               bool is_fill);
++  // Writes a pattern color: the pattern color space, then the underlying
++  // color for an uncolored tiling pattern, then `/Name scn`/`SCN`.
++  bool WritePatternColorToStream(fxcrt::ostringstream& buf,
++                                 const CPDF_Color* color,
++                                 ByteString colorspace_name,
++                                 ByteString pattern_name,
++                                 bool is_fill);
++  // Returns the name to use for `colorspace` in a `cs`/`CS` operator: the
++  // stored name when it still refers to this color space, a newly realized
++  // name for the color space array otherwise. Empty when the color space
++  // cannot be referred to by name at all.
++  ByteString GetColorSpaceResourceName(RetainPtr<CPDF_ColorSpace> colorspace,
++                                       ByteString stored_name) const;
++  // Returns the name to use for `pattern` in an `scn`/`SCN` operator.
++  ByteString GetPatternResourceName(RetainPtr<CPDF_Pattern> pattern,
++                                    ByteString stored_name) const;
+   const CPDF_ContentMarks* ProcessContentMarks(fxcrt::ostringstream* buf,
+                                                const CPDF_PageObject* pPageObj,
+                                                const CPDF_ContentMarks* pPrev);
+diff --git a/core/fpdfapi/edit/cpdf_pagecontentgenerator_unittest.cpp b/core/fpdfapi/edit/cpdf_pagecontentgenerator_unittest.cpp
+index aa3a2c6f90..ee691a708d 100644
+--- a/core/fpdfapi/edit/cpdf_pagecontentgenerator_unittest.cpp
++++ b/core/fpdfapi/edit/cpdf_pagecontentgenerator_unittest.cpp
+@@ -6,6 +6,7 @@
+ 
+ #include <iterator>
+ #include <memory>
++#include <set>
+ #include <utility>
+ 
+ #include "core/fpdfapi/font/cpdf_font.h"
+@@ -17,9 +18,11 @@
+ #include "core/fpdfapi/page/cpdf_textobject.h"
+ #include "core/fpdfapi/page/cpdf_textstate.h"
+ #include "core/fpdfapi/page/test_with_page_module.h"
++#include "core/fpdfapi/parser/cpdf_array.h"
+ #include "core/fpdfapi/parser/cpdf_dictionary.h"
+ #include "core/fpdfapi/parser/cpdf_document.h"
+ #include "core/fpdfapi/parser/cpdf_name.h"
++#include "core/fpdfapi/parser/cpdf_number.h"
+ #include "core/fpdfapi/parser/cpdf_parser.h"
+ #include "core/fpdfapi/parser/cpdf_reference.h"
+ #include "core/fpdfapi/parser/cpdf_stream.h"
+@@ -494,6 +497,120 @@ TEST_F(CPDFPageContentGeneratorTest, ProcessTextCharAndWordSpace) {
+   }
+ }
+ 
++TEST_F(CPDFPageContentGeneratorTest, ProcessColorSpaces) {
++  auto doc = std::make_unique<CPDF_TestDocument>();
++  doc->CreateNewDoc();
++
++  RetainPtr<CPDF_Dictionary> pPageDict(doc->CreateNewPage(0));
++
++  // Lab colour space in the page resources, as the parser would leave it:
++  // [/Lab << /WhitePoint [0.9505 1 1.089] /Range [-100 100 -100 100] >>].
++  RetainPtr<CPDF_Array> lab_array = doc->New<CPDF_Array>();
++  lab_array->Append(pdfium::MakeRetain<CPDF_Name>(nullptr, "Lab"));
++  RetainPtr<CPDF_Dictionary> lab_dict = doc->New<CPDF_Dictionary>();
++  RetainPtr<CPDF_Array> white_point = doc->New<CPDF_Array>();
++  white_point->AppendNew<CPDF_Number>(0.9505f);
++  white_point->AppendNew<CPDF_Number>(1.0f);
++  white_point->AppendNew<CPDF_Number>(1.089f);
++  lab_dict->SetFor("WhitePoint", std::move(white_point));
++  RetainPtr<CPDF_Array> range = doc->New<CPDF_Array>();
++  range->AppendNew<CPDF_Number>(-100.0f);
++  range->AppendNew<CPDF_Number>(100.0f);
++  range->AppendNew<CPDF_Number>(-100.0f);
++  range->AppendNew<CPDF_Number>(100.0f);
++  lab_dict->SetFor("Range", std::move(range));
++  lab_array->Append(std::move(lab_dict));
++  const uint32_t lab_obj_num = doc->AddIndirectObject(lab_array);
++
++  RetainPtr<CPDF_Dictionary> resources =
++      pPageDict->SetNewFor<CPDF_Dictionary>("Resources");
++  RetainPtr<CPDF_Dictionary> color_spaces =
++      resources->SetNewFor<CPDF_Dictionary>("ColorSpace");
++  color_spaces->SetNewFor<CPDF_Reference>("CSlab", doc.get(), lab_obj_num);
++
++  auto pTestPage = pdfium::MakeRetain<CPDF_Page>(doc.get(), pPageDict);
++  pTestPage->SetResources(resources);
++  CPDF_PageContentGenerator generator(pTestPage.Get());
++
++  std::set<const CPDF_Object*> visited;
++  RetainPtr<CPDF_ColorSpace> lab =
++      CPDF_ColorSpace::Load(doc.get(), lab_array.Get(), &visited);
++  ASSERT_TRUE(lab);
++
++  // Lab fill reuses its stored resource name; DeviceCMYK stroke is written
++  // with the raw components.
++  {
++    auto pPathObj = std::make_unique<CPDF_PathObject>();
++    pPathObj->set_filltype(CFX_FillRenderOptions::FillType::kWinding);
++    pPathObj->path().AppendRect(10, 5, 13, 30);
++    static const std::vector<float> lab_values = {50.0f, 80.0f, 0.0f};
++    pPathObj->mutable_color_state().SetFillColor(lab, lab_values, "CSlab");
++    static const std::vector<float> cmyk_values = {0.0f, 0.5f, 1.0f, 0.0f};
++    pPathObj->mutable_color_state().SetStrokeColor(
++        CPDF_ColorSpace::GetStockCS(CPDF_ColorSpace::Family::kDeviceCMYK),
++        cmyk_values);
++    fxcrt::ostringstream buf;
++    TestProcessPath(&generator, &buf, pPathObj.get());
++    ByteString path_string(buf);
++    EXPECT_EQ(ByteString("q /CSlab cs 50 80 0 sc 0 .5 1 0 K 10 5 3 25 re f Q\n"),
++              path_string);
++  }
++
++  // DeviceCMYK fill writes k; DeviceGray fill writes g.
++  {
++    auto pPathObj = std::make_unique<CPDF_PathObject>();
++    pPathObj->set_filltype(CFX_FillRenderOptions::FillType::kWinding);
++    pPathObj->path().AppendRect(10, 5, 13, 30);
++    static const std::vector<float> cmyk_values = {0.1f, 0.2f, 0.3f, 0.4f};
++    pPathObj->mutable_color_state().SetFillColor(
++        CPDF_ColorSpace::GetStockCS(CPDF_ColorSpace::Family::kDeviceCMYK),
++        cmyk_values);
++    fxcrt::ostringstream buf;
++    TestProcessPath(&generator, &buf, pPathObj.get());
++    ByteString path_string(buf);
++    EXPECT_EQ(ByteString("q .1 .2 .3 .4 k 10 5 3 25 re f Q\n"), path_string);
++  }
++  {
++    auto pPathObj = std::make_unique<CPDF_PathObject>();
++    pPathObj->set_filltype(CFX_FillRenderOptions::FillType::kWinding);
++    pPathObj->path().AppendRect(10, 5, 13, 30);
++    static const std::vector<float> gray_values = {0.5f};
++    pPathObj->mutable_color_state().SetFillColor(
++        CPDF_ColorSpace::GetStockCS(CPDF_ColorSpace::Family::kDeviceGray),
++        gray_values);
++    fxcrt::ostringstream buf;
++    TestProcessPath(&generator, &buf, pPathObj.get());
++    ByteString path_string(buf);
++    EXPECT_EQ(ByteString("q .5 g 10 5 3 25 re f Q\n"), path_string);
++  }
++
++  // Separation /None is written back faithfully (and leaves no ink), not
++  // dropped: dropping it would paint a black block where the original is
++  // blank. The array is realised under the first free FXC name.
++  {
++    RetainPtr<CPDF_Array> sep_array = doc->New<CPDF_Array>();
++    sep_array->Append(pdfium::MakeRetain<CPDF_Name>(nullptr, "Separation"));
++    sep_array->Append(pdfium::MakeRetain<CPDF_Name>(nullptr, "None"));
++    sep_array->Append(pdfium::MakeRetain<CPDF_Name>(nullptr, "DeviceCMYK"));
++    const uint32_t sep_obj_num = doc->AddIndirectObject(sep_array);
++    (void)sep_obj_num;
++    std::set<const CPDF_Object*> visited_sep;
++    RetainPtr<CPDF_ColorSpace> sep_none =
++        CPDF_ColorSpace::Load(doc.get(), sep_array.Get(), &visited_sep);
++    ASSERT_TRUE(sep_none);
++    auto pPathObj = std::make_unique<CPDF_PathObject>();
++    pPathObj->set_filltype(CFX_FillRenderOptions::FillType::kWinding);
++    pPathObj->path().AppendRect(10, 5, 13, 30);
++    static const std::vector<float> none_values = {1.0f};
++    pPathObj->mutable_color_state().SetFillColor(sep_none, none_values,
++                                                 "CSn");
++    fxcrt::ostringstream buf;
++    TestProcessPath(&generator, &buf, pPathObj.get());
++    ByteString path_string(buf);
++    EXPECT_EQ(ByteString("q /FXC1 cs 1 scn 10 5 3 25 re f Q\n"), path_string);
++  }
++}
++
+ TEST_F(CPDFPageContentGeneratorTest, ProcessEmptyForm) {
+   auto doc = std::make_unique<CPDF_TestDocument>();
+   doc->CreateNewDoc();
+diff --git a/core/fpdfapi/page/cpdf_basedcs.cpp b/core/fpdfapi/page/cpdf_basedcs.cpp
+index 522b1ef8f9..d8bb7a3d4a 100644
+--- a/core/fpdfapi/page/cpdf_basedcs.cpp
++++ b/core/fpdfapi/page/cpdf_basedcs.cpp
+@@ -16,3 +16,7 @@ void CPDF_BasedCS::EnableStdConversion(bool bEnabled) {
+     base_cs_->EnableStdConversion(bEnabled);
+   }
+ }
++
++RetainPtr<CPDF_ColorSpace> CPDF_BasedCS::GetBaseColorSpace() const {
++  return base_cs_;
++}
+diff --git a/core/fpdfapi/page/cpdf_basedcs.h b/core/fpdfapi/page/cpdf_basedcs.h
+index 55a16ad864..af4162cf52 100644
+--- a/core/fpdfapi/page/cpdf_basedcs.h
++++ b/core/fpdfapi/page/cpdf_basedcs.h
+@@ -20,6 +20,9 @@ class CPDF_BasedCS : public CPDF_ColorSpace {
+ 
+   void EnableStdConversion(bool bEnabled) final;
+ 
++  // CPDF_ColorSpace:
++  RetainPtr<CPDF_ColorSpace> GetBaseColorSpace() const override;
++
+  protected:
+   explicit CPDF_BasedCS(Family family);
+ 
+diff --git a/core/fpdfapi/page/cpdf_color.cpp b/core/fpdfapi/page/cpdf_color.cpp
+index 7709dfc2ad..d85a64a221 100644
+--- a/core/fpdfapi/page/cpdf_color.cpp
++++ b/core/fpdfapi/page/cpdf_color.cpp
+@@ -90,6 +90,24 @@ uint32_t CPDF_Color::ComponentCount() const {
+   return cs_->ComponentCount();
+ }
+ 
++RetainPtr<CPDF_ColorSpace> CPDF_Color::GetColorSpace() const {
++  return cs_;
++}
++
++pdfium::span<const float> CPDF_Color::GetComponents() const {
++  return std::holds_alternative<std::vector<float>>(color_data_)
++             ? pdfium::span<const float>(
++                   std::get<std::vector<float>>(color_data_))
++             : pdfium::span<const float>();
++}
++
++pdfium::span<const float> CPDF_Color::GetPatternComponents() const {
++  if (!std::holds_alternative<std::unique_ptr<PatternValue>>(color_data_)) {
++    return pdfium::span<const float>();
++  }
++  return std::get<std::unique_ptr<PatternValue>>(color_data_)->GetComps();
++}
++
+ bool CPDF_Color::IsColorSpaceRGB() const {
+   return cs_ ==
+          CPDF_ColorSpace::GetStockCS(CPDF_ColorSpace::Family::kDeviceRGB);
+diff --git a/core/fpdfapi/page/cpdf_color.h b/core/fpdfapi/page/cpdf_color.h
+index 69f0226882..3680a58da4 100644
+--- a/core/fpdfapi/page/cpdf_color.h
++++ b/core/fpdfapi/page/cpdf_color.h
+@@ -39,8 +39,17 @@ class CPDF_Color {
+                           pdfium::span<float> values);
+ 
+   uint32_t ComponentCount() const;
++  RetainPtr<CPDF_ColorSpace> GetColorSpace() const;
+   bool IsColorSpaceRGB() const;
+   bool IsColorSpaceGray() const;
++  // Returns the raw color components, as written by the sc/scn, g, rg or k
++  // operators. Returns an empty span for pattern colors.
++  pdfium::span<const float> GetComponents() const;
++  // Returns the underlying color components of a pattern color, as written
++  // by the scn operator before the pattern name. Only the first
++  // GetColorSpace()->GetBaseColorSpace()->ComponentCount() entries are
++  // meaningful. Returns an empty span for non-pattern colors.
++  pdfium::span<const float> GetPatternComponents() const;
+   // Wrapper around GetRGB() that returns the RGB value as FX_COLORREF. The
+   // GetRGB() return value is clamped to fit into FX_COLORREF, where the color
+   // components are 8-bit fields within an unsigned integer.
+diff --git a/core/fpdfapi/page/cpdf_colorspace.cpp b/core/fpdfapi/page/cpdf_colorspace.cpp
+index 92754d2dac..dcaa9aba68 100644
+--- a/core/fpdfapi/page/cpdf_colorspace.cpp
++++ b/core/fpdfapi/page/cpdf_colorspace.cpp
+@@ -189,6 +189,7 @@ class CPDF_LabCS final : public CPDF_ColorSpace {
+                        float* value,
+                        float* min,
+                        float* max) const override;
++  void GetMinMax(int iComponent, float* min, float* max) const override;
+   void TranslateImageLine(pdfium::span<uint8_t> dest_span,
+                           pdfium::span<const uint8_t> src_span,
+                           int pixels,
+@@ -199,6 +200,9 @@ class CPDF_LabCS final : public CPDF_ColorSpace {
+                   const CPDF_Array* pArray,
+                   std::set<const CPDF_Object*>* pVisited) override;
+ 
++  // Returns the range value at `range_index` in the /Range array.
++  float GetLabRange(int range_index) const;
++
+  private:
+   static constexpr size_t kRangesCount = 4;
+ 
+@@ -617,6 +621,28 @@ uint32_t CPDF_ColorSpace::ComponentCount() const {
+   return components_;
+ }
+ 
++RetainPtr<CPDF_ColorSpace> CPDF_ColorSpace::GetBaseColorSpace() const {
++  return nullptr;
++}
++
++bool CPDF_ColorSpace::NameIsDefinedInResources(const CPDF_Dictionary* resources,
++                                               ByteStringView name) const {
++  if (!resources) {
++    return false;
++  }
++
++  RetainPtr<const CPDF_Dictionary> color_space_list =
++      resources->GetDictFor("ColorSpace");
++  if (!color_space_list) {
++    return false;
++  }
++
++  RetainPtr<const CPDF_Array> array = color_space_list->GetArrayFor(name);
++  // Without an array, either the name is not defined or it is an alias for a
++  // color space that the name does not make any more specific.
++  return array_ && array_ == array.Get();
++}
++
+ // Returns nullptr because only the CPDF_ICCBasedCS subclass supports ICC
+ // profiles. CPDF_ICCBasedCS overrides this method to return valid ICC
+ // profile data.
+@@ -629,6 +655,10 @@ void CPDF_ColorSpace::GetDefaultValue(int iComponent,
+                                       float* min,
+                                       float* max) const {
+   *value = 0.0f;
++  GetMinMax(iComponent, min, max);
++}
++
++void CPDF_ColorSpace::GetMinMax(int iComponent, float* min, float* max) const {
+   *min = 0.0f;
+   *max = 1.0f;
+ }
+@@ -823,6 +853,11 @@ void CPDF_LabCS::GetDefaultValue(int iComponent,
+                                  float* value,
+                                  float* min,
+                                  float* max) const {
++  GetMinMax(iComponent, min, max);
++  *value = std::clamp(0.0f, *min, *max);
++}
++
++void CPDF_LabCS::GetMinMax(int iComponent, float* min, float* max) const {
+   DCHECK_LT(iComponent, 3);
+ 
+   if (iComponent > 0) {
+@@ -831,14 +866,17 @@ void CPDF_LabCS::GetDefaultValue(int iComponent,
+     if (range_min <= range_max) {
+       *min = range_min;
+       *max = range_max;
+-      *value = std::clamp(0.0f, *min, *max);
+       return;
+     }
+   }
+ 
+   *min = 0.0f;
+   *max = 100.0f;
+-  *value = 0.0f;
++}
++
++float CPDF_LabCS::GetLabRange(int range_index) const {
++  DCHECK_LT(range_index, kRangesCount);
++  return ranges_[range_index];
+ }
+ 
+ uint32_t CPDF_LabCS::v_Load(CPDF_Document* doc,
+diff --git a/core/fpdfapi/page/cpdf_colorspace.h b/core/fpdfapi/page/cpdf_colorspace.h
+index 58214125d1..2c158318d0 100644
+--- a/core/fpdfapi/page/cpdf_colorspace.h
++++ b/core/fpdfapi/page/cpdf_colorspace.h
+@@ -94,6 +94,19 @@ class CPDF_ColorSpace : public Retainable, public Observable {
+ 
+   uint32_t ComponentCount() const;
+   Family GetFamily() const { return family_; }
++
++  // Returns whether the color space was loaded from the /ColorSpace entry
++  // `name` in `resources`, i.e. whether `name cs` refers to this color space
++  // and `name` can be used to refer to it again.
++  bool NameIsDefinedInResources(const CPDF_Dictionary* resources,
++                                ByteStringView name) const;
++  // Returns the array that this color space was loaded from, if any. Empty for
++  // the stock color spaces.
++  RetainPtr<const CPDF_Array> GetArray() const { return array_; }
++
++  // Returns the color space that this one is based on, if any. This is the
++  // second element of a pattern color space.
++  virtual RetainPtr<CPDF_ColorSpace> GetBaseColorSpace() const;
+   bool IsSpecial() const {
+     return GetFamily() == Family::kSeparation ||
+            GetFamily() == Family::kDeviceN || GetFamily() == Family::kIndexed ||
+@@ -117,6 +130,7 @@ class CPDF_ColorSpace : public Retainable, public Observable {
+                                float* value,
+                                float* min,
+                                float* max) const;
++  virtual void GetMinMax(int iComponent, float* min, float* max) const;
+ 
+   virtual void TranslateImageLine(pdfium::span<uint8_t> dest_span,
+                                   pdfium::span<const uint8_t> src_span,
+diff --git a/core/fpdfapi/page/cpdf_colorstate.cpp b/core/fpdfapi/page/cpdf_colorstate.cpp
+index c2f36e5883..9fd0d8d4aa 100644
+--- a/core/fpdfapi/page/cpdf_colorstate.cpp
++++ b/core/fpdfapi/page/cpdf_colorstate.cpp
+@@ -77,43 +77,90 @@ bool CPDF_ColorState::HasStrokeColor() const {
+ }
+ 
+ void CPDF_ColorState::SetFillColor(RetainPtr<CPDF_ColorSpace> colorspace,
+-                                   std::vector<float> values) {
++                                   std::vector<float> values,
++                                   ByteString colorspace_name) {
+   ColorData* data = ref_.GetPrivateCopy();
+   std::optional<FX_COLORREF> colorref =
+-      SetColor(std::move(colorspace), std::move(values), data->fill_color_);
++      SetColor(std::move(colorspace), std::move(values), data->fill_color_,
++               &data->fill_color_space_name_);
+   if (colorref.has_value()) {
+     data->fill_color_ref_ = colorref.value();
+   }
++  data->fill_color_space_name_ = std::move(colorspace_name);
+ }
+ 
+ void CPDF_ColorState::SetStrokeColor(RetainPtr<CPDF_ColorSpace> colorspace,
+-                                     std::vector<float> values) {
++                                     std::vector<float> values,
++                                     ByteString colorspace_name) {
+   ColorData* data = ref_.GetPrivateCopy();
+   std::optional<FX_COLORREF> colorref =
+-      SetColor(std::move(colorspace), std::move(values), data->stroke_color_);
++      SetColor(std::move(colorspace), std::move(values), data->stroke_color_,
++               &data->stroke_color_space_name_);
+   if (colorref.has_value()) {
+     data->stroke_color_ref_ = colorref.value();
+   }
++  data->stroke_color_space_name_ = std::move(colorspace_name);
+ }
+ 
+ void CPDF_ColorState::SetFillPattern(RetainPtr<CPDF_Pattern> pattern,
+-                                     pdfium::span<float> values) {
++                                     pdfium::span<float> values,
++                                     ByteString colorspace_name,
++                                     ByteString pattern_name) {
+   ColorData* data = ref_.GetPrivateCopy();
+   data->fill_color_ref_ =
+-      SetPattern(std::move(pattern), values, data->fill_color_);
++      SetPattern(std::move(pattern), values, data->fill_color_,
++                 &data->fill_color_space_name_, &data->fill_pattern_name_);
++  data->fill_color_space_name_ = std::move(colorspace_name);
++  data->fill_pattern_name_ = std::move(pattern_name);
+ }
+ 
+ void CPDF_ColorState::SetStrokePattern(RetainPtr<CPDF_Pattern> pattern,
+-                                       pdfium::span<float> values) {
++                                       pdfium::span<float> values,
++                                       ByteString colorspace_name,
++                                       ByteString pattern_name) {
+   ColorData* data = ref_.GetPrivateCopy();
+   data->stroke_color_ref_ =
+-      SetPattern(std::move(pattern), values, data->stroke_color_);
++      SetPattern(std::move(pattern), values, data->stroke_color_,
++                 &data->stroke_color_space_name_,
++                 &data->stroke_pattern_name_);
++  data->stroke_color_space_name_ = std::move(colorspace_name);
++  data->stroke_pattern_name_ = std::move(pattern_name);
++}
++
++ByteString CPDF_ColorState::GetFillColorSpaceName() const {
++  const ColorData* data = ref_.GetObject();
++  return data ? data->fill_color_space_name_ : ByteString();
++}
++
++ByteString CPDF_ColorState::GetStrokeColorSpaceName() const {
++  const ColorData* data = ref_.GetObject();
++  return data ? data->stroke_color_space_name_ : ByteString();
++}
++
++void CPDF_ColorState::SetFillColorSpaceName(ByteString name) {
++  ref_.GetPrivateCopy()->fill_color_space_name_ = std::move(name);
++}
++
++void CPDF_ColorState::SetStrokeColorSpaceName(ByteString name) {
++  ref_.GetPrivateCopy()->stroke_color_space_name_ = std::move(name);
++}
++
++ByteString CPDF_ColorState::GetFillPatternName() const {
++  const ColorData* data = ref_.GetObject();
++  return data ? data->fill_pattern_name_ : ByteString();
++}
++
++ByteString CPDF_ColorState::GetStrokePatternName() const {
++  const ColorData* data = ref_.GetObject();
++  return data ? data->stroke_pattern_name_ : ByteString();
+ }
+ 
+ std::optional<FX_COLORREF> CPDF_ColorState::SetColor(
+     RetainPtr<CPDF_ColorSpace> colorspace,
+     std::vector<float> values,
+-    CPDF_Color& color) {
++    CPDF_Color& color,
++    ByteString* colorspace_name) {
++  colorspace_name->clear();
+   if (colorspace) {
+     color.SetColorSpace(std::move(colorspace));
+   } else if (color.IsNull()) {
+@@ -132,7 +179,11 @@ std::optional<FX_COLORREF> CPDF_ColorState::SetColor(
+ 
+ FX_COLORREF CPDF_ColorState::SetPattern(RetainPtr<CPDF_Pattern> pattern,
+                                         pdfium::span<float> values,
+-                                        CPDF_Color& color) {
++                                        CPDF_Color& color,
++                                        ByteString* colorspace_name,
++                                        ByteString* pattern_name) {
++  colorspace_name->clear();
++  pattern_name->clear();
+   color.SetValueForPattern(pattern, values);
+   std::optional<FX_COLORREF> colorref = color.GetColorRef();
+   if (colorref.has_value()) {
+@@ -149,7 +200,11 @@ CPDF_ColorState::ColorData::ColorData(const ColorData& src)
+     : fill_color_ref_(src.fill_color_ref_),
+       stroke_color_ref_(src.stroke_color_ref_),
+       fill_color_(src.fill_color_),
+-      stroke_color_(src.stroke_color_) {}
++      stroke_color_(src.stroke_color_),
++      fill_color_space_name_(src.fill_color_space_name_),
++      stroke_color_space_name_(src.stroke_color_space_name_),
++      fill_pattern_name_(src.fill_pattern_name_),
++      stroke_pattern_name_(src.stroke_pattern_name_) {}
+ 
+ CPDF_ColorState::ColorData::~ColorData() = default;
+ 
+diff --git a/core/fpdfapi/page/cpdf_colorstate.h b/core/fpdfapi/page/cpdf_colorstate.h
+index 42b42a743e..23d074c68e 100644
+--- a/core/fpdfapi/page/cpdf_colorstate.h
++++ b/core/fpdfapi/page/cpdf_colorstate.h
+@@ -11,6 +11,7 @@
+ #include <vector>
+ 
+ #include "core/fpdfapi/page/cpdf_color.h"
++#include "core/fxcrt/bytestring.h"
+ #include "core/fxcrt/retain_ptr.h"
+ #include "core/fxcrt/shared_copy_on_write.h"
+ #include "core/fxcrt/span.h"
+@@ -42,14 +43,35 @@ class CPDF_ColorState {
+   CPDF_Color* GetMutableStrokeColor();
+   bool HasStrokeColor() const;
+ 
++  // `colorspace_name` is the name used by the cs/CS operator that selected
++  // `colorspace`, if any. It allows callers to refer to the same color space
++  // resource when writing the color back out.
+   void SetFillColor(RetainPtr<CPDF_ColorSpace> colorspace,
+-                    std::vector<float> values);
++                    std::vector<float> values,
++                    ByteString colorspace_name = ByteString());
+   void SetStrokeColor(RetainPtr<CPDF_ColorSpace> colorspace,
+-                      std::vector<float> values);
++                      std::vector<float> values,
++                      ByteString colorspace_name = ByteString());
+   void SetFillPattern(RetainPtr<CPDF_Pattern> pattern,
+-                      pdfium::span<float> values);
++                      pdfium::span<float> values,
++                      ByteString colorspace_name = ByteString(),
++                      ByteString pattern_name = ByteString());
+   void SetStrokePattern(RetainPtr<CPDF_Pattern> pattern,
+-                        pdfium::span<float> values);
++                        pdfium::span<float> values,
++                        ByteString colorspace_name = ByteString(),
++                        ByteString pattern_name = ByteString());
++  // Returns the name of the color space resource that selected the fill color
++  // space, or an empty string if the fill color space did not come from one.
++  ByteString GetFillColorSpaceName() const;
++  ByteString GetStrokeColorSpaceName() const;
++  void SetFillColorSpaceName(ByteString name);
++  void SetStrokeColorSpaceName(ByteString name);
++  // Returns the name of the pattern resource that the fill/stroke pattern
++  // was selected from, or an empty string if the pattern did not come from
++  // one. This is the name an `scn` operator has to refer to when writing
++  // the pattern color back out.
++  ByteString GetFillPatternName() const;
++  ByteString GetStrokePatternName() const;
+ 
+   bool HasRef() const { return !!ref_; }
+ 
+@@ -66,6 +88,10 @@ class CPDF_ColorState {
+     FX_COLORREF stroke_color_ref_ = 0;
+     CPDF_Color fill_color_;
+     CPDF_Color stroke_color_;
++    ByteString fill_color_space_name_;
++    ByteString stroke_color_space_name_;
++    ByteString fill_pattern_name_;
++    ByteString stroke_pattern_name_;
+ 
+    private:
+     ColorData();
+@@ -75,10 +101,13 @@ class CPDF_ColorState {
+ 
+   std::optional<FX_COLORREF> SetColor(RetainPtr<CPDF_ColorSpace> colorspace,
+                                       std::vector<float> values,
+-                                      CPDF_Color& color);
++                                      CPDF_Color& color,
++                                      ByteString* color_space_name);
+   FX_COLORREF SetPattern(RetainPtr<CPDF_Pattern> pattern,
+                          pdfium::span<float> values,
+-                         CPDF_Color& color);
++                         CPDF_Color& color,
++                         ByteString* color_space_name,
++                         ByteString* pattern_name);
+ 
+   SharedCopyOnWrite<ColorData> ref_;
+ };
+diff --git a/core/fpdfapi/page/cpdf_pattern.h b/core/fpdfapi/page/cpdf_pattern.h
+index 5aaf703ef3..e05be115aa 100644
+--- a/core/fpdfapi/page/cpdf_pattern.h
++++ b/core/fpdfapi/page/cpdf_pattern.h
+@@ -27,6 +27,10 @@ class CPDF_Pattern : public Retainable, public Observable {
+ 
+   const CFX_Matrix& pattern_to_form() const { return pattern_to_form_; }
+ 
++  // Returns the pattern dictionary or stream this pattern was loaded from.
++  // A content stream generator uses it to find the pattern resource name.
++  RetainPtr<CPDF_Object> GetPatternObj() const { return pattern_obj_; }
++
+  protected:
+   CPDF_Pattern(CPDF_Document* doc,
+                RetainPtr<CPDF_Object> pObj,
+diff --git a/core/fpdfapi/page/cpdf_streamcontentparser.cpp b/core/fpdfapi/page/cpdf_streamcontentparser.cpp
+index a0d239f6a3..a77b2d3798 100644
+--- a/core/fpdfapi/page/cpdf_streamcontentparser.cpp
++++ b/core/fpdfapi/page/cpdf_streamcontentparser.cpp
+@@ -735,23 +735,29 @@ void CPDF_StreamContentParser::Handle_ConcatMatrix() {
+ }
+ 
+ void CPDF_StreamContentParser::Handle_SetColorSpace_Fill() {
+-  RetainPtr<CPDF_ColorSpace> pCS = FindColorSpace(GetString(0));
++  ByteString name = GetString(0);
++  // Ignore the operator as a whole if the color space name is unknown, so that
++  // the current color space stays the one its name refers to.
++  RetainPtr<CPDF_ColorSpace> pCS = FindColorSpace(name);
+   if (!pCS) {
+     return;
+   }
+ 
+   cur_states_->mutable_color_state().GetMutableFillColor()->SetColorSpace(
+       std::move(pCS));
++  cur_states_->mutable_color_state().SetFillColorSpaceName(std::move(name));
+ }
+ 
+ void CPDF_StreamContentParser::Handle_SetColorSpace_Stroke() {
+-  RetainPtr<CPDF_ColorSpace> pCS = FindColorSpace(GetString(0));
++  ByteString name = GetString(0);
++  RetainPtr<CPDF_ColorSpace> pCS = FindColorSpace(name);
+   if (!pCS) {
+     return;
+   }
+ 
+   cur_states_->mutable_color_state().GetMutableStrokeColor()->SetColorSpace(
+       std::move(pCS));
++  cur_states_->mutable_color_state().SetStrokeColorSpaceName(std::move(name));
+ }
+ 
+ void CPDF_StreamContentParser::Handle_SetDash() {
+@@ -945,13 +951,13 @@ void CPDF_StreamContentParser::Handle_EOFillPath() {
+ void CPDF_StreamContentParser::Handle_SetGray_Fill() {
+   cur_states_->mutable_color_state().SetFillColor(
+       CPDF_ColorSpace::GetStockCS(CPDF_ColorSpace::Family::kDeviceGray),
+-      GetNumbers(1));
++      GetNumbers(1), "DeviceGray");
+ }
+ 
+ void CPDF_StreamContentParser::Handle_SetGray_Stroke() {
+   cur_states_->mutable_color_state().SetStrokeColor(
+       CPDF_ColorSpace::GetStockCS(CPDF_ColorSpace::Family::kDeviceGray),
+-      GetNumbers(1));
++      GetNumbers(1), "DeviceGray");
+ }
+ 
+ void CPDF_StreamContentParser::Handle_SetExtendGraphState() {
+@@ -1003,7 +1009,7 @@ void CPDF_StreamContentParser::Handle_SetCMYKColor_Fill() {
+ 
+   cur_states_->mutable_color_state().SetFillColor(
+       CPDF_ColorSpace::GetStockCS(CPDF_ColorSpace::Family::kDeviceCMYK),
+-      GetNumbers(4));
++      GetNumbers(4), "DeviceCMYK");
+ }
+ 
+ void CPDF_StreamContentParser::Handle_SetCMYKColor_Stroke() {
+@@ -1013,7 +1019,7 @@ void CPDF_StreamContentParser::Handle_SetCMYKColor_Stroke() {
+ 
+   cur_states_->mutable_color_state().SetStrokeColor(
+       CPDF_ColorSpace::GetStockCS(CPDF_ColorSpace::Family::kDeviceCMYK),
+-      GetNumbers(4));
++      GetNumbers(4), "DeviceCMYK");
+ }
+ 
+ void CPDF_StreamContentParser::Handle_LineTo() {
+@@ -1081,7 +1087,7 @@ void CPDF_StreamContentParser::Handle_SetRGBColor_Fill() {
+ 
+   cur_states_->mutable_color_state().SetFillColor(
+       CPDF_ColorSpace::GetStockCS(CPDF_ColorSpace::Family::kDeviceRGB),
+-      GetNumbers(3));
++      GetNumbers(3), "DeviceRGB");
+ }
+ 
+ void CPDF_StreamContentParser::Handle_SetRGBColor_Stroke() {
+@@ -1091,7 +1097,7 @@ void CPDF_StreamContentParser::Handle_SetRGBColor_Stroke() {
+ 
+   cur_states_->mutable_color_state().SetStrokeColor(
+       CPDF_ColorSpace::GetStockCS(CPDF_ColorSpace::Family::kDeviceRGB),
+-      GetNumbers(3));
++      GetNumbers(3), "DeviceRGB");
+ }
+ 
+ void CPDF_StreamContentParser::Handle_SetRenderIntent() {}
+@@ -1107,12 +1113,57 @@ void CPDF_StreamContentParser::Handle_StrokePath() {
+ 
+ void CPDF_StreamContentParser::Handle_SetColor_Fill() {
+   int nargs = std::min(param_count_, 4U);
+-  cur_states_->mutable_color_state().SetFillColor(nullptr, GetNumbers(nargs));
++  cur_states_->mutable_color_state().SetFillColor(
++      nullptr, GetNumbers(nargs), GetCurrentColorSpaceName(/*for_fill=*/true));
+ }
+ 
+ void CPDF_StreamContentParser::Handle_SetColor_Stroke() {
+   int nargs = std::min(param_count_, 4U);
+-  cur_states_->mutable_color_state().SetStrokeColor(nullptr, GetNumbers(nargs));
++  cur_states_->mutable_color_state().SetStrokeColor(
++      nullptr, GetNumbers(nargs), GetCurrentColorSpaceName(/*for_fill=*/false));
++}
++
++ByteString CPDF_StreamContentParser::GetCurrentColorSpaceName(
++    bool for_fill) const {
++  const CPDF_ColorState& color_state = cur_states_->color_state();
++  const CPDF_Color* color =
++      for_fill ? color_state.GetFillColor() : color_state.GetStrokeColor();
++  if (!color || color->IsNull()) {
++    return ByteString();
++  }
++
++  RetainPtr<CPDF_ColorSpace> cs = color->GetColorSpace();
++  if (!cs) {
++    return ByteString();
++  }
++  if (cs->IsSpecial()) {
++    return for_fill ? color_state.GetFillColorSpaceName()
++                    : color_state.GetStrokeColorSpaceName();
++  }
++
++  switch (cs->GetFamily()) {
++    case CPDF_ColorSpace::Family::kDeviceRGB:
++      return "DeviceRGB";
++    case CPDF_ColorSpace::Family::kDeviceGray:
++      return "DeviceGray";
++    case CPDF_ColorSpace::Family::kDeviceCMYK:
++      return "DeviceCMYK";
++    case CPDF_ColorSpace::Family::kCalGray:
++    case CPDF_ColorSpace::Family::kCalRGB:
++    case CPDF_ColorSpace::Family::kLab:
++    case CPDF_ColorSpace::Family::kICCBased:
++      // These color spaces can only be selected by name from the resources
++      // dictionary, so the name that selected them is the one to write back.
++      // The family name itself is not a usable resource name: there is no
++      // /CalGray entry unless the file defines one under that exact name,
++      // which is exactly what the stored name records. Returning the family
++      // name here used to overwrite the stored resource name with e.g.
++      // "CalGray", which no `cs` operator can resolve again.
++      return for_fill ? color_state.GetFillColorSpaceName()
++                      : color_state.GetStrokeColorSpaceName();
++    default:
++      return ByteString();
++  }
+ }
+ 
+ void CPDF_StreamContentParser::Handle_SetColorPS_Fill() {
+@@ -1122,7 +1173,8 @@ void CPDF_StreamContentParser::Handle_SetColorPS_Fill() {
+   }
+ 
+   if (!pLastParam->IsName()) {
+-    cur_states_->mutable_color_state().SetFillColor(nullptr, GetColors());
++    cur_states_->mutable_color_state().SetFillColor(
++        nullptr, GetColors(), GetCurrentColorSpaceName(/*for_fill=*/true));
+     return;
+   }
+ 
+@@ -1134,8 +1186,9 @@ void CPDF_StreamContentParser::Handle_SetColorPS_Fill() {
+   }
+ 
+   std::vector<float> values = GetNamedColors();
+-  cur_states_->mutable_color_state().SetFillPattern(std::move(pPattern),
+-                                                    values);
++  cur_states_->mutable_color_state().SetFillPattern(
++      std::move(pPattern), values, GetCurrentColorSpaceName(/*for_fill=*/true),
++      GetString(0));
+ }
+ 
+ void CPDF_StreamContentParser::Handle_SetColorPS_Stroke() {
+@@ -1145,7 +1198,8 @@ void CPDF_StreamContentParser::Handle_SetColorPS_Stroke() {
+   }
+ 
+   if (!pLastParam->IsName()) {
+-    cur_states_->mutable_color_state().SetStrokeColor(nullptr, GetColors());
++    cur_states_->mutable_color_state().SetStrokeColor(
++        nullptr, GetColors(), GetCurrentColorSpaceName(/*for_fill=*/false));
+     return;
+   }
+ 
+@@ -1157,8 +1211,9 @@ void CPDF_StreamContentParser::Handle_SetColorPS_Stroke() {
+   }
+ 
+   std::vector<float> values = GetNamedColors();
+-  cur_states_->mutable_color_state().SetStrokePattern(std::move(pPattern),
+-                                                      values);
++  cur_states_->mutable_color_state().SetStrokePattern(
++      std::move(pPattern), values,
++      GetCurrentColorSpaceName(/*for_fill=*/false), GetString(0));
+ }
+ 
+ void CPDF_StreamContentParser::Handle_ShadeFill() {
+diff --git a/core/fpdfapi/page/cpdf_streamcontentparser.h b/core/fpdfapi/page/cpdf_streamcontentparser.h
+index 8aa0be5954..93d481d55b 100644
+--- a/core/fpdfapi/page/cpdf_streamcontentparser.h
++++ b/core/fpdfapi/page/cpdf_streamcontentparser.h
+@@ -135,6 +135,12 @@ class CPDF_StreamContentParser {
+   std::vector<float> GetNamedColors() const;
+   int32_t GetCurrentStreamIndex();
+ 
++  // Returns the name of the fill or stroke color space in `cur_states_`, as it
++  // would be written by a cs/CS operator. This is the resource name for color
++  // spaces that are defined in the resources dictionary, and a device color
++  // space name for the ones that are not.
++  ByteString GetCurrentColorSpaceName(bool for_fill) const;
++
+   void Handle_CloseFillStrokePath();
+   void Handle_FillStrokePath();
+   void Handle_CloseEOFillStrokePath();
+-- 
+2.51.2.windows.1
+

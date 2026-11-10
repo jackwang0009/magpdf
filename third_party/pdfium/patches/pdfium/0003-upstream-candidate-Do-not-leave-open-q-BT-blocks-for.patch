@@ -1,0 +1,57 @@
+From 8f29c14daccf5f9c3feb13ff30b85ddf1c1d9660 Mon Sep 17 00:00:00 2001
+From: jackwang0009 <93422958+jackwang0009@users.noreply.github.com>
+Date: Mon, 9 Nov 2026 11:18:53 +0800
+Subject: [PATCH 3/3] [upstream-candidate] Do not leave open q/BT blocks for
+ Type3 text
+
+ProcessText() emitted the enclosing q and BT before checking the font type. Type3 fonts cannot be written back, so the early return left both blocks unbalanced and everything after the object in the same content stream was interpreted inside a text object with a stale graphics state.
+
+Check the font type before emitting any operator and drop the object instead. Full Type3 preservation needs the glyph content streams serialized, which is a follow-up; at least the rest of the stream stays valid now.
+---
+ .../edit/cpdf_pagecontentgenerator.cpp        | 19 +++++++++++--------
+ 1 file changed, 11 insertions(+), 8 deletions(-)
+
+diff --git a/core/fpdfapi/edit/cpdf_pagecontentgenerator.cpp b/core/fpdfapi/edit/cpdf_pagecontentgenerator.cpp
+index 4e80e03734..9db44a74db 100644
+--- a/core/fpdfapi/edit/cpdf_pagecontentgenerator.cpp
++++ b/core/fpdfapi/edit/cpdf_pagecontentgenerator.cpp
+@@ -943,14 +943,6 @@ ByteString CPDF_PageContentGenerator::GetOrCreateDefaultGraphics() const {
+ // TJ sets the actual text, <####...> is used when specifying charcodes.
+ void CPDF_PageContentGenerator::ProcessText(fxcrt::ostringstream* buf,
+                                             CPDF_TextObject* pTextObj) {
+-  ProcessGraphics(buf, pTextObj);
+-  *buf << "BT ";
+-
+-  const CFX_Matrix& matrix = pTextObj->GetTextMatrix();
+-  if (!matrix.IsIdentity()) {
+-    WriteMatrix(*buf, matrix) << " Tm ";
+-  }
+-
+   RetainPtr<CPDF_Font> font(pTextObj->GetFont());
+   if (!font) {
+     font = CPDF_Font::GetStockFont(document_, "Helvetica");
+@@ -967,10 +959,21 @@ void CPDF_PageContentGenerator::ProcessText(fxcrt::ostringstream* buf,
+   } else if (font->IsCIDFont()) {
+     data.type = "Type0";
+   } else {
++    // Type3 fonts cannot be written back: their glyphs are arbitrary content
++    // streams. Skip the object without emitting the "q" and "BT" that would
++    // otherwise leave the stream unbalanced and swallow everything after it.
+     return;
+   }
+   data.baseFont = font->GetBaseFontName();
+ 
++  ProcessGraphics(buf, pTextObj);
++  *buf << "BT ";
++
++  const CFX_Matrix& matrix = pTextObj->GetTextMatrix();
++  if (!matrix.IsIdentity()) {
++    WriteMatrix(*buf, matrix) << " Tm ";
++  }
++
+   ByteString dict_name;
+   std::optional<ByteString> maybe_name = obj_holder_->FontsMapSearch(data);
+   if (maybe_name.has_value()) {
+-- 
+2.51.2.windows.1
+
