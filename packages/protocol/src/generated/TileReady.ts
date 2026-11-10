@@ -5,6 +5,6 @@
  */
 export type TileReady = { requestId: number, docId: number, pageId: number, scale: number, x: number, y: number, 
 /**
- * 渲染时的文档版本号。原型还没有修改命令，恒为 0。
+ * 渲染时的文档版本号。界面据此判断这块瓦片是不是已经过时。
  */
 version: number, slot: number, generation: number, };

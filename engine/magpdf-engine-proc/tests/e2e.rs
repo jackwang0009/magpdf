@@ -214,6 +214,23 @@ impl Engine {
         (at.duration_since(sent), ready)
     }
 
+    /// 第一页的全部对象（`obj.list`），按层级从下到上。
+    async fn objects(&mut self, doc_id: u64) -> Vec<Value> {
+        let list = self
+            .call(method::OBJ_LIST, json!({ "docId": doc_id, "pageId": 0 }))
+            .await;
+        list.as_array().expect("obj.list 返回数组").clone()
+    }
+
+    /// 发一条修改命令（或撤销、重做），取回新的版本号和随之而来的 `doc.changed`。
+    async fn edit(&mut self, method: &str, params: Value) -> (u64, Value) {
+        let result = self.call(method, params).await;
+        let version = result["version"].as_u64().expect("version");
+        let (_, changed) = self.event(event::DOC_CHANGED).await;
+        assert_eq!(changed["version"], version, "{changed}");
+        (version, changed)
+    }
+
     /// 恢复文件里记了几份文档。
     fn recovery_docs(&self) -> usize {
         let Ok(bytes) = std::fs::read(&self.recovery) else {
@@ -361,6 +378,224 @@ async fn doc_close_forgets_the_document() {
         .call_err(method::DOC_CLOSE, json!({ "docId": doc_id }))
         .await;
     assert_eq!(again["code"], ErrorCode::InvalidArgument.code());
+}
+
+/// 对象的包围盒 `[left, bottom, right, top]`。
+fn bbox(object: &Value) -> [f64; 4] {
+    let b = object["bbox"].as_array().expect("bbox");
+    [0, 1, 2, 3].map(|i| b[i].as_f64().expect("bbox 分量"))
+}
+
+fn by_id(objects: &[Value], id: u64) -> &Value {
+    objects
+        .iter()
+        .find(|o| o["id"] == id)
+        .unwrap_or_else(|| panic!("对象 {id} 不在列表里"))
+}
+
+/// 列对象、点选、变换、删除、改填充色、撤销和重做，都经管道走一遍（《接口协议》6.4、6.5、6.8）。
+#[tokio::test]
+async fn edit_commands_change_the_document_and_can_be_undone() {
+    let mut engine = Engine::start(None).await;
+    engine.hello().await;
+    let doc_id = engine.open("freight-bl-composite.pdf").await;
+
+    let objects = engine.objects(doc_id).await;
+    assert_eq!(objects.len(), 44);
+    for (z, object) in objects.iter().enumerate() {
+        assert_eq!(object["z"], z, "按层级从下到上：{object}");
+        assert_eq!(object["locked"], false);
+    }
+    let tail = engine
+        .call(
+            method::OBJ_LIST,
+            json!({ "docId": doc_id, "pageId": 0, "offset": 40, "limit": 10 }),
+        )
+        .await;
+    assert_eq!(tail.as_array().unwrap()[..], objects[40..]);
+
+    // 取最上面的一个文字对象，在它中心点选。
+    let target = objects
+        .iter()
+        .rev()
+        .find(|o| o["kind"] == "text")
+        .expect("样本里有文字对象");
+    let id = target["id"].as_u64().unwrap();
+    let [left, bottom, right, top] = bbox(target);
+    let hits = engine
+        .call(
+            method::OBJ_HIT_TEST,
+            json!({
+                "docId": doc_id,
+                "pageId": 0,
+                "point": [(left + right) / 2.0, (bottom + top) / 2.0],
+                "mode": "all",
+            }),
+        )
+        .await;
+    assert!(
+        hits.as_array().unwrap().iter().any(|h| h["id"] == id),
+        "{hits}"
+    );
+
+    // 右移 5 pt。
+    let (version, changed) = engine
+        .edit(
+            method::EDIT_TRANSFORM,
+            json!({
+                "docId": doc_id,
+                "baseVersion": 0,
+                "ids": [id],
+                "matrix": [1, 0, 0, 1, 5, 0],
+                "clipFollows": true,
+            }),
+        )
+        .await;
+    assert_eq!(version, 1);
+    assert_eq!(
+        changed,
+        json!({
+            "docId": doc_id,
+            "version": 1,
+            "changes": [{ "pageId": 0, "added": [], "removed": [], "modified": [id] }],
+            "pagesChanged": false,
+        })
+    );
+    let moved = engine.objects(doc_id).await;
+    assert!(
+        (bbox(by_id(&moved, id))[0] - left - 5.0).abs() < 0.6,
+        "{} -> {}",
+        target,
+        by_id(&moved, id)
+    );
+
+    // 基于旧版本的命令被拒绝，文档不变。
+    let stale = engine
+        .call_err(
+            method::EDIT_DELETE,
+            json!({ "docId": doc_id, "baseVersion": 0, "ids": [id] }),
+        )
+        .await;
+    assert_eq!(stale["code"], ErrorCode::VersionConflict.code(), "{stale}");
+    let ghost = engine
+        .call_err(
+            method::EDIT_DELETE,
+            json!({ "docId": doc_id, "baseVersion": 1, "ids": [id, 999_999] }),
+        )
+        .await;
+    assert_eq!(ghost["code"], ErrorCode::ObjectNotFound.code(), "{ghost}");
+    assert_eq!(engine.objects(doc_id).await.len(), 44);
+
+    // 删除，再撤销：对象回到原来的层级，编号不变。
+    let (version, changed) = engine
+        .edit(
+            method::EDIT_DELETE,
+            json!({ "docId": doc_id, "baseVersion": 1, "ids": [id] }),
+        )
+        .await;
+    assert_eq!(version, 2);
+    assert_eq!(changed["changes"][0]["removed"], json!([id]));
+    assert_eq!(engine.objects(doc_id).await.len(), 43);
+
+    let (version, changed) = engine
+        .edit(method::HISTORY_UNDO, json!({ "docId": doc_id }))
+        .await;
+    assert_eq!(version, 3);
+    assert_eq!(changed["changes"][0]["added"], json!([id]));
+    let restored = engine.objects(doc_id).await;
+    assert_eq!(restored.len(), 44);
+    assert_eq!(by_id(&restored, id)["z"], target["z"]);
+
+    let (version, changed) = engine
+        .edit(method::HISTORY_REDO, json!({ "docId": doc_id }))
+        .await;
+    assert_eq!(
+        (version, &changed["changes"][0]["removed"]),
+        (4, &json!([id]))
+    );
+    let (version, _) = engine
+        .edit(method::HISTORY_UNDO, json!({ "docId": doc_id }))
+        .await;
+    assert_eq!(version, 5);
+
+    // 把一个路径对象的填充改成红色。带了还不支持的样式字段要明确拒绝。
+    let path = objects
+        .iter()
+        .find(|o| o["kind"] == "path")
+        .expect("样本里有路径对象")["id"]
+        .as_u64()
+        .unwrap();
+    let (version, changed) = engine
+        .edit(
+            method::EDIT_SET_STYLE,
+            json!({
+                "docId": doc_id,
+                "baseVersion": 5,
+                "ids": [path],
+                "fill": { "space": "rgb", "components": [1.0, 0.0, 0.0] },
+            }),
+        )
+        .await;
+    assert_eq!(version, 6);
+    assert_eq!(changed["changes"][0]["modified"], json!([path]));
+    let unsupported = engine
+        .call_err(
+            method::EDIT_SET_STYLE,
+            json!({
+                "docId": doc_id,
+                "baseVersion": 6,
+                "ids": [path],
+                "lineWidth": 2,
+            }),
+        )
+        .await;
+    assert_eq!(unsupported["code"], ErrorCode::InvalidArgument.code());
+    // 新命令清空了重做栈。
+    let nothing = engine
+        .call_err(method::HISTORY_REDO, json!({ "docId": doc_id }))
+        .await;
+    assert_eq!(nothing["code"], ErrorCode::InvalidArgument.code());
+
+    // 之后渲染的瓦片带着当前的文档版本。
+    let (_, ready) = engine.render_tile(doc_id, 1.0, 0, 0).await;
+    assert_eq!(ready["version"], 6);
+}
+
+/// 生成器写不出渐变（方案 2.1），带渐变的页一改就会丢对象，所以修改命令要被拒绝（方案 2.3）。
+/// 生成器以后修好了，这一页就应该能正常编辑，两种结果这里都接受。
+#[tokio::test]
+async fn pages_the_generator_cannot_rewrite_refuse_edits() {
+    let mut engine = Engine::start(None).await;
+    engine.hello().await;
+    let doc_id = engine.open("shading-axial.pdf").await;
+    let objects = engine.objects(doc_id).await;
+    let id = objects[0]["id"].as_u64().unwrap();
+
+    let request = engine
+        .send(
+            method::EDIT_TRANSFORM,
+            json!({ "docId": doc_id, "baseVersion": 0, "ids": [id], "matrix": [1, 0, 0, 1, 3, 0] }),
+        )
+        .await;
+    match engine.response(request).await.1 {
+        Err(error) => {
+            assert_eq!(error["code"], ErrorCode::PageOverlayOnly.code(), "{error}");
+            // 版本号没有动：基于第 0 版的命令还是因为同一个原因被拒绝，而不是版本冲突。
+            let again = engine
+                .call_err(
+                    method::EDIT_DELETE,
+                    json!({ "docId": doc_id, "baseVersion": 0, "ids": [id] }),
+                )
+                .await;
+            assert_eq!(again["code"], ErrorCode::PageOverlayOnly.code());
+        }
+        Ok(result) => assert_eq!(result["version"], 1),
+    }
+    let after = engine.objects(doc_id).await;
+    assert_eq!(
+        after.iter().map(|o| &o["id"]).collect::<Vec<_>>(),
+        objects.iter().map(|o| &o["id"]).collect::<Vec<_>>()
+    );
 }
 
 /// `doc.open` 的失败用《接口协议》第 8 节的错误码区分。

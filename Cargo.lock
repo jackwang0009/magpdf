@@ -469,6 +469,7 @@ name = "magpdf-engine-proc"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "magpdf-engine",
  "magpdf-ipc",
  "pdfium-sys",
  "rmp-serde",

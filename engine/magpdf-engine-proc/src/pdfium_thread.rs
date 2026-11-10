@@ -2,10 +2,14 @@
 //!
 //! PDFium 不是线程安全的，所有调用都在一个专用线程上串行执行；通信线程只把任务投递进来，PDFium 忙时
 //! 仍能应答 `session.ping`。线程持有 PDFium 的 [`Library`] 与已打开的文档，并负责分配 docId。
+//! 每份文档是一个编辑会话（[`Session`]）：对象编号、撤销栈和文档版本号都在里面。
 
 use anyhow::{Context, Result};
+use magpdf_engine::edit::{Change, EditError, HitMode, ObjectId, ObjectSummary, Session};
 use magpdf_ipc::messages::DocInfo;
-use pdfium_sys::{Bitmap, Document, Library, PageSurface, PixelRect, RenderFlags, render_rect};
+use pdfium_sys::{
+    Bitmap, Document, Library, Matrix, PageSurface, PixelRect, RenderFlags, render_rect,
+};
 use tokio::sync::{mpsc, oneshot};
 
 /// PDFium 线程处理的错误。
@@ -23,30 +27,57 @@ pub enum EngineError {
     },
     #[error("渲染失败：{0}")]
     Render(String),
+    #[error("文档现在是第 {current} 版，请求基于第 {base} 版")]
+    VersionConflict { current: u64, base: u64 },
+    #[error(transparent)]
+    Edit(#[from] EditError),
 }
+
+/// 一条修改文档的操作。
+#[derive(Debug, Clone)]
+pub enum EditOp {
+    Transform {
+        ids: Vec<ObjectId>,
+        matrix: Matrix,
+    },
+    /// 只换填充的颜色，不动不透明度。
+    FillRgb {
+        ids: Vec<ObjectId>,
+        r: u8,
+        g: u8,
+        b: u8,
+    },
+    Delete {
+        ids: Vec<ObjectId>,
+    },
+    Undo,
+    Redo,
+}
+
+type Reply<T> = oneshot::Sender<std::result::Result<T, EngineError>>;
 
 /// 对 PDFium 线程的请求。
 pub enum Job {
     Open {
         path: String,
         password: Option<String>,
-        reply: oneshot::Sender<std::result::Result<DocInfo, EngineError>>,
+        reply: Reply<DocInfo>,
     },
-    /// 渲染一块瓦片，返回 512×512 BGRA。
+    /// 渲染一块瓦片，返回 512×512 BGRA 和渲染时的文档版本号。
     RenderTile {
         doc_id: u32,
         page_id: u32,
         scale: f32,
         x: u32,
         y: u32,
-        reply: oneshot::Sender<std::result::Result<Bitmap, EngineError>>,
+        reply: Reply<(Bitmap, u64)>,
     },
     /// 整页像素尺寸，供恢复后界面重建视图。
     PageSurface {
         doc_id: u32,
         page_id: u32,
         scale: f32,
-        reply: oneshot::Sender<std::result::Result<(u32, u32), EngineError>>,
+        reply: Reply<(u32, u32)>,
     },
     ListDocs {
         reply: oneshot::Sender<Vec<DocInfo>>,
@@ -55,6 +86,27 @@ pub enum Job {
     CloseDoc {
         doc_id: u32,
         reply: oneshot::Sender<bool>,
+    },
+    /// 一页上的全部对象，按层级从下到上。
+    Objects {
+        doc_id: u32,
+        page_id: u32,
+        reply: Reply<Vec<ObjectSummary>>,
+    },
+    HitTest {
+        doc_id: u32,
+        page_id: u32,
+        x: f32,
+        y: f32,
+        mode: HitMode,
+        reply: Reply<Vec<ObjectSummary>>,
+    },
+    /// 修改命令、撤销或重做。`base_version` 有值时先核对文档版本。
+    Edit {
+        doc_id: u32,
+        base_version: Option<u64>,
+        op: EditOp,
+        reply: Reply<Change>,
     },
     Shutdown,
 }
@@ -105,13 +157,21 @@ impl EngineHandle {
     }
 
     fn send(&self, job: Job) -> std::result::Result<(), EngineError> {
-        self.tx
-            .send(job)
-            .map_err(|_| EngineError::Render("PDFium 线程已退出".into()))
+        self.tx.send(job).map_err(|_| Self::closed())
     }
 
     fn closed() -> EngineError {
         EngineError::Render("PDFium 线程已退出".into())
+    }
+
+    /// 投递一个带应答的任务，等 PDFium 线程做完。
+    async fn ask<T>(
+        &self,
+        job: impl FnOnce(Reply<T>) -> Job,
+    ) -> std::result::Result<T, EngineError> {
+        let (reply, rx) = oneshot::channel();
+        self.send(job(reply))?;
+        rx.await.map_err(|_| Self::closed())?
     }
 
     pub async fn render_tile(
@@ -121,17 +181,16 @@ impl EngineHandle {
         scale: f32,
         x: u32,
         y: u32,
-    ) -> std::result::Result<Bitmap, EngineError> {
-        let (reply, rx) = oneshot::channel();
-        self.send(Job::RenderTile {
+    ) -> std::result::Result<(Bitmap, u64), EngineError> {
+        self.ask(|reply| Job::RenderTile {
             doc_id,
             page_id,
             scale,
             x,
             y,
             reply,
-        })?;
-        rx.await.map_err(|_| Self::closed())?
+        })
+        .await
     }
 
     pub async fn open(
@@ -139,13 +198,12 @@ impl EngineHandle {
         path: String,
         password: Option<String>,
     ) -> std::result::Result<DocInfo, EngineError> {
-        let (reply, rx) = oneshot::channel();
-        self.send(Job::Open {
+        self.ask(|reply| Job::Open {
             path,
             password,
             reply,
-        })?;
-        rx.await.map_err(|_| Self::closed())?
+        })
+        .await
     }
 
     /// 同步等待打开完成（引擎启动时做恢复，通信线程还没起来）。
@@ -173,14 +231,13 @@ impl EngineHandle {
         page_id: u32,
         scale: f32,
     ) -> std::result::Result<(u32, u32), EngineError> {
-        let (reply, rx) = oneshot::channel();
-        self.send(Job::PageSurface {
+        self.ask(|reply| Job::PageSurface {
             doc_id,
             page_id,
             scale,
             reply,
-        })?;
-        rx.await.map_err(|_| Self::closed())?
+        })
+        .await
     }
 
     pub async fn list_docs(&self) -> Vec<DocInfo> {
@@ -198,6 +255,52 @@ impl EngineHandle {
             return false;
         }
         rx.await.unwrap_or(false)
+    }
+
+    pub async fn objects(
+        &self,
+        doc_id: u32,
+        page_id: u32,
+    ) -> std::result::Result<Vec<ObjectSummary>, EngineError> {
+        self.ask(|reply| Job::Objects {
+            doc_id,
+            page_id,
+            reply,
+        })
+        .await
+    }
+
+    pub async fn hit_test(
+        &self,
+        doc_id: u32,
+        page_id: u32,
+        point: (f32, f32),
+        mode: HitMode,
+    ) -> std::result::Result<Vec<ObjectSummary>, EngineError> {
+        self.ask(|reply| Job::HitTest {
+            doc_id,
+            page_id,
+            x: point.0,
+            y: point.1,
+            mode,
+            reply,
+        })
+        .await
+    }
+
+    pub async fn edit(
+        &self,
+        doc_id: u32,
+        base_version: Option<u64>,
+        op: EditOp,
+    ) -> std::result::Result<Change, EngineError> {
+        self.ask(|reply| Job::Edit {
+            doc_id,
+            base_version,
+            op,
+            reply,
+        })
+        .await
     }
 
     pub fn shutdown(&self) {
@@ -247,6 +350,37 @@ impl PdfiumState {
                 self.docs.retain(|d| d.doc_id != doc_id);
                 let _ = reply.send(self.docs.len() != before);
             }
+            Job::Objects {
+                doc_id,
+                page_id,
+                reply,
+            } => {
+                let _ = reply.send(
+                    self.page_of(doc_id, page_id)
+                        .and_then(|(d, page)| Ok(d.session.objects(page)?)),
+                );
+            }
+            Job::HitTest {
+                doc_id,
+                page_id,
+                x,
+                y,
+                mode,
+                reply,
+            } => {
+                let _ = reply.send(
+                    self.page_of(doc_id, page_id)
+                        .and_then(|(d, page)| Ok(d.session.hit_test(page, x, y, mode)?)),
+                );
+            }
+            Job::Edit {
+                doc_id,
+                base_version,
+                op,
+                reply,
+            } => {
+                let _ = reply.send(self.edit(doc_id, base_version, op));
+            }
             Job::Shutdown => {}
         }
     }
@@ -272,7 +406,7 @@ impl PdfiumState {
             doc_id,
             path,
             title,
-            doc,
+            session: Session::from_document(self.lib, doc),
         };
         let info = info(&entry);
         self.docs.push(entry);
@@ -286,32 +420,76 @@ impl PdfiumState {
             .ok_or(EngineError::NoDocument { doc_id })
     }
 
+    fn find_mut(&mut self, doc_id: u32) -> std::result::Result<&mut OpenDoc, EngineError> {
+        self.docs
+            .iter_mut()
+            .find(|d| d.doc_id == doc_id)
+            .ok_or(EngineError::NoDocument { doc_id })
+    }
+
+    /// 找到文档并确认页码在范围内。原型里 `pageId` 就是页序号。
+    fn page_of(
+        &mut self,
+        doc_id: u32,
+        page_id: u32,
+    ) -> std::result::Result<(&mut OpenDoc, usize), EngineError> {
+        let d = self.find_mut(doc_id)?;
+        let count = u32::try_from(d.session.page_count()).unwrap_or(0);
+        if page_id >= count {
+            return Err(EngineError::NoPage { doc_id, page_id });
+        }
+        Ok((d, page_id as usize))
+    }
+
+    fn edit(
+        &mut self,
+        doc_id: u32,
+        base_version: Option<u64>,
+        op: EditOp,
+    ) -> std::result::Result<Change, EngineError> {
+        let session = &mut self.find_mut(doc_id)?.session;
+        if let Some(base) = base_version
+            && base != session.version()
+        {
+            return Err(EngineError::VersionConflict {
+                current: session.version(),
+                base,
+            });
+        }
+        Ok(match op {
+            EditOp::Transform { ids, matrix } => session.transform(&ids, matrix)?,
+            EditOp::FillRgb { ids, r, g, b } => session.set_fill_rgb(&ids, r, g, b)?,
+            EditOp::Delete { ids } => session.delete(&ids)?,
+            EditOp::Undo => session.undo()?,
+            EditOp::Redo => session.redo()?,
+        })
+    }
+
     fn render_tile(
-        &self,
+        &mut self,
         doc_id: u32,
         page_id: u32,
         scale: f32,
         x: u32,
         y: u32,
-    ) -> std::result::Result<Bitmap, EngineError> {
-        let d = self.find(doc_id)?;
-        let count = u32::try_from(d.doc.page_count()).unwrap_or(0);
-        if page_id >= count {
-            return Err(EngineError::NoPage { doc_id, page_id });
-        }
+    ) -> std::result::Result<(Bitmap, u64), EngineError> {
+        let (d, page) = self.page_of(doc_id, page_id)?;
+        let version = d.session.version();
         let page = d
-            .doc
-            .page(page_id as usize)
+            .session
+            .document()
+            .page(page)
             .map_err(|e| EngineError::Render(e.to_string()))?;
         let surface = PageSurface::new(&page, scale);
-        render_rect(
+        let bitmap = render_rect(
             &page,
             surface,
             PixelRect::tile(x, y),
             RenderFlags::NONE,
             0xFFFF_FFFF,
         )
-        .map_err(|e| EngineError::Render(e.to_string()))
+        .map_err(|e| EngineError::Render(e.to_string()))?;
+        Ok((bitmap, version))
     }
 
     fn page_surface(
@@ -321,11 +499,11 @@ impl PdfiumState {
         scale: f32,
     ) -> std::result::Result<(u32, u32), EngineError> {
         let d = self.find(doc_id)?;
-        if page_id >= u32::try_from(d.doc.page_count()).unwrap_or(0) {
+        let doc = d.session.document();
+        if page_id >= u32::try_from(doc.page_count()).unwrap_or(0) {
             return Err(EngineError::NoPage { doc_id, page_id });
         }
-        let page = d
-            .doc
+        let page = doc
             .page(page_id as usize)
             .map_err(|e| EngineError::Render(e.to_string()))?;
         let s = PageSurface::new(&page, scale);
@@ -338,12 +516,13 @@ struct OpenDoc {
     doc_id: u32,
     path: String,
     title: String,
-    doc: Document<'static>,
+    session: Session<'static>,
 }
 
 fn info(d: &OpenDoc) -> DocInfo {
+    let doc = d.session.document();
     let (mut page_width, mut page_height) = (0.0, 0.0);
-    if let Ok(page) = d.doc.page(0) {
+    if let Ok(page) = doc.page(0) {
         page_width = page.width();
         page_height = page.height();
     }
@@ -351,8 +530,8 @@ fn info(d: &OpenDoc) -> DocInfo {
         doc_id: d.doc_id,
         path: d.path.clone(),
         title: d.title.clone(),
-        version: 0,
-        page_count: u32::try_from(d.doc.page_count()).unwrap_or(0),
+        version: u32::try_from(d.session.version()).unwrap_or(u32::MAX),
+        page_count: u32::try_from(doc.page_count()).unwrap_or(0),
         page_width,
         page_height,
     }

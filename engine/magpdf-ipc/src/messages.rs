@@ -166,6 +166,9 @@ error_codes! {
     PasswordWrong = 2003, "E_PASSWORD_WRONG", "密码错误";
     FileDamaged = 2004, "E_FILE_DAMAGED", "文件损坏，自动修复也失败";
     Unsupported = 2005, "E_UNSUPPORTED", "不支持的文件";
+    VersionConflict = 3001, "E_VERSION_CONFLICT", "文档已经被别的操作修改";
+    ObjectNotFound = 3002, "E_OBJECT_NOT_FOUND", "对象不存在";
+    PageOverlayOnly = 3004, "E_PAGE_OVERLAY_ONLY", "页面保真校验未通过，只能叠加内容";
     InvalidArgument = 3005, "E_INVALID_ARGUMENT", "参数不合法";
     /// 瓦片的代数对不上：槽位已被复用（《接口协议》3.3，主进程转成 HTTP 410）。
     /// 《接口协议》第 8 节里还没有这个码，是 V06 原型加的。
@@ -200,6 +203,13 @@ names! {
         SESSION_SHUTDOWN = "session.shutdown";
         DOC_OPEN = "doc.open";
         DOC_CLOSE = "doc.close";
+        OBJ_LIST = "obj.list";
+        OBJ_HIT_TEST = "obj.hitTest";
+        EDIT_TRANSFORM = "edit.transform";
+        EDIT_SET_STYLE = "edit.setStyle";
+        EDIT_DELETE = "edit.delete";
+        HISTORY_UNDO = "history.undo";
+        HISTORY_REDO = "history.redo";
         RENDER_TILES = "render.tiles";
         RENDER_CANCEL = "render.cancel";
         /// 不在《接口协议》里：主进程请引擎核对槽位的代数（V06 原型加的，见 V06 报告）。
@@ -213,6 +223,8 @@ names! {
 names! {
     /// 事件名（《接口协议》第 7 节）。
     pub mod event {
+        /// 修改命令、撤销或重做成功之后，文档变了。
+        DOC_CHANGED = "doc.changed";
         /// 瓦片的像素已写入共享内存，可以取回。
         RENDER_TILE_READY = "render.tileReady";
         ENGINE_BUSY = "engine.busy";
@@ -311,6 +323,174 @@ pub struct DocCloseParams {
     pub discard: bool,
 }
 
+// ---- 对象查询（《接口协议》6.4）----
+
+/// 页面对象的种类（《接口协议》5.3 `ObjectSummary.kind` 的子集）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum ObjectKind {
+    Text,
+    Path,
+    Image,
+    Shading,
+    Form,
+    Unknown,
+}
+
+/// 对象摘要（《接口协议》5.3 的子集）。几何量用 PDF 用户空间，单位 pt。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ObjectSummary {
+    /// 会话内稳定的对象编号：编辑后不变，删除后不复用。
+    pub id: u64,
+    pub kind: ObjectKind,
+    /// 包围盒 `[left, bottom, right, top]`。PDFium 给不出来时省略。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bbox: Option<[f32; 4]>,
+    /// 页内层级，0 在最下面。
+    pub z: u32,
+    /// 原型还没有锁定功能，恒为 false。
+    pub locked: bool,
+}
+
+/// `obj.list` 一次最多返回的条数（《接口协议》5.3）。
+pub const OBJ_LIST_MAX: u32 = 2000;
+
+/// `obj.list` 的参数。返回 `ObjectSummary[]`，按层级从下到上。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ObjListParams {
+    pub doc_id: u32,
+    pub page_id: u32,
+    #[serde(default)]
+    pub offset: u32,
+    /// 省略或超过 [`OBJ_LIST_MAX`] 时按 [`OBJ_LIST_MAX`]。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
+/// 命中测试的模式（《接口协议》6.4）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum HitMode {
+    /// 最上面一个看得见的对象。
+    Top,
+    /// 光标下的全部对象，自上而下。
+    All,
+}
+
+/// `obj.hitTest` 的参数。返回 `ObjectSummary[]`。
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ObjHitTestParams {
+    pub doc_id: u32,
+    pub page_id: u32,
+    /// `[x, y]`，PDF 用户空间。
+    pub point: [f32; 2],
+    pub mode: HitMode,
+}
+
+// ---- 编辑与撤销（《接口协议》6.5、6.8）----
+
+/// `edit.transform` 的参数。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct EditTransformParams {
+    pub doc_id: u32,
+    pub base_version: u32,
+    pub ids: Vec<u64>,
+    /// `[a, b, c, d, e, f]`，左乘到对象上。
+    pub matrix: [f32; 6],
+    /// 剪切路径是否一起变换。原型里还不起作用。
+    #[serde(default)]
+    pub clip_follows: bool,
+}
+
+/// 颜色所在的色彩空间。原型只支持 RGB。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum ColorSpace {
+    Rgb,
+}
+
+/// 带色彩空间的颜色。分量在 0–1 之间，RGB 是三个分量。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct Color {
+    pub space: ColorSpace,
+    pub components: Vec<f32>,
+}
+
+/// `edit.setStyle` 的参数。原型只支持 `fill`；带了别的样式字段会被当作参数不合法拒绝，而不是悄悄忽略。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(export)]
+pub struct EditSetStyleParams {
+    pub doc_id: u32,
+    pub base_version: u32,
+    pub ids: Vec<u64>,
+    /// 填充色。只换颜色，对象的不透明度不动。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill: Option<Color>,
+}
+
+/// `edit.delete` 的参数。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct EditDeleteParams {
+    pub doc_id: u32,
+    pub base_version: u32,
+    pub ids: Vec<u64>,
+}
+
+/// `history.undo`、`history.redo` 的参数。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct HistoryParams {
+    pub doc_id: u32,
+}
+
+/// 修改命令、撤销、重做的返回值：新的文档版本号。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct EditResult {
+    pub version: u32,
+}
+
+/// `doc.changed` 里一页上的变化。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct PageChange {
+    pub page_id: u32,
+    pub added: Vec<u64>,
+    pub removed: Vec<u64>,
+    pub modified: Vec<u64>,
+}
+
+/// `doc.changed` 事件的参数（《接口协议》第 7 节）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct DocChanged {
+    pub doc_id: u32,
+    pub version: u32,
+    pub changes: Vec<PageChange>,
+    /// 页面的增删或顺序有没有变。原型还没有页面命令，恒为 false。
+    pub pages_changed: bool,
+}
+
 // ---- 瓦片 ----
 
 /// `render.tiles` 里的瓦片位置：整页像素网格上瓦片左上角。
@@ -369,7 +549,7 @@ pub struct TileReady {
     pub scale: f32,
     pub x: u32,
     pub y: u32,
-    /// 渲染时的文档版本号。原型还没有修改命令，恒为 0。
+    /// 渲染时的文档版本号。界面据此判断这块瓦片是不是已经过时。
     pub version: u32,
     pub slot: u32,
     pub generation: u32,

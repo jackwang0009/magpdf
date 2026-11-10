@@ -48,7 +48,7 @@ pub async fn run(engine: &Engine, p: BenchEngineParams) -> Result<BenchEngineRes
     let mp_response = codec::encode_msgpack(&response).map_err(|e| err(e.to_string()))?;
 
     // 1. 共享内存：写入与读出（预渲染一块瓦片作为被测数据）。
-    let bitmap = engine
+    let (bitmap, _) = engine
         .engine
         .render_tile(doc.doc_id, 0, 1.0, x, y)
         .await
@@ -111,7 +111,7 @@ pub async fn run(engine: &Engine, p: BenchEngineParams) -> Result<BenchEngineRes
     let mut render_and_write = Vec::with_capacity(iterations);
     for i in 0..iterations {
         let t0 = std::time::Instant::now();
-        let b = engine
+        let (b, _) = engine
             .engine
             .render_tile(doc.doc_id, 0, 1.0, x, y)
             .await

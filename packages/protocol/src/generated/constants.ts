@@ -10,6 +10,13 @@ export const METHOD = {
   SESSION_SHUTDOWN: 'session.shutdown',
   DOC_OPEN: 'doc.open',
   DOC_CLOSE: 'doc.close',
+  OBJ_LIST: 'obj.list',
+  OBJ_HIT_TEST: 'obj.hitTest',
+  EDIT_TRANSFORM: 'edit.transform',
+  EDIT_SET_STYLE: 'edit.setStyle',
+  EDIT_DELETE: 'edit.delete',
+  HISTORY_UNDO: 'history.undo',
+  HISTORY_REDO: 'history.redo',
   RENDER_TILES: 'render.tiles',
   RENDER_CANCEL: 'render.cancel',
   TILE_FETCH: 'tile.fetch',
@@ -20,6 +27,7 @@ export const METHOD = {
 
 /** 事件名（《接口协议》第 7 节）。 */
 export const EVENT = {
+  DOC_CHANGED: 'doc.changed',
   RENDER_TILE_READY: 'render.tileReady',
   ENGINE_BUSY: 'engine.busy',
   ENGINE_RESTARTING: 'engine.restarting',
@@ -36,6 +44,9 @@ export const ERROR_CODE = {
   E_PASSWORD_WRONG: 2003,
   E_FILE_DAMAGED: 2004,
   E_UNSUPPORTED: 2005,
+  E_VERSION_CONFLICT: 3001,
+  E_OBJECT_NOT_FOUND: 3002,
+  E_PAGE_OVERLAY_ONLY: 3004,
   E_INVALID_ARGUMENT: 3005,
   E_TILE_GENERATION_STALE: 3006,
   E_INTERNAL: 9001,

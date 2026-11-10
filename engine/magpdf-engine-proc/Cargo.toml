@@ -12,6 +12,7 @@ name = "magpdf-engine"
 path = "src/main.rs"
 
 [dependencies]
+magpdf-engine.workspace = true
 magpdf-ipc.workspace = true
 pdfium-sys.workspace = true
 anyhow.workspace = true

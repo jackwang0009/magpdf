@@ -11,19 +11,23 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use magpdf_engine::edit::{EditError, HitMode, ObjectId, ObjectSummary};
 use magpdf_ipc::frame::{self, Incoming};
 use magpdf_ipc::messages::{
-    self, BenchEngineParams, DocCloseParams, DocInfo, DocOpenParams, EchoParams, ErrorCode,
-    HelloParams, HelloResult, JsonValue, PingParams, RenderTilesParams, RenderTilesResult, Request,
+    self, BenchEngineParams, Color, ColorSpace, DocChanged, DocCloseParams, DocInfo, DocOpenParams,
+    EchoParams, EditDeleteParams, EditResult, EditSetStyleParams, EditTransformParams, ErrorCode,
+    HelloParams, HelloResult, HistoryParams, JsonValue, OBJ_LIST_MAX, ObjHitTestParams,
+    ObjListParams, PageChange, PingParams, RenderTilesParams, RenderTilesResult, Request,
     RequestId, Response, RoundtripParams, RoundtripResult, RpcError, TileCoord, TileFetchParams,
     TileFetchResult, method,
 };
 use magpdf_ipc::shm::{self, Layout, MappedRegion};
 use magpdf_ipc::{PROTOCOL_VERSION, pipe, pump};
+use pdfium_sys::Matrix;
 use tokio::net::windows::named_pipe::NamedPipeServer;
 use tokio::sync::mpsc;
 
-use crate::pdfium_thread::EngineHandle;
+use crate::pdfium_thread::{EditOp, EngineHandle};
 use crate::recovery::{DocRecovery, RecoveryFile};
 use crate::slots::{SlotTable, TileKey};
 
@@ -409,6 +413,74 @@ async fn handle_request(
             }
             Ok(Some(frame::response_ok(id, &())))
         }
+        method::OBJ_LIST => {
+            let p: ObjListParams = decode(params)?;
+            let objects = engine
+                .engine
+                .objects(p.doc_id, p.page_id)
+                .await
+                .map_err(map_engine_error)?;
+            let limit = p.limit.unwrap_or(OBJ_LIST_MAX).min(OBJ_LIST_MAX) as usize;
+            let page: Vec<messages::ObjectSummary> = objects
+                .iter()
+                .skip(p.offset as usize)
+                .take(limit)
+                .map(wire_object)
+                .collect();
+            Ok(Some(frame::response_ok(id, &page)))
+        }
+        method::OBJ_HIT_TEST => {
+            let p: ObjHitTestParams = decode(params)?;
+            let mode = match p.mode {
+                messages::HitMode::Top => HitMode::Top,
+                messages::HitMode::All => HitMode::All,
+            };
+            let hits = engine
+                .engine
+                .hit_test(p.doc_id, p.page_id, (p.point[0], p.point[1]), mode)
+                .await
+                .map_err(map_engine_error)?;
+            let hits: Vec<messages::ObjectSummary> = hits.iter().map(wire_object).collect();
+            Ok(Some(frame::response_ok(id, &hits)))
+        }
+        method::EDIT_TRANSFORM => {
+            let p: EditTransformParams = decode(params)?;
+            let [a, b, c, d, e, f] = p.matrix;
+            let op = EditOp::Transform {
+                ids: object_ids(&p.ids),
+                matrix: Matrix { a, b, c, d, e, f },
+            };
+            apply_edit(engine, id, p.doc_id, Some(p.base_version), op, out).await
+        }
+        method::EDIT_SET_STYLE => {
+            let p: EditSetStyleParams = decode(params)?;
+            let Some(fill) = p.fill else {
+                return Err(ErrorCode::InvalidArgument.error_with("没有给出要改的样式"));
+            };
+            let (r, g, b) = rgb_bytes(&fill)?;
+            let op = EditOp::FillRgb {
+                ids: object_ids(&p.ids),
+                r,
+                g,
+                b,
+            };
+            apply_edit(engine, id, p.doc_id, Some(p.base_version), op, out).await
+        }
+        method::EDIT_DELETE => {
+            let p: EditDeleteParams = decode(params)?;
+            let op = EditOp::Delete {
+                ids: object_ids(&p.ids),
+            };
+            apply_edit(engine, id, p.doc_id, Some(p.base_version), op, out).await
+        }
+        method::HISTORY_UNDO => {
+            let p: HistoryParams = decode(params)?;
+            apply_edit(engine, id, p.doc_id, None, EditOp::Undo, out).await
+        }
+        method::HISTORY_REDO => {
+            let p: HistoryParams = decode(params)?;
+            apply_edit(engine, id, p.doc_id, None, EditOp::Redo, out).await
+        }
         method::RENDER_TILES => {
             let p: RenderTilesParams = decode(params)?;
             let request_ids = schedule_tiles(engine, p, out.clone());
@@ -528,12 +600,12 @@ async fn render_and_publish(
     out: &mpsc::UnboundedSender<Outgoing>,
 ) {
     let scale = key.scale_milli as f32 / 1000.0;
-    let bitmap = match engine
+    let (bitmap, version) = match engine
         .engine
         .render_tile(key.doc_id, key.page_id, scale, key.x, key.y)
         .await
     {
-        Ok(b) => b,
+        Ok(rendered) => rendered,
         Err(e) => {
             tracing::warn!("瓦片渲染失败：{e}");
             return;
@@ -553,8 +625,7 @@ async fn render_and_publish(
         scale,
         x: key.x,
         y: key.y,
-        // 原型还没有修改命令，文档版本恒为 0。
-        version: 0,
+        version: wire_version(version),
         slot,
         generation,
     };
@@ -618,6 +689,79 @@ fn decode<T: serde::de::DeserializeOwned>(
         .map_err(|e| ErrorCode::InvalidArgument.error_with(format!("参数不合法：{e}")))
 }
 
+/// 执行一条修改命令（或撤销、重做）：成功后先推送 `doc.changed`，再应答新的版本号。
+async fn apply_edit(
+    engine: &Arc<Engine>,
+    id: RequestId,
+    doc_id: u32,
+    base_version: Option<u32>,
+    op: EditOp,
+    out: &mpsc::UnboundedSender<Outgoing>,
+) -> std::result::Result<Option<Response>, RpcError> {
+    let change = engine
+        .engine
+        .edit(doc_id, base_version.map(u64::from), op)
+        .await
+        .map_err(map_engine_error)?;
+    let version = wire_version(change.version);
+    let changed = DocChanged {
+        doc_id,
+        version,
+        changes: change
+            .pages
+            .iter()
+            .map(|page| PageChange {
+                page_id: u32::try_from(page.page).unwrap_or(u32::MAX),
+                added: page.added.iter().map(|id| id.0).collect(),
+                removed: page.removed.iter().map(|id| id.0).collect(),
+                modified: page.modified.iter().map(|id| id.0).collect(),
+            })
+            .collect(),
+        pages_changed: false,
+    };
+    engine.event_to(out, messages::event::DOC_CHANGED, &changed);
+    Ok(Some(frame::response_ok(id, &EditResult { version })))
+}
+
+/// 文档版本号在协议里是 32 位。
+fn wire_version(version: u64) -> u32 {
+    u32::try_from(version).unwrap_or(u32::MAX)
+}
+
+fn object_ids(ids: &[u64]) -> Vec<ObjectId> {
+    ids.iter().copied().map(ObjectId).collect()
+}
+
+fn wire_object(object: &ObjectSummary) -> messages::ObjectSummary {
+    messages::ObjectSummary {
+        id: object.id.0,
+        kind: match object.kind {
+            pdfium_sys::ObjectKind::Text => messages::ObjectKind::Text,
+            pdfium_sys::ObjectKind::Path => messages::ObjectKind::Path,
+            pdfium_sys::ObjectKind::Image => messages::ObjectKind::Image,
+            pdfium_sys::ObjectKind::Shading => messages::ObjectKind::Shading,
+            pdfium_sys::ObjectKind::Form => messages::ObjectKind::Form,
+            pdfium_sys::ObjectKind::Unknown => messages::ObjectKind::Unknown,
+        },
+        bbox: object.bounds.map(|b| [b.left, b.bottom, b.right, b.top]),
+        z: u32::try_from(object.z).unwrap_or(u32::MAX),
+        locked: false,
+    }
+}
+
+/// 把协议里的颜色换成 8 位 RGB。原型只认 RGB，三个分量都要在 0–1 之间。
+fn rgb_bytes(color: &Color) -> std::result::Result<(u8, u8, u8), RpcError> {
+    let ColorSpace::Rgb = color.space;
+    let [r, g, b] = color.components[..] else {
+        return Err(ErrorCode::InvalidArgument.error_with("RGB 颜色要有三个分量"));
+    };
+    if ![r, g, b].iter().all(|c| (0.0..=1.0).contains(c)) {
+        return Err(ErrorCode::InvalidArgument.error_with("颜色分量要在 0 到 1 之间"));
+    }
+    let byte = |c: f32| (c * 255.0).round() as u8;
+    Ok((byte(r), byte(g), byte(b)))
+}
+
 fn map_engine_error(e: crate::pdfium_thread::EngineError) -> RpcError {
     use crate::pdfium_thread::EngineError;
     let code = match &e {
@@ -627,8 +771,24 @@ fn map_engine_error(e: crate::pdfium_thread::EngineError) -> RpcError {
             with_password,
         } => open_error_code(error, *with_password),
         EngineError::Render(_) => ErrorCode::Internal,
+        EngineError::VersionConflict { .. } => ErrorCode::VersionConflict,
+        EngineError::Edit(edit) => edit_error_code(edit),
     };
     code.error_with(e.to_string())
+}
+
+/// 编辑失败时用哪个错误码（《接口协议》第 8 节）。
+fn edit_error_code(error: &EditError) -> ErrorCode {
+    match error {
+        EditError::NoObject(_) => ErrorCode::ObjectNotFound,
+        EditError::PageNotEditable { .. } => ErrorCode::PageOverlayOnly,
+        // 协议里没有“没有可撤销的操作”这样的码，按参数不合法报。
+        EditError::NoTarget
+        | EditError::SingularMatrix
+        | EditError::NothingToUndo
+        | EditError::NothingToRedo => ErrorCode::InvalidArgument,
+        EditError::Pdfium(_) | EditError::NoFill => ErrorCode::Internal,
+    }
 }
 
 /// `doc.open` 失败时用哪个错误码（《接口协议》6.1、第 8 节）。
