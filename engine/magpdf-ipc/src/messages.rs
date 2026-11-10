@@ -126,67 +126,57 @@ macro_rules! names {
     };
 }
 
-/// 《接口协议》第 8 节的错误码。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(i32)]
-pub enum ErrorCode {
-    /// 协议版本不符或消息格式错误。
-    Protocol = 1001,
-    /// 处理过程中引擎重启。
-    EngineRestarted = 1002,
-    /// 请求被取消。
-    Cancelled = 1003,
-    /// 文件不存在。
-    FileNotFound = 2001,
-    /// 参数不合法。
-    InvalidArgument = 3005,
-    /// 瓦片的代数对不上：槽位已被复用（《接口协议》3.3，HTTP 410 时的错误码）。
-    TileGenerationStale = 3006,
-    /// 内部错误。
-    Internal = 9001,
+/// 定义错误码表：每一行是「变体 = 数值, 协议里的名称, 给用户看的中文说明」。
+macro_rules! error_codes {
+    ($( $(#[$meta:meta])* $variant:ident = $code:literal, $name:literal, $message:literal; )*) => {
+        /// 《接口协议》第 8 节的错误码。
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        #[repr(i32)]
+        pub enum ErrorCode {
+            $( $(#[$meta])* $variant = $code, )*
+        }
+
+        impl ErrorCode {
+            /// 全部错误码，按数值从小到大。
+            pub const ALL: &[Self] = &[$(Self::$variant),*];
+
+            /// 《接口协议》第 8 节里的名称，如 `E_PROTOCOL`。
+            pub const fn name(self) -> &'static str {
+                match self {
+                    $(Self::$variant => $name,)*
+                }
+            }
+
+            /// 可以直接显示给用户的中文说明。
+            pub const fn message(self) -> &'static str {
+                match self {
+                    $(Self::$variant => $message,)*
+                }
+            }
+        }
+    };
+}
+
+error_codes! {
+    Protocol = 1001, "E_PROTOCOL", "协议版本不符或消息格式错误";
+    EngineRestarted = 1002, "E_ENGINE_RESTARTED", "处理过程中引擎重启";
+    Cancelled = 1003, "E_CANCELLED", "请求被取消";
+    FileNotFound = 2001, "E_FILE_NOT_FOUND", "文件不存在";
+    PasswordRequired = 2002, "E_PASSWORD_REQUIRED", "需要打开密码";
+    PasswordWrong = 2003, "E_PASSWORD_WRONG", "密码错误";
+    FileDamaged = 2004, "E_FILE_DAMAGED", "文件损坏，自动修复也失败";
+    Unsupported = 2005, "E_UNSUPPORTED", "不支持的文件";
+    InvalidArgument = 3005, "E_INVALID_ARGUMENT", "参数不合法";
+    /// 瓦片的代数对不上：槽位已被复用（《接口协议》3.3，主进程转成 HTTP 410）。
+    /// 《接口协议》第 8 节里还没有这个码，是 V06 原型加的。
+    TileGenerationStale = 3006, "E_TILE_GENERATION_STALE", "瓦片已被新内容替换";
+    Internal = 9001, "E_INTERNAL", "内部错误";
 }
 
 impl ErrorCode {
-    /// 全部错误码，按数值从小到大。
-    pub const ALL: [Self; 7] = [
-        Self::Protocol,
-        Self::EngineRestarted,
-        Self::Cancelled,
-        Self::FileNotFound,
-        Self::InvalidArgument,
-        Self::TileGenerationStale,
-        Self::Internal,
-    ];
-
     pub const fn code(self) -> i32 {
         self as i32
     }
-
-    /// 《接口协议》第 8 节里的名称，如 `E_PROTOCOL`。
-    pub const fn name(self) -> &'static str {
-        match self {
-            Self::Protocol => "E_PROTOCOL",
-            Self::EngineRestarted => "E_ENGINE_RESTARTED",
-            Self::Cancelled => "E_CANCELLED",
-            Self::FileNotFound => "E_FILE_NOT_FOUND",
-            Self::InvalidArgument => "E_INVALID_ARGUMENT",
-            Self::TileGenerationStale => "E_TILE_GENERATION_STALE",
-            Self::Internal => "E_INTERNAL",
-        }
-    }
-
-    pub fn message(self) -> &'static str {
-        match self {
-            Self::Protocol => "协议版本不符或消息格式错误",
-            Self::EngineRestarted => "处理过程中引擎重启",
-            Self::Cancelled => "请求被取消",
-            Self::FileNotFound => "文件不存在",
-            Self::InvalidArgument => "参数不合法",
-            Self::TileGenerationStale => "瓦片已被新内容替换",
-            Self::Internal => "内部错误",
-        }
-    }
-
     pub fn error(self) -> RpcError {
         RpcError::new(self, self.message())
     }

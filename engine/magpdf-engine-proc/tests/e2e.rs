@@ -363,6 +363,34 @@ async fn doc_close_forgets_the_document() {
     assert_eq!(again["code"], ErrorCode::InvalidArgument.code());
 }
 
+/// `doc.open` 的失败用《接口协议》第 8 节的错误码区分。
+#[tokio::test]
+async fn doc_open_failures_use_the_protocol_error_codes() {
+    let mut engine = Engine::start(None).await;
+    engine.hello().await;
+
+    let missing = engine
+        .call_err(
+            method::DOC_OPEN,
+            json!({ "path": sample("no-such-file.pdf") }),
+        )
+        .await;
+    assert_eq!(missing["code"], ErrorCode::FileNotFound.code(), "{missing}");
+
+    let garbage = std::env::temp_dir().join(format!("magpdf-{}-garbage.pdf", engine.session));
+    std::fs::write(&garbage, b"this is not a pdf").unwrap();
+    let damaged = engine
+        .call_err(
+            method::DOC_OPEN,
+            json!({ "path": garbage.to_string_lossy() }),
+        )
+        .await;
+    let _ = std::fs::remove_file(&garbage);
+    assert_eq!(damaged["code"], ErrorCode::FileDamaged.code(), "{damaged}");
+
+    assert_eq!(engine.recovery_docs(), 0, "打不开的文件不该记进恢复文件");
+}
+
 /// 引擎被强制结束后，新引擎按恢复文件把文档重新打开，并在 `session.hello` 里报告（方案 9.3）。
 #[tokio::test]
 async fn a_new_engine_reopens_documents_from_the_recovery_file() {

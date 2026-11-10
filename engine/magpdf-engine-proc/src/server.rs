@@ -160,10 +160,11 @@ impl Engine {
         let engine = EngineHandle::spawn()?;
         // 恢复：重新打开恢复文件里的文档。
         let mut restored = Vec::new();
-        for doc in recovery.state().docs.clone() {
+        for (index, doc) in recovery.state().docs.clone().iter().enumerate() {
             match engine.open_blocking(&doc.path) {
                 Ok(info) => restored.push(info),
-                Err(e) => tracing::warn!("恢复文档 {} 失败：{e}", doc.path),
+                // 日志里不写文件路径（《工程规范》4）。
+                Err(e) => tracing::warn!("恢复文件里的第 {} 份文档打不开：{e}", index + 1),
             }
         }
         if !restored.is_empty() {
@@ -294,7 +295,9 @@ async fn serve_connection(engine: Arc<Engine>, conn: NamedPipeServer) {
                     }
                 }
                 Ok(Incoming::Notification(_)) => {}
-                Ok(Incoming::Response(resp)) => tracing::warn!("引擎收到了响应 {resp:?}，忽略"),
+                Ok(Incoming::Response(resp)) => {
+                    tracing::warn!("引擎收到了一条响应（id {}），忽略", resp.id);
+                }
                 Err(e) => tracing::warn!("无法解析的消息：{e}"),
             }
         }
@@ -617,13 +620,57 @@ fn decode<T: serde::de::DeserializeOwned>(
 
 fn map_engine_error(e: crate::pdfium_thread::EngineError) -> RpcError {
     use crate::pdfium_thread::EngineError;
-    match &e {
-        EngineError::NoDocument { .. } | EngineError::NoPage { .. } => {
-            ErrorCode::InvalidArgument.error_with(e.to_string())
-        }
-        EngineError::Open(message) if message.contains("not found") => {
-            ErrorCode::FileNotFound.error_with(e.to_string())
-        }
-        _ => ErrorCode::Internal.error_with(e.to_string()),
+    let code = match &e {
+        EngineError::NoDocument { .. } | EngineError::NoPage { .. } => ErrorCode::InvalidArgument,
+        EngineError::Open {
+            error,
+            with_password,
+        } => open_error_code(error, *with_password),
+        EngineError::Render(_) => ErrorCode::Internal,
+    };
+    code.error_with(e.to_string())
+}
+
+/// `doc.open` 失败时用哪个错误码（《接口协议》6.1、第 8 节）。
+fn open_error_code(error: &pdfium_sys::Error, with_password: bool) -> ErrorCode {
+    use pdfium_sys::{Error, LoadError};
+    match error {
+        Error::Io(io) if io.kind() == std::io::ErrorKind::NotFound => ErrorCode::FileNotFound,
+        Error::Load(LoadError::Password) if with_password => ErrorCode::PasswordWrong,
+        Error::Load(LoadError::Password) => ErrorCode::PasswordRequired,
+        // PDFium 报“格式不对”或“文件读不了”，都是修复之后仍然打不开。
+        Error::Load(LoadError::Format | LoadError::File) => ErrorCode::FileDamaged,
+        // 不认识的加密方式。
+        Error::Load(LoadError::Security) => ErrorCode::Unsupported,
+        _ => ErrorCode::Internal,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use pdfium_sys::{Error, LoadError};
+
+    use super::*;
+
+    #[test]
+    fn open_errors_map_to_protocol_codes() {
+        let missing = Error::Io(std::io::Error::from(std::io::ErrorKind::NotFound));
+        assert_eq!(open_error_code(&missing, false), ErrorCode::FileNotFound);
+        let denied = Error::Io(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+        assert_eq!(open_error_code(&denied, false), ErrorCode::Internal);
+        let password = Error::Load(LoadError::Password);
+        assert_eq!(
+            open_error_code(&password, false),
+            ErrorCode::PasswordRequired
+        );
+        assert_eq!(open_error_code(&password, true), ErrorCode::PasswordWrong);
+        assert_eq!(
+            open_error_code(&Error::Load(LoadError::Format), false),
+            ErrorCode::FileDamaged
+        );
+        assert_eq!(
+            open_error_code(&Error::Load(LoadError::Security), false),
+            ErrorCode::Unsupported
+        );
     }
 }

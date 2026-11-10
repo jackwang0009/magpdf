@@ -15,8 +15,12 @@ pub enum EngineError {
     NoDocument { doc_id: u32 },
     #[error("页面 {page_id} 不存在（文档 {doc_id}）")]
     NoPage { doc_id: u32, page_id: u32 },
-    #[error("打开文档失败：{0}")]
-    Open(String),
+    /// 打开失败。`with_password` 记下请求里有没有带密码，用来区分“需要密码”和“密码错误”。
+    #[error("打开文档失败：{error}")]
+    Open {
+        error: pdfium_sys::Error,
+        with_password: bool,
+    },
     #[error("渲染失败：{0}")]
     Render(String),
 }
@@ -252,8 +256,12 @@ impl PdfiumState {
         path: String,
         password: Option<&str>,
     ) -> std::result::Result<DocInfo, EngineError> {
-        let doc = Document::load_file(self.lib, std::path::Path::new(&path), password)
-            .map_err(|e| EngineError::Open(e.to_string()))?;
+        let doc = Document::load_file(self.lib, std::path::Path::new(&path), password).map_err(
+            |error| EngineError::Open {
+                error,
+                with_password: password.is_some(),
+            },
+        )?;
         let doc_id = self.next_doc_id;
         self.next_doc_id += 1;
         let title = std::path::Path::new(&path)
