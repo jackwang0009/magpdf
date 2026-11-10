@@ -6,7 +6,7 @@ import type { Stats } from "./Stats";
  */
 export type BenchEngineResult = { 
 /**
- * 引擎的一次小消息往返（管道上的 echo，含读帧、JSON 解码、编码、写帧）。
+ * 引擎处理一条小消息的编解码合计：请求的 JSON 编码与解码、响应的编码与解码，不含管道读写。
  */
 engineRoundtrip: Stats, 
 /**
@@ -48,7 +48,7 @@ jsonBytes: number, msgpackBytes: number,
 /**
  * 引擎能拿到的物理内存（MB），用于 I2 建议。
  */
-totalMemoryMb: bigint, 
+totalMemoryMb: number, 
 /**
  * 系统 CPU 占用（%，采样期间的平均值），说明测量是否受其他任务干扰。
  */

@@ -5,4 +5,4 @@ import type { JsonValue } from "./JsonValue";
 /**
  * JSON-RPC 请求。
  */
-export type Request = { jsonrpc: JsonRpcTag, id: bigint, method: string, params?: JsonValue | null, };
+export type Request = { jsonrpc: JsonRpcTag, id: number, method: string, params?: JsonValue | null, };

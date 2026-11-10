@@ -10,5 +10,5 @@ Cargo.lock
 models/manifest.json
 tests/corpus/synthetic/manifest.json
 tests/corpus/synthetic-text/samples/manifest.json
-# ts-rs 生成的协议类型，cargo test 时重写
-engine/magpdf-ipc/bindings/
+# 从 Rust 生成的协议类型和常量，cargo test -p magpdf-ipc 时重写
+packages/protocol/src/generated/

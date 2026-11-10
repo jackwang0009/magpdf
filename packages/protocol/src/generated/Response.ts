@@ -6,4 +6,4 @@ import type { RpcError } from "./RpcError";
 /**
  * JSON-RPC 响应：`result` 与 `error` 恰有其一。
  */
-export type Response = { jsonrpc: JsonRpcTag, id: bigint, result?: JsonValue | null, error?: RpcError | null, };
+export type Response = { jsonrpc: JsonRpcTag, id: number, result?: JsonValue | null, error?: RpcError | null, };

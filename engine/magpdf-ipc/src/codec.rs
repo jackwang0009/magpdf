@@ -34,7 +34,8 @@ pub fn decode_json<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, serde_json::E
     serde_json::from_slice(bytes)
 }
 
-/// 把消息编码成 MessagePack（对照用）。引擎的基准里另有直接调用 `rmp_serde` 的同口径测量，这里保留给\n/// 两边对照协议的单元测试。
+/// 把消息编码成 MessagePack（对照用）。引擎的基准里另有直接调用 `rmp_serde` 的同口径测量，这里保留给
+/// 两边对照协议的单元测试。
 pub fn encode_msgpack<T: Serialize>(value: &T) -> Result<Encoded, rmp_serde::encode::Error> {
     Ok(Encoded {
         bytes: rmp_serde::to_vec_named(value)?,

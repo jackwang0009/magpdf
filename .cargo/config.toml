@@ -1,0 +1,6 @@
+# 协议类型生成（方案 3.1、《接口协议》开头）：`cargo test -p magpdf-ipc` 时，ts-rs 把带 `#[ts(export)]` 的
+# 类型写到 packages/protocol/src/generated/，magpdf-ipc 自己的测试再写一份 constants.ts。
+# JSON 里的整数都是 JavaScript 安全整数（《接口协议》3.1），所以 u64 生成为 number 而不是 bigint。
+[env]
+TS_RS_EXPORT_DIR = { value = "packages/protocol/src/generated", relative = true }
+TS_RS_LARGE_INT = "number"

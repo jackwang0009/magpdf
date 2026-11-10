@@ -108,6 +108,24 @@ impl fmt::Display for RpcError {
 
 impl std::error::Error for RpcError {}
 
+/// 定义一组协议里的名字：每个名字一个常量，外加按声明顺序的 `ALL` 表（生成 TypeScript 常量时用）。
+macro_rules! names {
+    (
+        $(#[$meta:meta])*
+        pub mod $module:ident {
+            $($(#[$item_meta:meta])* $name:ident = $value:literal;)*
+        }
+    ) => {
+        $(#[$meta])*
+        pub mod $module {
+            $($(#[$item_meta])* pub const $name: &str = $value;)*
+
+            /// 全部名字，按声明顺序：`(常量名, 协议里的名字)`。
+            pub const ALL: &[(&str, &str)] = &[$((stringify!($name), $value)),*];
+        }
+    };
+}
+
 /// 《接口协议》第 8 节的错误码。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i32)]
@@ -129,8 +147,32 @@ pub enum ErrorCode {
 }
 
 impl ErrorCode {
+    /// 全部错误码，按数值从小到大。
+    pub const ALL: [Self; 7] = [
+        Self::Protocol,
+        Self::EngineRestarted,
+        Self::Cancelled,
+        Self::FileNotFound,
+        Self::InvalidArgument,
+        Self::TileGenerationStale,
+        Self::Internal,
+    ];
+
     pub const fn code(self) -> i32 {
         self as i32
+    }
+
+    /// 《接口协议》第 8 节里的名称，如 `E_PROTOCOL`。
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Protocol => "E_PROTOCOL",
+            Self::EngineRestarted => "E_ENGINE_RESTARTED",
+            Self::Cancelled => "E_CANCELLED",
+            Self::FileNotFound => "E_FILE_NOT_FOUND",
+            Self::InvalidArgument => "E_INVALID_ARGUMENT",
+            Self::TileGenerationStale => "E_TILE_GENERATION_STALE",
+            Self::Internal => "E_INTERNAL",
+        }
     }
 
     pub fn message(self) -> &'static str {
@@ -160,28 +202,32 @@ impl ErrorCode {
     }
 }
 
-/// 方法名（《接口协议》第 4、6.3 节，加 V06 原型用的测量方法）。
-pub mod method {
-    pub const SESSION_HELLO: &str = "session.hello";
-    pub const SESSION_PING: &str = "session.ping";
-    pub const SESSION_SHUTDOWN: &str = "session.shutdown";
-    pub const DOC_OPEN: &str = "doc.open";
-    pub const RENDER_TILES: &str = "render.tiles";
-    pub const RENDER_CANCEL: &str = "render.cancel";
-    pub const TILE_FETCH: &str = "tile.fetch";
-    pub const BENCH_ECHO: &str = "bench.echo";
-    pub const BENCH_ROUNDTRIP: &str = "bench.roundtrip";
-    pub const BENCH_ENGINE: &str = "bench.engine";
+names! {
+    /// 方法名（《接口协议》第 4、6.3 节，加 V06 原型用的测量方法）。
+    pub mod method {
+        SESSION_HELLO = "session.hello";
+        SESSION_PING = "session.ping";
+        SESSION_SHUTDOWN = "session.shutdown";
+        DOC_OPEN = "doc.open";
+        RENDER_TILES = "render.tiles";
+        RENDER_CANCEL = "render.cancel";
+        /// 不在《接口协议》里：主进程请引擎核对槽位的代数（V06 原型加的，见 V06 报告）。
+        TILE_FETCH = "tile.fetch";
+        BENCH_ECHO = "bench.echo";
+        BENCH_ROUNDTRIP = "bench.roundtrip";
+        BENCH_ENGINE = "bench.engine";
+    }
 }
 
-/// 事件名（《接口协议》第 7 节）。
-pub mod event {
-    pub const RENDER_TILE_READY: &str = "render.tileReady";
-    pub const ENGINE_BUSY: &str = "engine.busy";
-    pub const ENGINE_RESTARTING: &str = "engine.restarting";
-    pub const ENGINE_RESTORED: &str = "engine.restored";
-    /// 瓦片的像素已写入共享内存，可以取回。
-    pub const TILE_READY: &str = "tile.ready";
+names! {
+    /// 事件名（《接口协议》第 7 节）。
+    pub mod event {
+        /// 瓦片的像素已写入共享内存，可以取回。
+        RENDER_TILE_READY = "render.tileReady";
+        ENGINE_BUSY = "engine.busy";
+        ENGINE_RESTARTING = "engine.restarting";
+        ENGINE_RESTORED = "engine.restored";
+    }
 }
 
 // ---- session ----
@@ -306,16 +352,19 @@ pub struct RenderTilesResult {
     pub request_ids: Vec<u32>,
 }
 
-/// `tile.ready` 事件的参数：瓦片已写入共享内存。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+/// `render.tileReady` 事件的参数（《接口协议》第 7 节）：瓦片已写入共享内存。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct TileReady {
     pub request_id: u32,
     pub doc_id: u32,
     pub page_id: u32,
+    pub scale: f32,
     pub x: u32,
     pub y: u32,
+    /// 渲染时的文档版本号。原型还没有修改命令，恒为 0。
+    pub version: u32,
     pub slot: u32,
     pub generation: u32,
 }
@@ -419,7 +468,7 @@ impl Stats {
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct BenchEngineResult {
-    /// 引擎的一次小消息往返（管道上的 echo，含读帧、JSON 解码、编码、写帧）。
+    /// 引擎处理一条小消息的编解码合计：请求的 JSON 编码与解码、响应的编码与解码，不含管道读写。
     pub engine_roundtrip: Stats,
     /// 从共享内存读出 512×512 瓦片（`copy_from_slice`）。
     pub shm_read: Stats,
@@ -444,4 +493,97 @@ pub struct BenchEngineResult {
     pub total_memory_mb: u64,
     /// 系统 CPU 占用（%，采样期间的平均值），说明测量是否受其他任务干扰。
     pub cpu_percent: f64,
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+    use std::fmt::Write as _;
+    use std::path::PathBuf;
+
+    use super::*;
+
+    /// ts-rs 导出类型的目录：`TS_RS_EXPORT_DIR`（仓库里由 `.cargo/config.toml` 指到
+    /// `packages/protocol/src/generated`），没设时是 crate 下的 `bindings/`。
+    fn export_dir() -> PathBuf {
+        std::env::var_os("TS_RS_EXPORT_DIR")
+            .map_or_else(|| PathBuf::from("bindings"), PathBuf::from)
+    }
+
+    /// `constants.ts` 的内容：协议版本、方法名、事件名、错误码。
+    fn constants_ts() -> String {
+        let mut out = String::from(
+            "// 本文件由 magpdf-ipc 的测试 export_protocol_constants 生成（cargo test -p magpdf-ipc），不要手工修改。\n\n",
+        );
+        out.push_str("/** 协议版本：不兼容修改时加 1（《接口协议》第 4 节）。 */\n");
+        writeln!(
+            out,
+            "export const PROTOCOL_VERSION = {PROTOCOL_VERSION} as const;\n"
+        )
+        .unwrap();
+        out.push_str("/** 方法名（《接口协议》第 4、6 节，以及 V06 原型的测量方法）。 */\n");
+        out.push_str("export const METHOD = {\n");
+        for (name, value) in method::ALL {
+            writeln!(out, "  {name}: '{value}',").unwrap();
+        }
+        out.push_str("} as const;\n\n");
+        out.push_str("/** 事件名（《接口协议》第 7 节）。 */\n");
+        out.push_str("export const EVENT = {\n");
+        for (name, value) in event::ALL {
+            writeln!(out, "  {name}: '{value}',").unwrap();
+        }
+        out.push_str("} as const;\n\n");
+        out.push_str("/** 错误码（《接口协议》第 8 节）。 */\n");
+        out.push_str("export const ERROR_CODE = {\n");
+        for code in ErrorCode::ALL {
+            writeln!(out, "  {}: {},", code.name(), code.code()).unwrap();
+        }
+        out.push_str("} as const;\n");
+        out
+    }
+
+    #[test]
+    fn names_and_error_codes_are_unique() {
+        for table in [method::ALL, event::ALL] {
+            let values: BTreeSet<_> = table.iter().map(|(_, value)| *value).collect();
+            assert_eq!(values.len(), table.len(), "协议名字不能重复：{table:?}");
+        }
+        let codes: Vec<i32> = ErrorCode::ALL.iter().map(|c| c.code()).collect();
+        assert!(codes.is_sorted(), "错误码按数值从小到大列出：{codes:?}");
+        let names: BTreeSet<_> = ErrorCode::ALL.iter().map(|c| c.name()).collect();
+        assert_eq!(names.len(), ErrorCode::ALL.len());
+        assert!(names.iter().all(|n| n.starts_with("E_")));
+    }
+
+    /// 和 ts-rs 的导出测试做法一样：`cargo test` 时把协议常量写进导出目录，与生成的类型放在一起。
+    #[test]
+    fn export_protocol_constants() {
+        let dir = export_dir();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("constants.ts"), constants_ts()).unwrap();
+    }
+
+    /// `packages/protocol/src/messages.ts` 手工列出要再导出的类型；生成目录里多了类型而它没跟上时在这里报错。
+    #[test]
+    fn protocol_package_reexports_every_generated_type() {
+        let dir = export_dir();
+        let Ok(barrel) = std::fs::read_to_string(dir.join("../messages.ts")) else {
+            // 导出目录不在协议包里（没有设 TS_RS_EXPORT_DIR）时没有可核对的文件。
+            return;
+        };
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+            if path.extension().is_none_or(|ext| ext != "ts") || stem == "constants" {
+                continue;
+            }
+            assert!(
+                barrel.contains(&format!("'./generated/{stem}'")),
+                "packages/protocol/src/messages.ts 没有再导出 {stem}"
+            );
+        }
+    }
 }

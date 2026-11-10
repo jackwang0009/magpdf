@@ -7,4 +7,4 @@ export type PingParams = {
 /**
  * 主进程的单调时钟毫秒数，引擎原样回传（用来观察监控延迟）。
  */
-t: bigint, };
+t: number, };

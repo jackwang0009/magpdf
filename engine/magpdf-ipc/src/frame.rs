@@ -180,13 +180,15 @@ mod tests {
     async fn async_read_write_preserves_messages() {
         let (mut a, mut b) = tokio::io::duplex(1024);
         let note = notification(
-            "tile.ready",
+            crate::messages::event::RENDER_TILE_READY,
             &crate::messages::TileReady {
                 request_id: 1,
                 doc_id: 2,
                 page_id: 0,
+                scale: 1.0,
                 x: 512,
                 y: 0,
+                version: 0,
                 slot: 3,
                 generation: 4,
             },

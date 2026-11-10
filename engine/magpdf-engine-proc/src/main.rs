@@ -9,7 +9,7 @@
 //! 结构：
 //! - 主线程跑 tokio 运行时，负责管道通信：读帧、JSON 解码、派发、编码、写帧；
 //! - PDFium 任务投递给一个专用线程（[`pdfium_thread`]），PDFium 忙时通信线程仍能应答 `session.ping`；
-//! - 瓦片由 PDFium 线程渲染后写进命名共享内存（[`slots`] 记账），再发 `tile.ready` 事件。
+//! - 瓦片由 PDFium 线程渲染后写进命名共享内存（[`slots`] 记账），再发 `render.tileReady` 事件。
 
 mod bench;
 mod pdfium_thread;

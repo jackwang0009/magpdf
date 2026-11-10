@@ -2,7 +2,7 @@
 //!
 //! 一条连接一个读循环 + 一个写循环。读循环收到请求后按方法派发：不碰 PDFium 的（`session.*`、
 //! `bench.*`、`tile.fetch`）在通信线程上直接应答；渲染请求立即应答 `requestIds`，瓦片在后台渲染完成后
-//! 以 `tile.ready` 事件送达。
+//! 以 `render.tileReady` 事件送达。
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -185,7 +185,7 @@ impl Engine {
 ///
 /// 不碰 PDFium 的请求（`session.*`、`tile.fetch`、`bench.*` 的一部分）在 pump 里直接应答；碰 PDFium 的
 /// 请求投递到 PDFium 线程后立即应答（`doc.open` 等 PDFium 完成），渲染请求立即应答 requestId、瓦片
-/// 完成时以 `tile.ready` 事件发出。
+/// 完成时以 `render.tileReady` 事件发出。
 async fn serve_connection(engine: Arc<Engine>, conn: NamedPipeServer) {
     let (out_tx, mut out_rx) = mpsc::unbounded_channel::<Outgoing>();
     let mut reader = pump::FrameReader::new();
@@ -425,7 +425,7 @@ fn record_view(engine: &Engine, p: &RenderTilesParams) {
     }
 }
 
-/// 渲染一块瓦片、写进共享内存槽位，然后发 `tile.ready`。
+/// 渲染一块瓦片、写进共享内存槽位，然后发 `render.tileReady`。
 async fn render_and_publish(
     engine: &Arc<Engine>,
     request_id: u32,
@@ -455,12 +455,15 @@ async fn render_and_publish(
         request_id,
         doc_id: key.doc_id,
         page_id: key.page_id,
+        scale,
         x: key.x,
         y: key.y,
+        // 原型还没有修改命令，文档版本恒为 0。
+        version: 0,
         slot,
         generation,
     };
-    engine.event_to(out, messages::event::TILE_READY, &ready);
+    engine.event_to(out, messages::event::RENDER_TILE_READY, &ready);
 }
 
 fn write_tile(
