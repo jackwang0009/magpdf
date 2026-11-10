@@ -39,3 +39,5 @@ Thumbs.db
 /tests/corpus/synthetic-ocr/out/
 # V12 临时性能测量脚本与截图（本地运行，不入库）
 /.perf/
+# 本机调试脚本、截图等临时产物统一放这里，不入库
+/_agent_tmp/
