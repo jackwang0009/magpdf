@@ -2,6 +2,7 @@ use std::ffi::{CString, c_int, c_void};
 use std::marker::PhantomData;
 use std::path::Path;
 use std::ptr;
+use std::sync::Arc;
 
 use crate::error::{Error, LoadError, Result};
 use crate::geom::{Matrix, Rect};
@@ -71,14 +72,16 @@ impl SaveFlags {
 /// 一个已打开的 PDF 文档。数据由 `Document` 持有（PDFium 要求内存文档的缓冲区在文档关闭前有效）。
 pub struct Document<'lib> {
     handle: raw::FPDF_DOCUMENT,
-    _data: Vec<u8>,
+    /// 文档是从这块数据打开的。PDFium 只读它，从不改写：打开之后的修改都记在 PDFium 自己的对象里。
+    /// 所以它可以和 [`Document::reopen`] 得到的文档共用；新建的文档没有数据，这里是空的。
+    data: Arc<Vec<u8>>,
     _lib: PhantomData<&'lib Library>,
 }
 
 impl std::fmt::Debug for Document<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Document")
-            .field("bytes", &self._data.len())
+            .field("bytes", &self.data.len())
             .finish_non_exhaustive()
     }
 }
@@ -92,10 +95,20 @@ impl<'lib> Document<'lib> {
     }
 
     /// 从内存打开。
-    pub fn load_bytes(_lib: &'lib Library, data: Vec<u8>, password: Option<&str>) -> Result<Self> {
+    pub fn load_bytes(lib: &'lib Library, data: Vec<u8>, password: Option<&str>) -> Result<Self> {
+        Self::load_shared(lib, Arc::new(data), password)
+    }
+
+    fn load_shared(
+        _lib: &'lib Library,
+        data: Arc<Vec<u8>>,
+        password: Option<&str>,
+    ) -> Result<Self> {
         let password_c = password.map(CString::new).transpose()?;
         let password_ptr = password_c.as_ref().map_or(ptr::null(), |p| p.as_ptr());
-        // SAFETY: data 的缓冲区由返回的 Document 持有，寿命覆盖整个文档句柄；password 为有效 C 字符串或 NULL。
+        // SAFETY: data 的缓冲区由返回的 Document 持有（共用时每份文档各拿着一个引用计数），寿命覆盖整个
+        // 文档句柄；PDFium 把它当只读的内存文件用，几份文档同时读同一块数据没有问题；
+        // password 为有效 C 字符串或 NULL。
         let handle = unsafe {
             raw::FPDF_LoadMemDocument64(data.as_ptr().cast::<c_void>(), data.len(), password_ptr)
         };
@@ -104,9 +117,20 @@ impl<'lib> Document<'lib> {
         }
         Ok(Self {
             handle,
-            _data: data,
+            data,
             _lib: PhantomData,
         })
+    }
+
+    /// 把这份文档打开时用的数据再打开一遍，得到一份互不相干的文档：它是文件原来的样子，不含打开之后
+    /// 做过的任何修改。两份文档共用同一块只读数据，不复制，所以文件再大也只花解析的时间。
+    ///
+    /// 新建的文档（[`Document::create`]）没有数据，返回 `None`。
+    pub fn reopen(&self, lib: &'lib Library, password: Option<&str>) -> Option<Result<Self>> {
+        if self.data.is_empty() {
+            return None;
+        }
+        Some(Self::load_shared(lib, Arc::clone(&self.data), password))
     }
 
     /// 新建一份空文档（还没有页面）。
@@ -118,7 +142,7 @@ impl<'lib> Document<'lib> {
         }
         Ok(Self {
             handle,
-            _data: Vec::new(),
+            data: Arc::new(Vec::new()),
             _lib: PhantomData,
         })
     }

@@ -145,7 +145,11 @@ pub struct Session<'lib> {
     /// 已经列过对象的页：页序号 → 按层级排列的对象编号。
     ids: BTreeMap<usize, Vec<ObjectId>>,
     next_id: u64,
-    /// 保真校验用的文档副本，第一次校验时从当前文档存一份出来。`Err` 表示副本建不出来。
+    /// 保真校验用的另一份文档，第一次校验时建：文件原来的样子，在它上面试着重写页面，不碰正在用的这份。
+    /// `Err` 表示建不出来。
+    ///
+    /// 它和下面的 `fidelity` 都按页序号对应到正在用的文档。原型还没有页面命令（插入、删除、重排）；
+    /// 加页面命令的时候，这两处要改成按不随重排变化的页面编号来对。
     scratch: Option<std::result::Result<Document<'lib>, ()>>,
     /// 校验过的页：`None` 表示可以修改，`Some` 是不能修改的原因。
     fidelity: BTreeMap<usize, Option<&'static str>>,
@@ -319,10 +323,14 @@ impl<'lib> Session<'lib> {
             return Ok(*known);
         }
         if self.scratch.is_none() {
-            let copy = self
-                .doc
-                .save_to_vec(SaveFlags::NO_INCREMENTAL)
-                .and_then(|bytes| Document::load_bytes(self.lib, bytes, None));
+            // 从文件打开的文档：把文件的数据再解析一遍。要校验的页还没有被改过（改之前必须先过校验），
+            // 所以文件原来的样子就是它现在的样子；两份文档共用同一块数据，不复制，文件再大也只花解析的
+            // 时间。新建的文档没有文件数据，只能把当前的样子存一份出来再读回去。
+            let copy = self.doc.reopen(self.lib, None).unwrap_or_else(|| {
+                self.doc
+                    .save_to_vec(SaveFlags::NO_INCREMENTAL)
+                    .and_then(|bytes| Document::load_bytes(self.lib, bytes, None))
+            });
             self.scratch = Some(copy.map_err(|_| ()));
         }
         let verdict = match &self.scratch {

@@ -152,6 +152,50 @@ fn render_and_inspect_objects() {
     });
 }
 
+/// 用同一块文件数据再打开一份：两份文档互不相干，谁先关都行。
+#[test]
+fn reopen_shares_the_file_data_but_not_the_changes() {
+    const BLUE: [u8; 4] = [255, 0, 0, 255];
+    const WHITE: [u8; 4] = [255, 255, 255, 255];
+    let center = |doc: &Document<'_>| {
+        let page = doc.page(0).expect("page");
+        page.render(RenderOptions::default())
+            .expect("render")
+            .pixel(50, 50)
+    };
+    with_library(|lib| {
+        let doc =
+            Document::load_bytes(lib, minimal_pdf(BLUE_SQUARE, "<< >>", &[]), None).expect("load");
+        let copy = doc.reopen(lib, None).expect("有文件数据").expect("reopen");
+        assert_eq!(center(&doc), BLUE);
+        assert_eq!(center(&copy), BLUE);
+
+        // 把副本里的方块拿掉并重写内容流：原来那份不受影响
+        {
+            let page = copy.page(0).expect("page");
+            let square = page.object(0).expect("object 0");
+            page.remove_object(square).expect("remove");
+            page.generate_content().expect("generate content");
+        }
+        assert_eq!(center(&copy), WHITE);
+        assert_eq!(center(&doc), BLUE);
+
+        // 再开一份，看到的还是文件原来的样子，不带副本上的修改
+        let second = copy.reopen(lib, None).expect("有文件数据").expect("reopen");
+        assert_eq!(center(&second), BLUE);
+
+        // 先关掉最早的那一份：数据由还开着的文档接着拿着
+        drop(doc);
+        drop(copy);
+        assert_eq!(second.page(0).expect("page").object_count(), 1);
+        assert_eq!(center(&second), BLUE);
+
+        // 新建的文档不是从文件数据打开的，没有可以再打开的东西
+        let blank = Document::create(lib).expect("create");
+        assert!(blank.reopen(lib, None).is_none());
+    });
+}
+
 #[test]
 fn regenerate_content_and_save_roundtrip() {
     with_library(|lib| {
