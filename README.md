@@ -39,6 +39,7 @@ models/  assets/       模型清单与下载脚本；内置素材与模板
 pwsh scripts/fetch-pdfium-prebuilt.ps1   # 拉取原版 PDFium 预编译库到 third_party/pdfium-prebuilt
 cargo test --workspace                   # 引擎
 cargo run -p magpdf-cli -- info 某文件.pdf
+cargo run -p magpdf-cli -- fidelity 某文件.pdf   # 逐页报告能不能修改原有对象；不能的页只能叠加内容（方案 2.3）
 pnpm install && pnpm test && pnpm dev    # 界面，浏览器打开 http://localhost:1420（没有引擎，显示的是模拟文档）
 ```
 
