@@ -34,6 +34,7 @@ export const EVENT = {
   ENGINE_BUSY: 'engine.busy',
   ENGINE_RESTARTING: 'engine.restarting',
   ENGINE_RESTORED: 'engine.restored',
+  ENGINE_FAILED: 'engine.failed',
 } as const;
 
 /** 错误码（《接口协议》第 8 节）。 */

@@ -231,8 +231,13 @@ names! {
         /// 瓦片的像素已写入共享内存，可以取回。
         RENDER_TILE_READY = "render.tileReady";
         ENGINE_BUSY = "engine.busy";
+        /// 主进程发：引擎没了，正在重启。在途的请求会以 `E_ENGINE_RESTARTED` 结束。
         ENGINE_RESTARTING = "engine.restarting";
+        /// 主进程发：新引擎已经就绪，参数见 [`EngineRestored`]。
         ENGINE_RESTORED = "engine.restored";
+        /// 主进程发：引擎连续几次都没能重新拉起来，参数见 [`EngineFailed`]。
+        /// 《接口协议》里还没有这个事件。
+        ENGINE_FAILED = "engine.failed";
     }
 }
 
@@ -607,6 +612,29 @@ pub struct TileFetchResult {
     pub generation: u32,
     pub width: u32,
     pub height: u32,
+}
+
+// ---- 主进程发给界面的事件（《接口协议》第 7 节）----
+
+/// `engine.restored` 事件的参数：新引擎已经就绪，这些文档按恢复文件重新打开了。
+///
+/// 《接口协议》只写了 `docIds`。引擎重启后 `docId` 是重新分配的，界面要靠 `docs` 里的路径才能把
+/// 手里的文档和新的 `docId` 对上；对不上的（没能恢复）就当作已经关掉。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct EngineRestored {
+    pub doc_ids: Vec<u32>,
+    pub docs: Vec<DocInfo>,
+}
+
+/// `engine.failed` 事件的参数：引擎连续几次都没能重新拉起来，主进程不再重试。
+/// 《接口协议》里还没有这个事件。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct EngineFailed {
+    pub message: String,
 }
 
 // ---- 基准 ----

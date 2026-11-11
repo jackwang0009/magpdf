@@ -31,9 +31,11 @@ jobs:
       - run: pnpm build
 
   rust:
-    name: 引擎（fmt、clippy、test）
+    name: 引擎与主进程（fmt、clippy、test）
     runs-on: windows-latest
-    timeout-minutes: 30
+    # 主进程带着 Tauri（两百多个 crate），没有缓存的那一次编译要多留些时间。
+    # 调试构建从开发服务器加载界面，不需要先构建前端；界面端到端测试不在这里跑（《测试计划》：每晚）。
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - name: 拉取 PDFium 预编译库

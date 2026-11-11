@@ -58,7 +58,14 @@ windows = { version = "0.62", features = [
   "Win32_Security_Authorization",
   "Win32_Security_Cryptography",
   "Win32_System_SystemInformation",
+  "Win32_System_Console",
 ] }
+
+# 桌面外壳（方案 3.4）：Tauri 2，界面跑在系统自带的 WebView2 里。文件对话框由主进程用 rfd 弹（方案 3.1），
+# 不装 Tauri 的 dialog 插件：界面只拿得到用户选中的那份文档，拿不到任意路径。
+tauri = { version = "2", features = [] }
+tauri-build = { version = "2", features = [] }
+rfd = { version = "0.18", default-features = false }
 
 [workspace.lints.rust]
 missing_debug_implementations = "warn"

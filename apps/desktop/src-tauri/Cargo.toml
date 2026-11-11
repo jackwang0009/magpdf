@@ -1,15 +1,19 @@
 [package]
 name = "magpdf-desktop"
-description = "主进程：监督引擎、IPC、V06 基准（Tauri WebView 后续接入）"
+description = "主进程：Tauri 2 外壳，启动并监督引擎，把界面的请求转给引擎；另带 V06 基准（--bench）"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 repository.workspace = true
+build = "build.rs"
 
 [[bin]]
 name = "magpdf-desktop"
 path = "src/main.rs"
+
+[build-dependencies]
+tauri-build.workspace = true
 
 [dependencies]
 magpdf-ipc.workspace = true
@@ -20,6 +24,8 @@ tracing-subscriber.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
+tauri.workspace = true
+rfd.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows.workspace = true

@@ -1,16 +1,60 @@
-//! MagPDF 桌面主进程（V06 原型入口）。
+//! MagPDF 桌面主进程。
 //!
-//! 当前提供命令行基准：`magpdf-desktop --bench`，拉起引擎、测三条通过线与 I1/I2。
-//! Tauri WebView 外壳在后续补齐；本二进制先作为主进程监督者。
+//! - `magpdf-desktop [文档.pdf ...]`：打开窗口（Tauri 2 + WebView2），启动并监督引擎进程，
+//!   把界面的请求转给引擎（[`app`]）。命令行给了 PDF 就直接打开。
+//! - `magpdf-desktop --bench`：不开窗口，拉起引擎测 V06 的三条通过线与 I1、I2（[`host`]）。
 
+// 发布版是窗口程序，不带控制台；调试版留着控制台，方便看日志。
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
+mod app;
+mod console;
 mod host;
 
 use std::fs;
+use std::path::PathBuf;
+use std::process::ExitCode;
 
 use anyhow::{Context, Result};
 use host::{Host, HostConfig};
 
-fn main() -> Result<()> {
+const USAGE: &str = "\
+用法：
+  magpdf-desktop [文档.pdf ...]   打开窗口；给了文档就直接打开
+  magpdf-desktop --bench          V06 基准，不开窗口
+环境变量：
+  MAGPDF_ENGINE_BIN     引擎可执行文件（默认和本程序在同一个目录）
+  MAGPDF_DATA_DIR       数据目录（默认 %LOCALAPPDATA%\\MagPDF 和 %APPDATA%\\MagPDF）
+  MAGPDF_LOG            日志级别（默认 info）
+  MAGPDF_WEBVIEW_DEBUG_PORT   打开 WebView2 的远程调试端口，界面端到端测试用
+  PDFIUM_PREBUILT_DIR、MAGPDF_BENCH_PDF   只有 --bench 用";
+
+/// 命令行的意思。
+#[derive(Debug, PartialEq, Eq)]
+enum Invocation {
+    /// 打开窗口，并打开这些文档。
+    Window(Vec<PathBuf>),
+    Bench,
+    Help,
+    /// 不认识的开关。
+    Unknown(String),
+}
+
+fn parse_args(args: impl Iterator<Item = String>) -> Invocation {
+    let mut documents = Vec::new();
+    for arg in args {
+        match arg.as_str() {
+            "--bench" => return Invocation::Bench,
+            "--help" | "-h" => return Invocation::Help,
+            flag if flag.starts_with("--") => return Invocation::Unknown(arg),
+            _ => documents.push(PathBuf::from(arg)),
+        }
+    }
+    Invocation::Window(documents)
+}
+
+fn main() -> ExitCode {
+    console::attach_to_parent();
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_env("MAGPDF_LOG")
@@ -19,14 +63,25 @@ fn main() -> Result<()> {
         .with_target(false)
         .init();
 
-    let mut args = std::env::args().skip(1).collect::<Vec<_>>();
-    if args.first().map(String::as_str) == Some("--bench") {
-        args.remove(0);
-        return run_bench();
+    let outcome = match parse_args(std::env::args().skip(1)) {
+        Invocation::Window(documents) => app::run(documents),
+        Invocation::Bench => run_bench(),
+        Invocation::Help => {
+            println!("{USAGE}");
+            Ok(())
+        }
+        Invocation::Unknown(flag) => {
+            eprintln!("不认识的参数 {flag}\n{USAGE}");
+            return ExitCode::from(2);
+        }
+    };
+    match outcome {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            tracing::error!("{error:#}");
+            ExitCode::FAILURE
+        }
     }
-    println!("用法：magpdf-desktop --bench");
-    println!("环境变量：PDFIUM_PREBUILT_DIR、MAGPDF_ENGINE_BIN、MAGPDF_BENCH_PDF");
-    Ok(())
 }
 
 fn run_bench() -> Result<()> {
@@ -65,4 +120,28 @@ fn run_bench() -> Result<()> {
         std::process::exit(2);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> Invocation {
+        parse_args(args.iter().map(|arg| (*arg).to_owned()))
+    }
+
+    #[test]
+    fn command_line_is_understood() {
+        assert_eq!(parse(&[]), Invocation::Window(Vec::new()));
+        assert_eq!(
+            parse(&["a.pdf", r"C:\dir\b.pdf"]),
+            Invocation::Window(vec![PathBuf::from("a.pdf"), PathBuf::from(r"C:\dir\b.pdf")])
+        );
+        assert_eq!(parse(&["--bench"]), Invocation::Bench);
+        assert_eq!(parse(&["-h"]), Invocation::Help);
+        assert_eq!(
+            parse(&["--frobnicate"]),
+            Invocation::Unknown("--frobnicate".to_owned())
+        );
+    }
 }

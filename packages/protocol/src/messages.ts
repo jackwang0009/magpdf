@@ -18,6 +18,8 @@ export type { EditDeleteParams } from './generated/EditDeleteParams';
 export type { EditResult } from './generated/EditResult';
 export type { EditSetStyleParams } from './generated/EditSetStyleParams';
 export type { EditTransformParams } from './generated/EditTransformParams';
+export type { EngineFailed } from './generated/EngineFailed';
+export type { EngineRestored } from './generated/EngineRestored';
 export type { HelloParams } from './generated/HelloParams';
 export type { HelloResult } from './generated/HelloResult';
 export type { HistoryParams } from './generated/HistoryParams';

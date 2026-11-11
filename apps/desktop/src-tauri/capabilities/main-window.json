@@ -1,0 +1,13 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-window",
+  "description": "主窗口能做的事：收主进程转发的引擎事件，调用应用自己的三个命令。别的 Tauri 接口一概不开。",
+  "windows": ["main"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-engine-request",
+    "allow-open-document-dialog",
+    "allow-open-documents"
+  ]
+}
