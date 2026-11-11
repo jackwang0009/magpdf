@@ -16,10 +16,11 @@ use magpdf_ipc::frame::{self, Incoming};
 use magpdf_ipc::messages::{
     self, BenchEngineParams, Color, ColorSpace, DocChanged, DocCloseParams, DocInfo, DocOpenParams,
     DocSnapshot, DocSnapshotParams, EchoParams, EditDeleteParams, EditResult, EditSetStyleParams,
-    EditTransformParams, ErrorCode, HelloParams, HelloResult, HistoryParams, JsonValue,
-    OBJ_LIST_MAX, ObjHitTestParams, ObjListParams, PageChange, PageInfo, PingParams,
-    RenderTilesParams, RenderTilesResult, Request, RequestId, Response, RoundtripParams,
-    RoundtripResult, RpcError, StallParams, TileCoord, TileFetchParams, TileFetchResult, method,
+    EditTransformParams, ErrorCode, Fidelity, FidelityCheckParams, FidelityResult, HelloParams,
+    HelloResult, HistoryParams, JsonValue, OBJ_LIST_MAX, ObjHitTestParams, ObjListParams,
+    PageChange, PageInfo, PingParams, RenderTilesParams, RenderTilesResult, Request, RequestId,
+    Response, RoundtripParams, RoundtripResult, RpcError, StallParams, TileCoord, TileFetchParams,
+    TileFetchResult, method,
 };
 use magpdf_ipc::shm::{self, Layout, MappedRegion};
 use magpdf_ipc::{PROTOCOL_VERSION, pipe, pump};
@@ -27,7 +28,7 @@ use pdfium_sys::Matrix;
 use tokio::net::windows::named_pipe::NamedPipeServer;
 use tokio::sync::mpsc;
 
-use crate::pdfium_thread::{EditOp, EngineHandle};
+use crate::pdfium_thread::{EditOp, EngineHandle, Notice, PageFidelity};
 use crate::recovery::{DocRecovery, RecoveryFile};
 use crate::slots::{SlotTable, TileKey};
 
@@ -87,6 +88,9 @@ pub struct Engine {
     pub pipe: String,
     pub session_id: String,
     pub engine: EngineHandle,
+    /// PDFium 线程主动发出来的通知（后台保真校验的结论）。连接建立时取走，转成事件发给主进程；
+    /// 一个引擎只服务一条连接，所以只取一次。
+    pub notices: Mutex<Option<mpsc::UnboundedReceiver<Notice>>>,
     pub shm: Mutex<MappedRegion>,
     pub slots: Mutex<SlotTable>,
     pub recovery: Mutex<RecoveryFile>,
@@ -164,7 +168,7 @@ impl Engine {
         let mut recovery = RecoveryFile::load(&recovery_path);
         // 共享内存由引擎创建（引擎重启时沿用同一会话的映射）。
         let region = shm::create(&config.session, Layout::new(config.slots))?;
-        let engine = EngineHandle::spawn()?;
+        let (engine, notices) = EngineHandle::spawn()?;
         // 恢复：重新打开恢复文件里的文档。
         let mut restored = Vec::new();
         for (index, doc) in recovery.state().docs.clone().iter().enumerate() {
@@ -185,6 +189,7 @@ impl Engine {
             pipe: config.pipe,
             session_id: config.session,
             engine,
+            notices: Mutex::new(Some(notices)),
             shm: Mutex::new(region),
             slots: Mutex::new(SlotTable::new(config.slots)),
             recovery: Mutex::new(recovery),
@@ -249,6 +254,20 @@ async fn serve_connection(engine: Arc<Engine>, conn: NamedPipeServer) {
                 }
             }
         }
+    });
+    // PDFium 线程主动发出来的通知，转成事件。
+    let notices = engine.notices.lock().ok().and_then(|mut n| n.take());
+    let forwarder = notices.map(|mut notices| {
+        let out = out_tx.clone();
+        tokio::spawn(async move {
+            while let Some(notice) = notices.recv().await {
+                if let Some(event) = notice_event(notice)
+                    && out.send(event).is_err()
+                {
+                    break;
+                }
+            }
+        })
     });
     let mut reader = pump::FrameReader::new();
     let mut pending: VecDeque<Vec<u8>> = VecDeque::new();
@@ -324,6 +343,39 @@ async fn serve_connection(engine: Arc<Engine>, conn: NamedPipeServer) {
         }
     }
     worker.abort();
+    if let Some(forwarder) = forwarder {
+        forwarder.abort();
+    }
+}
+
+/// PDFium 线程的通知对应哪条事件。
+fn notice_event(notice: Notice) -> Option<Outgoing> {
+    match notice {
+        Notice::Fidelity {
+            doc_id,
+            page_id,
+            fidelity,
+        } => {
+            let (status, reason) = wire_fidelity(fidelity);
+            let result = FidelityResult {
+                doc_id,
+                page_id,
+                status,
+                reason,
+            };
+            frame::json_value(&result)
+                .map(|value| Outgoing::Event(messages::event::FIDELITY_RESULT.to_owned(), value))
+        }
+    }
+}
+
+/// 保真校验状态在协议里的写法：状态和原因分开两个字段。
+fn wire_fidelity(fidelity: PageFidelity) -> (Fidelity, Option<String>) {
+    match fidelity {
+        PageFidelity::Pending => (Fidelity::Pending, None),
+        PageFidelity::Ok => (Fidelity::Ok, None),
+        PageFidelity::OverlayOnly(reason) => (Fidelity::OverlayOnly, Some(reason.to_owned())),
+    }
 }
 
 /// 派发一条请求；`None` 表示不需要应答。
@@ -429,11 +481,14 @@ async fn handle_request(
                 .iter()
                 .map(|shape| {
                     let index = u32::try_from(shape.index).unwrap_or(u32::MAX);
+                    let (fidelity, fidelity_reason) = wire_fidelity(shape.fidelity);
                     PageInfo {
                         page_id: index,
                         index,
                         width: shape.width,
                         height: shape.height,
+                        fidelity,
+                        fidelity_reason,
                         // PDFium 给的是 90° 的倍数（0–3），协议里写度数。
                         rotate: shape
                             .detail
@@ -518,6 +573,16 @@ async fn handle_request(
         method::HISTORY_REDO => {
             let p: HistoryParams = decode(params)?;
             apply_edit(engine, id, p.doc_id, None, EditOp::Redo, out).await
+        }
+        method::FIDELITY_CHECK => {
+            let p: FidelityCheckParams = decode(params)?;
+            // 结论不在应答里：每一页各发一条 fidelity.result（《接口协议》6.9）。
+            engine
+                .engine
+                .check_fidelity(p.doc_id, p.page_ids)
+                .await
+                .map_err(map_engine_error)?;
+            Ok(Some(frame::response_ok(id, &())))
         }
         method::RENDER_TILES => {
             let p: RenderTilesParams = decode(params)?;

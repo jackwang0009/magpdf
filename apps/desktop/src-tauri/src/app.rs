@@ -413,6 +413,7 @@ mod tests {
             "obj.hitTest",
             "edit.transform",
             "history.undo",
+            "fidelity.check",
             "render.tiles",
             "render.cancel",
         ] {

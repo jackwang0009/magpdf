@@ -211,6 +211,7 @@ names! {
         EDIT_DELETE = "edit.delete";
         HISTORY_UNDO = "history.undo";
         HISTORY_REDO = "history.redo";
+        FIDELITY_CHECK = "fidelity.check";
         RENDER_TILES = "render.tiles";
         RENDER_CANCEL = "render.cancel";
         /// 不在《接口协议》里：主进程请引擎核对槽位的代数（V06 原型加的，见 V06 报告）。
@@ -230,6 +231,8 @@ names! {
         DOC_CHANGED = "doc.changed";
         /// 瓦片的像素已写入共享内存，可以取回。
         RENDER_TILE_READY = "render.tileReady";
+        /// 一页的保真校验有了结论，参数见 [`FidelityResult`]。
+        FIDELITY_RESULT = "fidelity.result";
         ENGINE_BUSY = "engine.busy";
         /// 主进程发：引擎没了，正在重启。在途的请求会以 `E_ENGINE_RESTARTED` 结束。
         ENGINE_RESTARTING = "engine.restarting";
@@ -333,8 +336,21 @@ pub struct DocSnapshotParams {
     pub page_ids: Option<Vec<u32>>,
 }
 
+/// 页面的保真校验状态（《接口协议》5.3、方案 2.3）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum Fidelity {
+    /// 还没有校验。页面显示之后，引擎在空闲时校验，结论经 `fidelity.result` 推送。
+    Pending,
+    /// 可以修改原有对象。
+    Ok,
+    /// 只能叠加内容（新增对象、在上面覆盖），不能修改原有对象。
+    OverlayOnly,
+}
+
 /// 页面信息（《接口协议》5.3 `PageInfo` 的子集）。
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct PageInfo {
@@ -345,6 +361,11 @@ pub struct PageInfo {
     pub width: f32,
     /// 显示高度（pt）。
     pub height: f32,
+    /// 现在知道的保真校验状态。查快照不会触发校验。
+    pub fidelity: Fidelity,
+    /// `fidelity` 为 `overlayOnly` 时的原因，给技术支持看的；给用户看的说法由界面统一写。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fidelity_reason: Option<String>,
     /// 页面的 `/Rotate`：0、90、180、270。只有按 `pageIds` 请求时才有。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rotate: Option<u16>,
@@ -545,6 +566,33 @@ pub struct DocChanged {
     pub changes: Vec<PageChange>,
     /// 页面的增删或顺序有没有变。原型还没有页面命令，恒为 false。
     pub pages_changed: bool,
+}
+
+// ---- 保真校验（《接口协议》6.9）----
+
+/// `fidelity.check` 的参数：马上校验这几页，不等引擎空闲。应答是空的；每一页的结论各发一条
+/// `fidelity.result`，已经校验过的页也发。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct FidelityCheckParams {
+    pub doc_id: u32,
+    pub page_ids: Vec<u32>,
+}
+
+/// `fidelity.result` 事件的参数（《接口协议》第 7 节）：一页的保真校验有了结论。
+/// 三种情况下会发：页面显示之后引擎空闲时校验的；修改命令顺带校验的；`fidelity.check` 要的。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct FidelityResult {
+    pub doc_id: u32,
+    pub page_id: u32,
+    /// `ok` 或 `overlayOnly`，不会是 `pending`。
+    pub status: Fidelity,
+    /// `overlayOnly` 时的原因。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 // ---- 瓦片 ----

@@ -7,6 +7,8 @@ import type {
   EditDeleteParams,
   EditResult,
   EditTransformParams,
+  FidelityCheckParams,
+  FidelityResult,
   HistoryParams,
   ObjListParams,
   ObjectKind,
@@ -38,9 +40,17 @@ export interface FakePage {
   readonly rotate: number;
   readonly cropBox: UserBox;
   objects: FakeObject[];
-  /** 为真时这一页拒绝修改（保真校验没通过） */
+  /** 为真时这一页通不过保真校验：修改命令被拒绝，校验的结论是“只能叠加内容” */
   overlayOnly?: boolean;
+  /**
+   * 保真校验做过没有。和真引擎一样，校验是晚一步的事：页面显示之后引擎空闲时做
+   * （测试里调 `finishBackgroundCheck`），或者修改命令、`fidelity.check` 顺带做。
+   */
+  checked?: boolean;
 }
+
+/** 假引擎给“只能叠加内容”的页报的原因。 */
+export const FAKE_OVERLAY_REASON = '重新生成内容流后页面的画面变了';
 
 interface FakeDocument {
   readonly docId: number;
@@ -122,6 +132,26 @@ export class FakeEngine {
     this.document(docId).version += 1;
   }
 
+  /** 引擎空闲下来，把这一页的保真校验做了（真引擎在页面显示之后自己会做），推送 `fidelity.result`。 */
+  finishBackgroundCheck(docId: number, pageId: number): void {
+    const page = this.page(docId, pageId);
+    if (!page.checked) this.check(docId, page);
+  }
+
+  /** 校验一页并推送结论。 */
+  private check(docId: number, page: FakePage): void {
+    page.checked = true;
+    const result: FidelityResult = {
+      docId,
+      pageId: page.pageId,
+      status: page.overlayOnly ? 'overlayOnly' : 'ok',
+      ...(page.overlayOnly ? { reason: FAKE_OVERLAY_REASON } : {}),
+    };
+    // 结论和请求的应答走的是两条路，没有先后保证
+    if (this.eventFirst) this.transport.emit(EVENT.FIDELITY_RESULT, result);
+    else setTimeout(() => this.transport.emit(EVENT.FIDELITY_RESULT, result), 0);
+  }
+
   private document(docId: number): FakeDocument {
     const document = this.documents.get(docId);
     if (!document) throw invalid(`文档 ${docId} 不存在`);
@@ -145,6 +175,13 @@ export class FakeEngine {
         return this.history(params as HistoryParams, 'undo');
       case METHOD.HISTORY_REDO:
         return this.history(params as HistoryParams, 'redo');
+      case METHOD.FIDELITY_CHECK: {
+        const { docId, pageIds } = params as FidelityCheckParams;
+        // 先确认页都在；已经校验过的页也回一条结论
+        const pages = pageIds.map((pageId) => this.page(docId, pageId));
+        for (const page of pages) this.check(docId, page);
+        return null;
+      }
       default:
         throw { code: ERROR_CODE.E_PROTOCOL, message: `假引擎没有实现 ${method}` };
     }
@@ -157,6 +194,8 @@ export class FakeEngine {
       index,
       width: page.width,
       height: page.height,
+      fidelity: !page.checked ? 'pending' : page.overlayOnly ? 'overlayOnly' : 'ok',
+      ...(page.checked && page.overlayOnly ? { fidelityReason: FAKE_OVERLAY_REASON } : {}),
     });
     if (!params.pageIds) {
       return { version: document.version, pages: document.pages.map(brief) };
@@ -201,15 +240,20 @@ export class FakeEngine {
       const index = document.pages.findIndex((page) => page.objects.some((o) => o.id === id));
       if (index < 0) throw { code: ERROR_CODE.E_OBJECT_NOT_FOUND, message: '对象不存在' };
       const page = document.pages[index]!;
+      const list = found.get(index) ?? [];
+      list.push(page.objects.find((o) => o.id === id)!);
+      found.set(index, list);
+    }
+    // 动手之前先校验碰到的页（还没校验过的现在做，结论照样推送）；有一页通不过，整条命令都不做
+    for (const index of found.keys()) {
+      const page = document.pages[index]!;
+      if (!page.checked) this.check(document.docId, page);
       if (page.overlayOnly) {
         throw {
           code: ERROR_CODE.E_PAGE_OVERLAY_ONLY,
           message: '页面保真校验未通过，只能叠加内容',
         };
       }
-      const list = found.get(index) ?? [];
-      list.push(page.objects.find((o) => o.id === id)!);
-      found.set(index, list);
     }
     return found;
   }

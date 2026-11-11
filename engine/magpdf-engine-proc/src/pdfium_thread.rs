@@ -3,6 +3,11 @@
 //! PDFium 不是线程安全的，所有调用都在一个专用线程上串行执行；通信线程只把任务投递进来，PDFium 忙时
 //! 仍能应答 `session.ping`。线程持有 PDFium 的 [`Library`] 与已打开的文档，并负责分配 docId。
 //! 每份文档是一个编辑会话（[`Session`]）：对象编号、撤销栈和文档版本号都在里面。
+//!
+//! 任务队列空下来的时候，线程给显示过的页面做保真校验（方案 2.3“提前进行”），一次一页，
+//! 做完一页就回头看有没有新任务。结论经 [`Notice`] 告诉通信线程。
+
+use std::collections::{HashSet, VecDeque};
 
 use anyhow::{Context, Result};
 use magpdf_engine::edit::{Change, EditError, HitMode, ObjectId, ObjectSummary, Session};
@@ -54,6 +59,38 @@ pub enum EditOp {
     Redo,
 }
 
+/// 一页的保真校验状态（方案 2.3）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PageFidelity {
+    /// 还没有校验。
+    Pending,
+    /// 可以修改原有对象。
+    Ok,
+    /// 只能叠加内容；带着原因。
+    OverlayOnly(&'static str),
+}
+
+impl PageFidelity {
+    fn of(known: Option<Option<&'static str>>) -> Self {
+        match known {
+            None => Self::Pending,
+            Some(None) => Self::Ok,
+            Some(Some(reason)) => Self::OverlayOnly(reason),
+        }
+    }
+}
+
+/// PDFium 线程主动告诉通信线程的事，通信线程转成事件发给主进程。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Notice {
+    /// 一页的保真校验有了结论。状态不会是 `Pending`。
+    Fidelity {
+        doc_id: u32,
+        page_id: u32,
+        fidelity: PageFidelity,
+    },
+}
+
 /// `doc.snapshot` 里一页的信息。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PageShape {
@@ -61,6 +98,8 @@ pub struct PageShape {
     /// 显示尺寸（pt），已经按页面旋转换好宽高。
     pub width: f32,
     pub height: f32,
+    /// 现在知道的保真校验状态；查它不会触发校验。
+    pub fidelity: PageFidelity,
     /// 要加载页面才拿得到的部分；列全部页面时不取。
     pub detail: Option<PageDetail>,
 }
@@ -134,6 +173,12 @@ pub enum Job {
         op: EditOp,
         reply: Reply<Change>,
     },
+    /// 马上校验这几页（不等空闲）。每一页的结论都发一条 [`Notice::Fidelity`]，已经校验过的页也发。
+    CheckFidelity {
+        doc_id: u32,
+        page_ids: Vec<u32>,
+        reply: Reply<()>,
+    },
     Shutdown,
 }
 
@@ -144,9 +189,10 @@ pub struct EngineHandle {
 }
 
 impl EngineHandle {
-    /// 启动专用线程并等 PDFium 初始化完成。
-    pub fn spawn() -> Result<Self> {
+    /// 启动专用线程并等 PDFium 初始化完成。另一个返回值是线程主动发出来的通知（[`Notice`]）。
+    pub fn spawn() -> Result<(Self, mpsc::UnboundedReceiver<Notice>)> {
         let (tx, mut rx) = mpsc::unbounded_channel::<Job>();
+        let (notices, notices_rx) = mpsc::unbounded_channel::<Notice>();
         let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<()>>();
         std::thread::Builder::new()
             .name("pdfium".to_owned())
@@ -168,9 +214,26 @@ impl EngineHandle {
                     docs: Vec::new(),
                     next_doc_id: 1,
                     lib,
+                    notices,
+                    background: VecDeque::new(),
+                    queued: HashSet::new(),
                 };
                 // 专用线程里同步取任务；通信线程不依赖这条线程的响应速度来处理心跳。
-                while let Some(job) = rx.blocking_recv() {
+                loop {
+                    let job = match rx.try_recv() {
+                        Ok(job) => job,
+                        Err(mpsc::error::TryRecvError::Disconnected) => break,
+                        Err(mpsc::error::TryRecvError::Empty) => {
+                            // 队列空了：做一项后台工作，做完马上回头看有没有新任务。
+                            if state.background_step() {
+                                continue;
+                            }
+                            match rx.blocking_recv() {
+                                Some(job) => job,
+                                None => break,
+                            }
+                        }
+                    };
                     if matches!(job, Job::Shutdown) {
                         break;
                     }
@@ -179,7 +242,7 @@ impl EngineHandle {
             })
             .context("启动 PDFium 线程失败")?;
         ready_rx.recv().context("PDFium 线程没有启动")??;
-        Ok(Self { tx })
+        Ok((Self { tx }, notices_rx))
     }
 
     fn send(&self, job: Job) -> std::result::Result<(), EngineError> {
@@ -342,6 +405,20 @@ impl EngineHandle {
         .await
     }
 
+    /// 马上校验这几页的保真度。结论不在返回值里，而是每页一条 [`Notice::Fidelity`]。
+    pub async fn check_fidelity(
+        &self,
+        doc_id: u32,
+        page_ids: Vec<u32>,
+    ) -> std::result::Result<(), EngineError> {
+        self.ask(|reply| Job::CheckFidelity {
+            doc_id,
+            page_ids,
+            reply,
+        })
+        .await
+    }
+
     pub fn shutdown(&self) {
         let _ = self.send(Job::Shutdown);
     }
@@ -351,6 +428,11 @@ struct PdfiumState {
     docs: Vec<OpenDoc>,
     next_doc_id: u32,
     lib: &'static Library,
+    notices: mpsc::UnboundedSender<Notice>,
+    /// 等着在空闲时做保真校验的页：（docId，页序号），按页面第一次显示的先后。
+    background: VecDeque<(u32, usize)>,
+    /// 进过 `background` 的页。每页只排一次：校验出错（没有结论）的页不会每渲染一块瓦片就再排一次。
+    queued: HashSet<(u32, usize)>,
 }
 
 impl PdfiumState {
@@ -371,7 +453,12 @@ impl PdfiumState {
                 y,
                 reply,
             } => {
-                let _ = reply.send(self.render_tile(doc_id, page_id, scale, x, y));
+                let rendered = self.render_tile(doc_id, page_id, scale, x, y);
+                if rendered.is_ok() {
+                    // 这一页显示出来了：等队列空了，提前把它的保真校验做掉（方案 2.3）。
+                    self.queue_background_check(doc_id, page_id as usize);
+                }
+                let _ = reply.send(rendered);
             }
             Job::PageSurface {
                 doc_id,
@@ -387,6 +474,8 @@ impl PdfiumState {
             Job::CloseDoc { doc_id, reply } => {
                 let before = self.docs.len();
                 self.docs.retain(|d| d.doc_id != doc_id);
+                self.background.retain(|(doc, _)| *doc != doc_id);
+                self.queued.retain(|(doc, _)| *doc != doc_id);
                 let _ = reply.send(self.docs.len() != before);
             }
             Job::Snapshot {
@@ -425,10 +514,87 @@ impl PdfiumState {
                 op,
                 reply,
             } => {
-                let _ = reply.send(self.edit(doc_id, base_version, op));
+                let outcome = self.edit(doc_id, base_version, op);
+                // 修改命令会先校验它碰到的页；刚得出的结论（不管命令成没成）也要让界面知道。
+                self.report_new_verdicts(doc_id);
+                let _ = reply.send(outcome);
+            }
+            Job::CheckFidelity {
+                doc_id,
+                page_ids,
+                reply,
+            } => {
+                let _ = reply.send(self.check_fidelity(doc_id, &page_ids));
             }
             Job::Shutdown => {}
         }
+    }
+
+    /// 没有别的任务时做一项后台工作：给一个显示过、还没有结论的页面做保真校验。
+    /// 返回这一趟有没有做事；没有事可做时返回 `false`，线程去等下一个任务。
+    fn background_step(&mut self) -> bool {
+        while let Some((doc_id, page)) = self.background.pop_front() {
+            // 文档已经关了，或者修改命令已经先校验过这一页
+            let Ok(d) = self.find_mut(doc_id) else {
+                continue;
+            };
+            if d.session.known_fidelity(page).is_some() {
+                continue;
+            }
+            if let Err(e) = d.session.check_fidelity(page) {
+                tracing::warn!("后台保真校验没有做成：{e}");
+            }
+            self.report_new_verdicts(doc_id);
+            return true;
+        }
+        false
+    }
+
+    /// 页面显示过了（渲染过瓦片）：还没有校验结论的话，排到后台去校验。
+    fn queue_background_check(&mut self, doc_id: u32, page: usize) {
+        let pending = self
+            .find(doc_id)
+            .is_ok_and(|d| d.session.known_fidelity(page).is_none());
+        if pending && self.queued.insert((doc_id, page)) {
+            self.background.push_back((doc_id, page));
+        }
+    }
+
+    /// 把一份文档里刚得出的校验结论发出去。
+    fn report_new_verdicts(&mut self, doc_id: u32) {
+        let Ok(d) = self.find_mut(doc_id) else {
+            return;
+        };
+        for (page, verdict) in d.session.take_new_verdicts() {
+            let _ = self.notices.send(Notice::Fidelity {
+                doc_id,
+                page_id: u32::try_from(page).unwrap_or(u32::MAX),
+                fidelity: PageFidelity::of(Some(verdict)),
+            });
+        }
+    }
+
+    fn check_fidelity(
+        &mut self,
+        doc_id: u32,
+        page_ids: &[u32],
+    ) -> std::result::Result<(), EngineError> {
+        // 先确认页都在，再动手：页号不对的请求一页也不校验、一条结论也不发。
+        for &page_id in page_ids {
+            self.page_of(doc_id, page_id)?;
+        }
+        for &page_id in page_ids {
+            let (d, page) = self.page_of(doc_id, page_id)?;
+            let verdict = d.session.check_fidelity(page)?;
+            // 这一页的结论在下面直接发，不再走“刚得出的结论”那一路，免得发两遍
+            d.session.take_new_verdicts();
+            let _ = self.notices.send(Notice::Fidelity {
+                doc_id,
+                page_id,
+                fidelity: PageFidelity::of(Some(verdict)),
+            });
+        }
+        Ok(())
     }
 
     fn open(
@@ -481,6 +647,7 @@ impl PdfiumState {
         let d = self.find(doc_id)?;
         let doc = d.session.document();
         let failed = |e: pdfium_sys::Error| EngineError::Render(e.to_string());
+        let fidelity = |index: usize| PageFidelity::of(d.session.known_fidelity(index));
         let pages = match page_ids {
             None => (0..doc.page_count())
                 .map(|index| {
@@ -489,6 +656,7 @@ impl PdfiumState {
                         index,
                         width,
                         height,
+                        fidelity: fidelity(index),
                         detail: None,
                     })
                 })
@@ -505,6 +673,7 @@ impl PdfiumState {
                         index,
                         width: geometry.width,
                         height: geometry.height,
+                        fidelity: fidelity(index),
                         detail: Some(PageDetail {
                             rotation: geometry.rotation,
                             visible: geometry.bounds,

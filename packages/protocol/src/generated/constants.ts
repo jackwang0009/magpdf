@@ -18,6 +18,7 @@ export const METHOD = {
   EDIT_DELETE: 'edit.delete',
   HISTORY_UNDO: 'history.undo',
   HISTORY_REDO: 'history.redo',
+  FIDELITY_CHECK: 'fidelity.check',
   RENDER_TILES: 'render.tiles',
   RENDER_CANCEL: 'render.cancel',
   TILE_FETCH: 'tile.fetch',
@@ -31,6 +32,7 @@ export const METHOD = {
 export const EVENT = {
   DOC_CHANGED: 'doc.changed',
   RENDER_TILE_READY: 'render.tileReady',
+  FIDELITY_RESULT: 'fidelity.result',
   ENGINE_BUSY: 'engine.busy',
   ENGINE_RESTARTING: 'engine.restarting',
   ENGINE_RESTORED: 'engine.restored',

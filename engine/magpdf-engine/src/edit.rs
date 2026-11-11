@@ -153,6 +153,8 @@ pub struct Session<'lib> {
     scratch: Option<std::result::Result<Document<'lib>, ()>>,
     /// 校验过的页：`None` 表示可以修改，`Some` 是不能修改的原因。
     fidelity: BTreeMap<usize, Option<&'static str>>,
+    /// 刚校验出来、还没有被 [`Session::take_new_verdicts`] 取走的结论，按得出的先后。
+    new_verdicts: Vec<(usize, Option<&'static str>)>,
     undo: Vec<Command>,
     redo: Vec<Command>,
     limit: usize,
@@ -214,6 +216,7 @@ impl<'lib> Session<'lib> {
             next_id: 0,
             scratch: None,
             fidelity: BTreeMap::new(),
+            new_verdicts: Vec::new(),
             undo: Vec::new(),
             redo: Vec::new(),
             limit: DEFAULT_LIMIT,
@@ -316,8 +319,13 @@ impl<'lib> Session<'lib> {
     /// PDFium 的生成器写不出来的对象会消失、挪位置或者变色，这样的页一旦改了任何对象，整页的内容流
     /// 都要重写，别的对象也跟着坏，所以只允许在上面叠加内容。结果按页记住，只校验一次。
     ///
-    /// 还看不出来的一类：颜色空间被换算成画面相同的 RGB（灰度写成 `rg`）。像素一样、对象也一样，
-    /// 要靠操作符级比对，这里还没有做。
+    /// 还看不出来的几类，这里都还没有做：
+    /// - 颜色空间被换算成画面相同的 RGB（灰度写成 `rg`）：像素一样、对象也一样，要靠操作符级比对；
+    /// - 默认隐藏的可选内容图层：像素比对时没有把图层全部打开（方案 2.3 要求打开）；
+    /// - 和别的页共用内容流的页：重写这一页会连带改掉那一页（方案 2.1），而这里只比这一页。
+    ///
+    /// 修改命令执行前会自己调用它；也可以提前调用（页面显示之后、引擎空闲时），这样用户第一次修改
+    /// 时不用等。
     pub fn check_fidelity(&mut self, page: usize) -> Result<Option<&'static str>> {
         if let Some(known) = self.fidelity.get(&page) {
             return Ok(*known);
@@ -338,7 +346,19 @@ impl<'lib> Session<'lib> {
             _ => Some("校验用的文档副本建不出来"),
         };
         self.fidelity.insert(page, verdict);
+        self.new_verdicts.push((page, verdict));
         Ok(verdict)
+    }
+
+    /// 这一页已经有的校验结论，不做校验。外层的 `None` 表示还没有校验过。
+    pub fn known_fidelity(&self, page: usize) -> Option<Option<&'static str>> {
+        self.fidelity.get(&page).copied()
+    }
+
+    /// 取走上次调用以来新得出的校验结论（页序号，结论），按得出的先后。
+    /// 修改命令会顺带校验它碰到的页，调用方靠这个知道哪些页刚有了结论，好通知界面。
+    pub fn take_new_verdicts(&mut self) -> Vec<(usize, Option<&'static str>)> {
+        std::mem::take(&mut self.new_verdicts)
     }
 
     /// 把矩阵左乘到每个对象上。撤销时用逆矩阵再变一次。
@@ -599,10 +619,14 @@ fn roundtrip_verdict(scratch: &Document<'_>, page: usize) -> Result<Option<&'sta
         let Ok(picture) = page_obj.render(fidelity_render(&page_obj)) else {
             return Ok(Some(UNRENDERABLE));
         };
-        for object in page_obj.objects() {
-            object.mark_modified()?;
+        // 内容流重新生成不出来的页，当然也不能改。
+        let regenerated = page_obj
+            .objects()
+            .try_for_each(|object| object.mark_modified())
+            .and_then(|()| page_obj.generate_content());
+        if regenerated.is_err() {
+            return Ok(Some("这一页的内容流重新生成不出来"));
         }
-        page_obj.generate_content()?;
         (shape, picture)
     };
     let rewritten = scratch.page(page)?;
@@ -1059,6 +1083,42 @@ mod tests {
             );
             assert_eq!(session.version(), 0);
         }
+    }
+
+    /// 校验的结论只得出一次、只报告一次：修改命令顺带做的校验也算。
+    #[test]
+    fn each_fidelity_verdict_is_reported_once() {
+        with_session(|session| {
+            session.add_blank_page(200.0, 100.0).unwrap();
+            assert_eq!(session.known_fidelity(0), None);
+            assert!(session.take_new_verdicts().is_empty());
+
+            // 修改命令先校验它碰到的页。
+            let id = session.objects(0).unwrap()[0].id;
+            session
+                .transform(&[id], Matrix::translation(5.0, 0.0))
+                .unwrap();
+            assert_eq!(session.known_fidelity(0), Some(None));
+            assert_eq!(session.known_fidelity(1), None, "没碰过的页不校验");
+            assert_eq!(session.take_new_verdicts(), vec![(0, None)]);
+
+            // 已经有结论的页，再问、再改都不会重新报告。
+            assert_eq!(session.check_fidelity(0).unwrap(), None);
+            session
+                .transform(&[id], Matrix::translation(5.0, 0.0))
+                .unwrap();
+            assert!(session.take_new_verdicts().is_empty());
+
+            // 提前校验另一页。
+            assert_eq!(session.check_fidelity(1).unwrap(), None);
+            assert_eq!(session.take_new_verdicts(), vec![(1, None)]);
+            assert!(
+                session.check_fidelity(7).is_err(),
+                "页码不对是错误，不是结论"
+            );
+            assert_eq!(session.known_fidelity(7), None);
+            assert!(session.take_new_verdicts().is_empty());
+        });
     }
 
     #[test]

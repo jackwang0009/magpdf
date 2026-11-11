@@ -360,9 +360,9 @@ async fn doc_snapshot_lists_pages_in_display_orientation() {
         json!({
             "version": 0,
             "pages": [
-                { "pageId": 0, "index": 0, "width": 200.0, "height": 300.0 },
-                { "pageId": 1, "index": 1, "width": 300.0, "height": 200.0 },
-                { "pageId": 2, "index": 2, "width": 200.0, "height": 300.0 },
+                { "pageId": 0, "index": 0, "width": 200.0, "height": 300.0, "fidelity": "pending" },
+                { "pageId": 1, "index": 1, "width": 300.0, "height": 200.0, "fidelity": "pending" },
+                { "pageId": 2, "index": 2, "width": 200.0, "height": 300.0, "fidelity": "pending" },
             ],
         })
     );
@@ -382,9 +382,9 @@ async fn doc_snapshot_lists_pages_in_display_orientation() {
         detailed["pages"],
         json!([
             { "pageId": 2, "index": 2, "width": 200.0, "height": 300.0,
-              "rotate": 270, "cropBox": [0.0, 0.0, 300.0, 200.0] },
+              "fidelity": "pending", "rotate": 270, "cropBox": [0.0, 0.0, 300.0, 200.0] },
             { "pageId": 0, "index": 0, "width": 200.0, "height": 300.0,
-              "rotate": 90, "cropBox": [0.0, 0.0, 300.0, 200.0] },
+              "fidelity": "pending", "rotate": 90, "cropBox": [0.0, 0.0, 300.0, 200.0] },
         ])
     );
     let no_such_page = engine
@@ -407,9 +407,9 @@ async fn doc_snapshot_lists_pages_in_display_orientation() {
         detailed["pages"],
         json!([
             { "pageId": 1, "index": 1, "width": 200.0, "height": 100.0,
-              "rotate": 0, "cropBox": [50.0, 50.0, 250.0, 150.0] },
+              "fidelity": "pending", "rotate": 0, "cropBox": [50.0, 50.0, 250.0, 150.0] },
             { "pageId": 3, "index": 3, "width": 300.0, "height": 200.0,
-              "rotate": 0, "cropBox": [-150.0, -100.0, 150.0, 100.0] },
+              "fidelity": "pending", "rotate": 0, "cropBox": [-150.0, -100.0, 150.0, 100.0] },
         ])
     );
 }
@@ -725,6 +725,119 @@ async fn edits_are_refused_or_applied_but_never_half_done(sample: &str) {
         after.iter().map(|o| &o["id"]).collect::<Vec<_>>(),
         objects.iter().map(|o| &o["id"]).collect::<Vec<_>>()
     );
+}
+
+impl Engine {
+    /// 已经读到、还没被取走的 `fidelity.result` 有几条。
+    fn buffered_fidelity_results(&self) -> usize {
+        self.events
+            .iter()
+            .filter(|(_, name, _)| name == event::FIDELITY_RESULT)
+            .count()
+    }
+
+    async fn fidelity_of_first_page(&mut self, doc_id: u64) -> Value {
+        let snapshot = self
+            .call(method::DOC_SNAPSHOT, json!({ "docId": doc_id }))
+            .await;
+        snapshot["pages"][0]["fidelity"].clone()
+    }
+}
+
+/// 保真校验（《接口协议》6.9、方案 2.3）。页面显示之后，引擎趁空闲自己校验并推送结论，用户第一次修改时
+/// 不用等；也可以点名马上校验；修改命令顺带校验的页同样推送。快照里带着现在知道的状态。
+#[tokio::test]
+async fn fidelity_is_checked_ahead_of_time_and_on_request() {
+    let mut engine = Engine::start(None).await;
+    engine.hello().await;
+    let doc_id = engine.open("color-devicegray.pdf").await;
+    let ok = json!({ "docId": doc_id, "pageId": 0, "status": "ok" });
+
+    // 刚打开，页面还没有显示过：不校验。
+    let snapshot = engine
+        .call(method::DOC_SNAPSHOT, json!({ "docId": doc_id }))
+        .await;
+    assert_eq!(snapshot["pages"][0]["fidelity"], "pending");
+    assert!(snapshot["pages"][0].get("fidelityReason").is_none());
+
+    // 渲染了一块瓦片，说明这一页显示出来了。没有人要求，引擎自己校验并推送。
+    engine.render_tile(doc_id, 1.0, 0, 0).await;
+    let (_, result) = engine.event(event::FIDELITY_RESULT).await;
+    assert_eq!(result, ok);
+    assert_eq!(engine.fidelity_of_first_page(doc_id).await, "ok");
+
+    // 再渲染多少块也只校验这一次。
+    engine.render_tile(doc_id, 2.0, 0, 0).await;
+    engine.render_tile(doc_id, 2.0, 512, 0).await;
+    assert_eq!(engine.fidelity_of_first_page(doc_id).await, "ok");
+    assert_eq!(engine.buffered_fidelity_results(), 0);
+
+    // 点名校验：已经有结论的页也回一条，调用方总能等到答复。
+    let reply = engine
+        .call(
+            method::FIDELITY_CHECK,
+            json!({ "docId": doc_id, "pageIds": [0] }),
+        )
+        .await;
+    assert_eq!(reply, Value::Null);
+    let (_, result) = engine.event(event::FIDELITY_RESULT).await;
+    assert_eq!(result, ok);
+
+    // 页号不对：整条请求不做，一条结论也不发。
+    let bad = engine
+        .call_err(
+            method::FIDELITY_CHECK,
+            json!({ "docId": doc_id, "pageIds": [0, 9] }),
+        )
+        .await;
+    assert_eq!(bad["code"], ErrorCode::InvalidArgument.code(), "{bad}");
+    assert_eq!(engine.fidelity_of_first_page(doc_id).await, "ok");
+    assert_eq!(engine.buffered_fidelity_results(), 0);
+
+    // 没显示过、也没点名校验的页，第一条修改命令会先校验它，结论一样推送。
+    let fresh = engine.open("color-devicegray.pdf").await;
+    assert_ne!(fresh, doc_id);
+    let id = engine.objects(fresh).await[0]["id"].as_u64().unwrap();
+    engine
+        .edit(
+            method::EDIT_TRANSFORM,
+            json!({ "docId": fresh, "baseVersion": 0, "ids": [id], "matrix": [1, 0, 0, 1, 3, 0] }),
+        )
+        .await;
+    let (_, result) = engine.event(event::FIDELITY_RESULT).await;
+    assert_eq!(
+        result,
+        json!({ "docId": fresh, "pageId": 0, "status": "ok" })
+    );
+
+    // 生成器写不出渐变（方案 2.1）：带渐变的页只能叠加内容，结论里带着原因，快照里也有。
+    // 生成器以后修好了这一页就能改，所以两种结论都接受，但事件和快照要一致。
+    let shading = engine.open("shading-axial.pdf").await;
+    engine
+        .call(
+            method::FIDELITY_CHECK,
+            json!({ "docId": shading, "pageIds": [0] }),
+        )
+        .await;
+    let (_, result) = engine.event(event::FIDELITY_RESULT).await;
+    assert_eq!(result["docId"], shading);
+    let snapshot = engine
+        .call(method::DOC_SNAPSHOT, json!({ "docId": shading }))
+        .await;
+    let page = &snapshot["pages"][0];
+    assert_eq!(page["fidelity"], result["status"]);
+    match result["status"].as_str() {
+        Some("overlayOnly") => {
+            let reason = result["reason"].as_str().expect("要给出原因");
+            assert!(!reason.is_empty());
+            assert_eq!(page["fidelityReason"], reason);
+        }
+        Some("ok") => {
+            assert!(result.get("reason").is_none());
+            assert!(page.get("fidelityReason").is_none());
+        }
+        other => panic!("结论只能是 ok 或 overlayOnly：{other:?}"),
+    }
 }
 
 /// `doc.open` 的失败用《接口协议》第 8 节的错误码区分。
