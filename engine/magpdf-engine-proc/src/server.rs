@@ -15,11 +15,11 @@ use magpdf_engine::edit::{EditError, HitMode, ObjectId, ObjectSummary};
 use magpdf_ipc::frame::{self, Incoming};
 use magpdf_ipc::messages::{
     self, BenchEngineParams, Color, ColorSpace, DocChanged, DocCloseParams, DocInfo, DocOpenParams,
-    EchoParams, EditDeleteParams, EditResult, EditSetStyleParams, EditTransformParams, ErrorCode,
-    HelloParams, HelloResult, HistoryParams, JsonValue, OBJ_LIST_MAX, ObjHitTestParams,
-    ObjListParams, PageChange, PingParams, RenderTilesParams, RenderTilesResult, Request,
-    RequestId, Response, RoundtripParams, RoundtripResult, RpcError, TileCoord, TileFetchParams,
-    TileFetchResult, method,
+    DocSnapshot, DocSnapshotParams, EchoParams, EditDeleteParams, EditResult, EditSetStyleParams,
+    EditTransformParams, ErrorCode, HelloParams, HelloResult, HistoryParams, JsonValue,
+    OBJ_LIST_MAX, ObjHitTestParams, ObjListParams, PageChange, PageInfo, PingParams,
+    RenderTilesParams, RenderTilesResult, Request, RequestId, Response, RoundtripParams,
+    RoundtripResult, RpcError, TileCoord, TileFetchParams, TileFetchResult, method,
 };
 use magpdf_ipc::shm::{self, Layout, MappedRegion};
 use magpdf_ipc::{PROTOCOL_VERSION, pipe, pump};
@@ -412,6 +412,32 @@ async fn handle_request(
                 let _ = recovery.save();
             }
             Ok(Some(frame::response_ok(id, &())))
+        }
+        method::DOC_SNAPSHOT => {
+            let p: DocSnapshotParams = decode(params)?;
+            let (version, sizes) = engine
+                .engine
+                .snapshot(p.doc_id)
+                .await
+                .map_err(map_engine_error)?;
+            let pages = sizes
+                .iter()
+                .enumerate()
+                .map(|(index, (width, height))| {
+                    let index = u32::try_from(index).unwrap_or(u32::MAX);
+                    PageInfo {
+                        page_id: index,
+                        index,
+                        width: *width,
+                        height: *height,
+                    }
+                })
+                .collect();
+            let snapshot = DocSnapshot {
+                version: wire_version(version),
+                pages,
+            };
+            Ok(Some(frame::response_ok(id, &snapshot)))
         }
         method::OBJ_LIST => {
             let p: ObjListParams = decode(params)?;

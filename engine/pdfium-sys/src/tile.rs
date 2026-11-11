@@ -25,15 +25,12 @@ pub struct PageSurface {
 
 impl PageSurface {
     /// 按缩放倍数计算整页像素尺寸，至少 1 像素。
+    ///
+    /// [`Page::width`] 和 [`Page::height`] 已经是按页面旋转换好的显示尺寸，这里不用再换。
     pub fn new(page: &Page<'_>, scale: f32) -> Self {
-        let (w, h) = if (page.rotation() & 1) == 1 {
-            (page.height(), page.width())
-        } else {
-            (page.width(), page.height())
-        };
         Self {
-            width: (w * scale).round().max(1.0) as u32,
-            height: (h * scale).round().max(1.0) as u32,
+            width: (page.width() * scale).round().max(1.0) as u32,
+            height: (page.height() * scale).round().max(1.0) as u32,
         }
     }
 }

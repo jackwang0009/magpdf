@@ -10,6 +10,7 @@ export const METHOD = {
   SESSION_SHUTDOWN: 'session.shutdown',
   DOC_OPEN: 'doc.open',
   DOC_CLOSE: 'doc.close',
+  DOC_SNAPSHOT: 'doc.snapshot',
   OBJ_LIST: 'obj.list',
   OBJ_HIT_TEST: 'obj.hitTest',
   EDIT_TRANSFORM: 'edit.transform',

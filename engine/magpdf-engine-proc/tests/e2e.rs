@@ -299,6 +299,32 @@ async fn hello_open_render_and_read_the_tile_from_shared_memory() {
     assert_eq!(stale["code"], ErrorCode::TileGenerationStale.code());
 }
 
+/// `doc.snapshot` 给出每一页的显示尺寸：旋转 90° 和 270° 的页宽高互换。
+#[tokio::test]
+async fn doc_snapshot_lists_pages_in_display_orientation() {
+    let mut engine = Engine::start(None).await;
+    engine.hello().await;
+    let doc_id = engine.open("struct-page-rotate.pdf").await;
+    let snapshot = engine
+        .call(method::DOC_SNAPSHOT, json!({ "docId": doc_id }))
+        .await;
+    assert_eq!(
+        snapshot,
+        json!({
+            "version": 0,
+            "pages": [
+                { "pageId": 0, "index": 0, "width": 200.0, "height": 300.0 },
+                { "pageId": 1, "index": 1, "width": 300.0, "height": 200.0 },
+                { "pageId": 2, "index": 2, "width": 200.0, "height": 300.0 },
+            ],
+        })
+    );
+    let missing = engine
+        .call_err(method::DOC_SNAPSHOT, json!({ "docId": doc_id + 100 }))
+        .await;
+    assert_eq!(missing["code"], ErrorCode::InvalidArgument.code());
+}
+
 /// 瓦片渲染完，事件要马上发出去，不能等读循环的定时器（修复前最坏要等 500 ms）。
 #[tokio::test]
 async fn tile_ready_event_is_not_held_back_on_an_idle_pipe() {

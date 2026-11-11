@@ -68,6 +68,58 @@ fn tile_keeps_requested_size_and_fills_outside_with_background() {
     assert_eq!(tile.pixel(250, 150), [255, 255, 255, 255]);
 }
 
+/// 旋转 90° 的页（MediaBox 300×200）显示出来是 200×300。瓦片要按显示方向取，
+/// 和整页渲染的同一块区域一致；页面尺寸不加载页面也能问到。
+#[test]
+fn tiles_of_a_rotated_page_follow_the_display_orientation() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let lib = Library::init().unwrap();
+    let doc = Document::load_file(&lib, &sample("struct-page-rotate.pdf"), None).unwrap();
+    assert_eq!(doc.page_size(0).unwrap(), (200.0, 300.0));
+    assert_eq!(doc.page_size(1).unwrap(), (300.0, 200.0));
+    assert!(doc.page_size(3).is_err());
+
+    let page = doc.page(0).unwrap();
+    assert_eq!(page.rotation(), 1);
+    let surface = PageSurface::new(&page, 1.0);
+    assert_eq!((surface.width, surface.height), (200, 300));
+
+    let full = page
+        .render_to_size(
+            surface.width,
+            surface.height,
+            RenderFlags::NONE,
+            0xFFFF_FFFF,
+        )
+        .unwrap();
+    let rect = PixelRect {
+        x: 0,
+        y: 0,
+        width: surface.width,
+        height: surface.height,
+    };
+    let tile = render_rect(&page, surface, rect, RenderFlags::NONE, 0xFFFF_FFFF).unwrap();
+    let mut same = 0usize;
+    let mut inked = 0usize;
+    for y in 0..surface.height {
+        for x in 0..surface.width {
+            let px = full.pixel(x, y);
+            if tile.pixel(x, y) == px {
+                same += 1;
+            }
+            if px != [255, 255, 255, 255] {
+                inked += 1;
+            }
+        }
+    }
+    let total = (surface.width * surface.height) as usize;
+    assert!(inked > 100, "整页渲染里应该有内容，非白像素 {inked} 个");
+    assert!(
+        same as f64 / total as f64 > 0.999,
+        "一致像素 {same}/{total}"
+    );
+}
+
 #[test]
 fn tiles_of_a_real_page_match_the_matching_part_of_the_full_render() {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());

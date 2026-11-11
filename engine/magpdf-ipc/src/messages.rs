@@ -203,6 +203,7 @@ names! {
         SESSION_SHUTDOWN = "session.shutdown";
         DOC_OPEN = "doc.open";
         DOC_CLOSE = "doc.close";
+        DOC_SNAPSHOT = "doc.snapshot";
         OBJ_LIST = "obj.list";
         OBJ_HIT_TEST = "obj.hitTest";
         EDIT_TRANSFORM = "edit.transform";
@@ -311,6 +312,37 @@ pub struct DocInfo {
 
 /// `doc.open` 的返回值。
 pub type DocOpenResult = DocInfo;
+
+/// `doc.snapshot` 的参数（《接口协议》6.1）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct DocSnapshotParams {
+    pub doc_id: u32,
+}
+
+/// 页面信息（《接口协议》5.3 `PageInfo` 的子集）。
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct PageInfo {
+    /// 页面在会话内的编号。原型还没有页面命令，它等于页序号。
+    pub page_id: u32,
+    pub index: u32,
+    /// 显示宽度（pt），已经按页面旋转换好宽高。
+    pub width: f32,
+    /// 显示高度（pt）。
+    pub height: f32,
+}
+
+/// `doc.snapshot` 的返回值。原型只给页面列表；对象用 `obj.list` 按页取。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct DocSnapshot {
+    pub version: u32,
+    pub pages: Vec<PageInfo>,
+}
 
 /// `doc.close` 的参数（《接口协议》6.1）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]

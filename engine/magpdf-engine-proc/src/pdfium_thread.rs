@@ -87,6 +87,11 @@ pub enum Job {
         doc_id: u32,
         reply: oneshot::Sender<bool>,
     },
+    /// 文档版本号和每一页的显示尺寸（pt）。不加载页面，大文档也很快。
+    Snapshot {
+        doc_id: u32,
+        reply: Reply<(u64, Vec<(f32, f32)>)>,
+    },
     /// 一页上的全部对象，按层级从下到上。
     Objects {
         doc_id: u32,
@@ -257,6 +262,13 @@ impl EngineHandle {
         rx.await.unwrap_or(false)
     }
 
+    pub async fn snapshot(
+        &self,
+        doc_id: u32,
+    ) -> std::result::Result<(u64, Vec<(f32, f32)>), EngineError> {
+        self.ask(|reply| Job::Snapshot { doc_id, reply }).await
+    }
+
     pub async fn objects(
         &self,
         doc_id: u32,
@@ -350,6 +362,9 @@ impl PdfiumState {
                 self.docs.retain(|d| d.doc_id != doc_id);
                 let _ = reply.send(self.docs.len() != before);
             }
+            Job::Snapshot { doc_id, reply } => {
+                let _ = reply.send(self.snapshot(doc_id));
+            }
             Job::Objects {
                 doc_id,
                 page_id,
@@ -425,6 +440,16 @@ impl PdfiumState {
             .iter_mut()
             .find(|d| d.doc_id == doc_id)
             .ok_or(EngineError::NoDocument { doc_id })
+    }
+
+    fn snapshot(&self, doc_id: u32) -> std::result::Result<(u64, Vec<(f32, f32)>), EngineError> {
+        let d = self.find(doc_id)?;
+        let doc = d.session.document();
+        let pages = (0..doc.page_count())
+            .map(|index| doc.page_size(index))
+            .collect::<pdfium_sys::Result<Vec<_>>>()
+            .map_err(|e| EngineError::Render(e.to_string()))?;
+        Ok((d.session.version(), pages))
     }
 
     /// 找到文档并确认页码在范围内。原型里 `pageId` 就是页序号。

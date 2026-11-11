@@ -124,6 +124,26 @@ impl<'lib> Document<'lib> {
         usize::try_from(n).unwrap_or(0)
     }
 
+    /// 第 `index` 页的显示尺寸（点，已按页面旋转换好宽高）。不加载页面，也不解析内容流，
+    /// 打开大文档时用它给全部页面排版。
+    pub fn page_size(&self, index: usize) -> Result<(f32, f32)> {
+        let count = self.page_count();
+        if index >= count {
+            return Err(Error::PageIndex { index, count });
+        }
+        let idx = c_int::try_from(index).map_err(|_| Error::PageIndex { index, count })?;
+        let mut size = raw::FS_SIZEF {
+            width: 0.0,
+            height: 0.0,
+        };
+        // SAFETY: handle 有效，idx 已检查在范围内，size 是有效的输出位置。
+        let ok = unsafe { raw::FPDF_GetPageSizeByIndexF(self.handle, idx, &mut size) };
+        if ok == 0 {
+            return Err(Error::LoadPage(LoadError::last()));
+        }
+        Ok((size.width, size.height))
+    }
+
     /// 文件头声明的 PDF 版本 ×10，例如 1.7 返回 17。
     pub fn file_version(&self) -> Option<i32> {
         let mut v: c_int = 0;
