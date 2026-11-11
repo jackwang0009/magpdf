@@ -8,11 +8,11 @@
 按方案第 12 节组织：
 
 ```
-apps/desktop/          Tauri 2 主进程（Rust）+ 界面入口（React 19 + Vite）
+apps/desktop/          Tauri 2 主进程（Rust，src-tauri）+ 界面入口（React 19 + Vite）+ 界面端到端测试（e2e）
 packages/ui            通用界面控件
 packages/editor        画布、工具状态机、选择与变换、快捷键、工作区
 packages/protocol      界面与引擎之间的命令和数据类型（由 Rust 生成，cargo test -p magpdf-ipc 时更新）
-engine/pdfium-sys      PDFium 与 MAG_* 扩展的 Rust 绑定（unsafe 只允许出现在这里和 magpdf-ipc 里调用 Windows 接口的模块）
+engine/pdfium-sys      PDFium 与 MAG_* 扩展的 Rust 绑定（unsafe 只允许出现在这里，以及 magpdf-ipc 和主进程里调用 Windows 接口的模块）
 engine/magpdf-engine   引擎服务：命令与撤销、保真校验、命中测试、渲染调度、保存与恢复
 engine/magpdf-engine-proc  引擎进程 magpdf-engine：管道通信、PDFium 专用线程、共享内存瓦片
 engine/magpdf-ipc      主进程与引擎之间的帧格式、消息和共享内存
@@ -39,7 +39,21 @@ models/  assets/       模型清单与下载脚本；内置素材与模板
 pwsh scripts/fetch-pdfium-prebuilt.ps1   # 拉取原版 PDFium 预编译库到 third_party/pdfium-prebuilt
 cargo test --workspace                   # 引擎
 cargo run -p magpdf-cli -- info 某文件.pdf
-pnpm install && pnpm test && pnpm dev    # 界面，浏览器打开 http://localhost:1420
+pnpm install && pnpm test && pnpm dev    # 界面，浏览器打开 http://localhost:1420（没有引擎，显示的是模拟文档）
+```
+
+桌面程序（界面接着真实的引擎）：
+
+```powershell
+pnpm dev                                    # 界面的开发服务器，留着别关
+cargo build -p magpdf-engine-proc           # 另开一个终端。引擎要和主进程在同一个目录（target\debug）
+cargo run -p magpdf-desktop -- 某文件.pdf   # 不给文件就用「文件 → 打开」
+
+# 发布版（界面打进可执行文件）和界面端到端冒烟测试
+pnpm --filter @magpdf/desktop build
+cargo build --release -p magpdf-engine-proc
+cargo build --release -p magpdf-desktop --features tauri/custom-protocol
+pnpm --filter @magpdf/desktop e2e
 ```
 
 代码检查：`cargo fmt --all --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo deny check`、
