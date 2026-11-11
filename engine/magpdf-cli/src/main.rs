@@ -4,6 +4,7 @@
 
 mod content;
 mod edit_line;
+mod fidelity;
 mod image;
 mod ocr;
 mod roundtrip;
@@ -57,6 +58,8 @@ enum Command {
     },
     /// 往返测试：每页对象全部标记为已修改、重新生成内容流并保存，渲染比对原件与保存结果（V02）
     Roundtrip(roundtrip::RoundtripArgs),
+    /// 保真校验：逐页报告能不能修改原有对象，不能的页只能叠加内容（方案 2.3）
+    Fidelity(fidelity::FidelityArgs),
     /// 自研内容流读写的往返对比（V17）
     ContentRoundtrip(content::ContentArgs),
     /// `roundtrip --isolate` 的子进程入口：处理单个文件并把 JSON 结果写到标准输出
@@ -117,6 +120,7 @@ fn main() -> Result<()> {
             output,
         } => render(&lib, &file, page, dpi, render_flags(annots, print), &output),
         Command::Roundtrip(args) => roundtrip::run(&lib, &args),
+        Command::Fidelity(args) => fidelity::run(&lib, &args),
         Command::RoundtripWorker(args) => roundtrip::run_worker(&lib, &args),
         Command::ContentRoundtrip(args) => content::run(&args),
         Command::EditLine(args) => edit_line::run(&lib, args),

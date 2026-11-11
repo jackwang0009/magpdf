@@ -316,7 +316,8 @@ fn enumerate(input: &Path, source_override: Option<&str>) -> Result<(PathBuf, Ve
     Ok((root, entries))
 }
 
-fn collect_pdfs(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
+/// 递归收集目录下的 PDF 文件（`fidelity` 子命令也用）。
+pub(crate) fn collect_pdfs(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
     for entry in fs::read_dir(dir).with_context(|| format!("读取目录 {}", dir.display()))? {
         let path = entry?.path();
         if path.is_dir() {

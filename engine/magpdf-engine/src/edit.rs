@@ -11,8 +11,11 @@
 use std::collections::BTreeMap;
 
 use pdfium_sys::{
-    DetachedObject, Document, Library, Matrix, ObjectKind, Page, PageObject, Rect, Rgba, SaveFlags,
+    DetachedObject, Document, Library, Matrix, ObjectKind, Page, PageObject, Rect, RenderOptions,
+    Rgba, SaveFlags,
 };
+
+use crate::compare::{Thresholds, compare};
 
 /// 对象在一次会话内的稳定编号（《接口协议》5.1）。只在会话内有效，不写进文件。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -302,14 +305,15 @@ impl<'lib> Session<'lib> {
         Ok(hits)
     }
 
-    /// 一页能不能修改原有对象（方案 2.3 保真校验里的对象比对）。返回 `None` 表示可以，`Some` 是原因。
+    /// 一页能不能修改原有对象（方案 2.3 的保真校验）。返回 `None` 表示可以，`Some` 是原因。
     ///
     /// 做法：在文档的副本上把这一页的对象全部标记为已修改、重新生成内容流，再重新加载，比较前后
-    /// 对象的个数、种类和包围盒。PDFium 的生成器写不出来的对象会消失或挪位置，这样的页一旦改了
-    /// 任何对象就会坏掉，编号表也会对不上，所以只允许在上面叠加内容。结果按页记住，只校验一次。
+    /// 对象的个数、种类和包围盒（对象比对），再比较前后渲染出来的画面（像素比对，判定规则同往返测试）。
+    /// PDFium 的生成器写不出来的对象会消失、挪位置或者变色，这样的页一旦改了任何对象，整页的内容流
+    /// 都要重写，别的对象也跟着坏，所以只允许在上面叠加内容。结果按页记住，只校验一次。
     ///
-    /// 这只是对象比对。颜色空间被换算成等价 RGB 这类变化包围盒看不出来，要靠像素和操作符级比对，
-    /// 这里还没有做。
+    /// 还看不出来的一类：颜色空间被换算成画面相同的 RGB（灰度写成 `rg`）。像素一样、对象也一样，
+    /// 要靠操作符级比对，这里还没有做。
     pub fn check_fidelity(&mut self, page: usize) -> Result<Option<&'static str>> {
         if let Some(known) = self.fidelity.get(&page) {
             return Ok(*known);
@@ -566,18 +570,35 @@ fn page_shape(page: &Page<'_>) -> Vec<(ObjectKind, Option<Rect>)> {
     page.objects().map(|o| (o.kind(), o.bounds())).collect()
 }
 
-/// 在副本上重写一页的内容流，比较前后的对象。`None` 表示没有变化。
+/// 保真校验渲染一页最多用多少像素。超过的大幅面页面降低比对的分辨率，而不是直接判为不能改。
+const FIDELITY_MAX_PIXELS: f32 = 16_000_000.0;
+
+/// 保真校验的渲染参数：2 倍分辨率（144 dpi），和往返测试用的一样（方案 13.2）；页面太大时降低倍率。
+fn fidelity_render(page: &Page<'_>) -> RenderOptions {
+    let area = (page.width() * page.height()).max(1.0);
+    RenderOptions {
+        scale: (FIDELITY_MAX_PIXELS / area).sqrt().min(2.0),
+        ..RenderOptions::default()
+    }
+}
+
+/// 在副本上重写一页的内容流，比较前后的对象和画面。`None` 表示没有变化。
 fn roundtrip_verdict(scratch: &Document<'_>, page: usize) -> Result<Option<&'static str>> {
-    let before = {
+    const UNRENDERABLE: &str = "页面渲染不出来，没法比较重写前后的画面";
+    let (before, picture_before) = {
         let page_obj = scratch.page(page)?;
         let shape = page_shape(&page_obj);
+        let Ok(picture) = page_obj.render(fidelity_render(&page_obj)) else {
+            return Ok(Some(UNRENDERABLE));
+        };
         for object in page_obj.objects() {
             object.mark_modified()?;
         }
         page_obj.generate_content()?;
-        shape
+        (shape, picture)
     };
-    let after = page_shape(&scratch.page(page)?);
+    let rewritten = scratch.page(page)?;
+    let after = page_shape(&rewritten);
     if before.len() != after.len() {
         return Ok(Some("重新生成内容流后对象的个数变了"));
     }
@@ -600,6 +621,15 @@ fn roundtrip_verdict(scratch: &Document<'_>, page: usize) -> Result<Option<&'sta
         if !same {
             return Ok(Some("重新生成内容流后对象的位置变了"));
         }
+    }
+    // 对象一个没少、位置也没动，画面仍然可能变：生成器把 CMYK、专色这些颜色写丢了，对象就变黑。
+    // 判定规则和往返测试相同（方案 2.3、13.2）。
+    let Ok(picture_after) = rewritten.render(fidelity_render(&rewritten)) else {
+        return Ok(Some(UNRENDERABLE));
+    };
+    let thresholds = Thresholds::default();
+    if !compare(&picture_before, &picture_after, &thresholds).passes(&thresholds) {
+        return Ok(Some("重新生成内容流后页面的画面变了"));
     }
     Ok(None)
 }
@@ -965,6 +995,62 @@ mod tests {
             after.iter().map(|o| o.id).collect::<Vec<_>>(),
             before.iter().map(|o| o.id).collect::<Vec<_>>()
         );
+    }
+
+    /// CMYK 的色块：原版 PDFium 的生成器写不出 `k`、`K`（方案 2.1），重写之后对象一个不少、位置也不动，
+    /// 只是变成了黑色。光比对象看不出来，要比画面。这样的页也不能改：一改，整页的内容流重写，
+    /// 没碰过的色块跟着变黑。生成器修好之后这一页就能编辑，所以两种结论都接受，但要和实际重写一遍
+    /// 的结果对得上。
+    #[test]
+    fn a_page_whose_colors_change_when_rewritten_is_not_editable() {
+        use pdfium_sys::{Document, RenderOptions};
+
+        use crate::compare::{Thresholds, compare};
+
+        let _guard = crate::pdfium_lock::lock();
+        let lib = Library::init().expect("PDFium");
+        let sample = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/corpus/synthetic/color-devicecmyk.pdf");
+
+        // 对照：另开一份，把第 1 页重写一遍，直接看对象和画面变没变。
+        let (objects_same, picture_same) = {
+            let doc = Document::load_file(&lib, &sample, None).expect("打开样本");
+            let render = RenderOptions {
+                scale: 2.0,
+                ..RenderOptions::default()
+            };
+            let (shape, before) = {
+                let page = doc.page(0).unwrap();
+                let shape: Vec<_> = page.objects().map(|o| o.kind()).collect();
+                let before = page.render(render).unwrap();
+                crate::roundtrip::mark_all_and_regenerate(&page).unwrap();
+                (shape, before)
+            };
+            let page = doc.page(0).unwrap();
+            let after = page.render(render).unwrap();
+            let thresholds = Thresholds::default();
+            (
+                shape == page.objects().map(|o| o.kind()).collect::<Vec<_>>(),
+                compare(&before, &after, &thresholds).passes(&thresholds),
+            )
+        };
+        assert!(objects_same, "这份样本重写之后对象的个数和种类不该变");
+
+        let mut session = Session::open(&lib, &sample, None).expect("打开样本");
+        let target = session.objects(0).unwrap()[0].id;
+        let verdict = session.check_fidelity(0).unwrap();
+        let outcome = session.transform(&[target], Matrix::translation(3.0, 0.0));
+        if picture_same {
+            assert_eq!(verdict, None);
+            outcome.expect("重写之后画面不变的页可以修改");
+        } else {
+            assert_eq!(verdict, Some("重新生成内容流后页面的画面变了"));
+            assert!(
+                matches!(outcome, Err(EditError::PageNotEditable { page: 0, .. })),
+                "{outcome:?}"
+            );
+            assert_eq!(session.version(), 0);
+        }
     }
 
     #[test]

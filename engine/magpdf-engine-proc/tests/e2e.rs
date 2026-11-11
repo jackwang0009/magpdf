@@ -509,25 +509,31 @@ fn by_id(objects: &[Value], id: u64) -> &Value {
 }
 
 /// 列对象、点选、变换、删除、改填充色、撤销和重做，都经管道走一遍（《接口协议》6.4、6.5、6.8）。
+///
+/// 样本用灰度色块那一份：它的页面用原版 PDFium 重写之后画面不变，所以允许修改。
+/// 提单样本里有 CMYK 色块，原版 PDFium 下不让改，见下一个用例。
 #[tokio::test]
 async fn edit_commands_change_the_document_and_can_be_undone() {
     let mut engine = Engine::start(None).await;
     engine.hello().await;
-    let doc_id = engine.open("freight-bl-composite.pdf").await;
+    let doc_id = engine.open("color-devicegray.pdf").await;
 
     let objects = engine.objects(doc_id).await;
-    assert_eq!(objects.len(), 44);
+    let total = objects.len();
+    assert_eq!(total, 8);
     for (z, object) in objects.iter().enumerate() {
         assert_eq!(object["z"], z, "按层级从下到上：{object}");
         assert_eq!(object["locked"], false);
+        // 这份样本里没有不可见文字、全透明对象和整页白底，每个对象都能在画布上点中。
+        assert_eq!(object["pickable"], true, "{object}");
     }
     let tail = engine
         .call(
             method::OBJ_LIST,
-            json!({ "docId": doc_id, "pageId": 0, "offset": 40, "limit": 10 }),
+            json!({ "docId": doc_id, "pageId": 0, "offset": 5, "limit": 10 }),
         )
         .await;
-    assert_eq!(tail.as_array().unwrap()[..], objects[40..]);
+    assert_eq!(tail.as_array().unwrap()[..], objects[5..]);
 
     // 取最上面的一个文字对象，在它中心点选。
     let target = objects
@@ -599,7 +605,7 @@ async fn edit_commands_change_the_document_and_can_be_undone() {
         )
         .await;
     assert_eq!(ghost["code"], ErrorCode::ObjectNotFound.code(), "{ghost}");
-    assert_eq!(engine.objects(doc_id).await.len(), 44);
+    assert_eq!(engine.objects(doc_id).await.len(), total);
 
     // 删除，再撤销：对象回到原来的层级，编号不变。
     let (version, changed) = engine
@@ -610,7 +616,7 @@ async fn edit_commands_change_the_document_and_can_be_undone() {
         .await;
     assert_eq!(version, 2);
     assert_eq!(changed["changes"][0]["removed"], json!([id]));
-    assert_eq!(engine.objects(doc_id).await.len(), 43);
+    assert_eq!(engine.objects(doc_id).await.len(), total - 1);
 
     let (version, changed) = engine
         .edit(method::HISTORY_UNDO, json!({ "docId": doc_id }))
@@ -618,7 +624,7 @@ async fn edit_commands_change_the_document_and_can_be_undone() {
     assert_eq!(version, 3);
     assert_eq!(changed["changes"][0]["added"], json!([id]));
     let restored = engine.objects(doc_id).await;
-    assert_eq!(restored.len(), 44);
+    assert_eq!(restored.len(), total);
     assert_eq!(by_id(&restored, id)["z"], target["z"]);
 
     let (version, changed) = engine
@@ -676,13 +682,21 @@ async fn edit_commands_change_the_document_and_can_be_undone() {
     assert_eq!(ready["version"], 6);
 }
 
-/// 生成器写不出渐变（方案 2.1），带渐变的页一改就会丢对象，所以修改命令要被拒绝（方案 2.3）。
-/// 生成器以后修好了，这一页就应该能正常编辑，两种结果这里都接受。
+/// 生成器写不出来的页，修改命令要被拒绝（方案 2.3）：一改，整页的内容流都要重写，没碰过的对象跟着坏。
+/// 两份样本坏的方式不同：带渐变的页重写后渐变对象没了（方案 2.1）；提单样本里有 CMYK 色块和专色印章，
+/// 重写后对象都在，但变成了黑色和灰色，要比画面才看得出来。
+/// 生成器以后修好了，这些页就应该能正常编辑，两种结果这里都接受。
 #[tokio::test]
 async fn pages_the_generator_cannot_rewrite_refuse_edits() {
+    for sample in ["shading-axial.pdf", "freight-bl-composite.pdf"] {
+        edits_are_refused_or_applied_but_never_half_done(sample).await;
+    }
+}
+
+async fn edits_are_refused_or_applied_but_never_half_done(sample: &str) {
     let mut engine = Engine::start(None).await;
     engine.hello().await;
-    let doc_id = engine.open("shading-axial.pdf").await;
+    let doc_id = engine.open(sample).await;
     let objects = engine.objects(doc_id).await;
     let id = objects[0]["id"].as_u64().unwrap();
 
