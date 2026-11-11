@@ -54,6 +54,41 @@ describe('命中测试', () => {
     ).not.toContainEqual(expect.objectContaining({ id: 'locked' }));
   });
 
+  it('点选时不算数的对象（不可见文字、整页白底）点不中也框不中，但查堆叠时仍然列出来', () => {
+    const background: PageObject = {
+      id: 'background',
+      type: 'path',
+      name: 'background',
+      bbox: { x: 0, y: 0, width: A4.width, height: A4.height },
+      pickable: false,
+    };
+    const hidden: PageObject = {
+      id: 'hidden-text',
+      type: 'text',
+      name: 'hidden-text',
+      bbox: { x: 80, y: 80, width: 100, height: 100 },
+      pickable: false,
+    };
+    const scanned: PageSnapshot = { ...page, objects: [background, ...page.objects, hidden] };
+    // 最上面盖着一层不可见文字：点到的是它下面看得见的对象
+    expect(linearHitTester.hitPoint(scanned, { x: 90, y: 90 }, 0)?.id).toBe('top');
+    // 空白处下面只有整页底块：什么也点不中
+    expect(linearHitTester.hitPoint(scanned, { x: 400, y: 600 }, 0)).toBeNull();
+    const everything = { x: 0, y: 0, width: A4.width, height: A4.height };
+    expect(linearHitTester.hitRect(scanned, everything, 'intersect').map((o) => o.id)).toEqual([
+      'bottom',
+      'middle',
+      'top',
+    ]);
+    expect(linearHitTester.objectsAtPoint(scanned, { x: 90, y: 90 }, 0).map((o) => o.id)).toEqual([
+      'hidden-text',
+      'top',
+      'middle',
+      'bottom',
+      'background',
+    ]);
+  });
+
   it('框选：相交模式与完全包含模式', () => {
     const partial = { x: 0, y: 0, width: 60, height: 60 };
     expect(linearHitTester.hitRect(page, partial, 'intersect').map((o) => o.id)).toEqual([

@@ -54,6 +54,35 @@ describe('编辑器状态', () => {
     expect(next.selection).toEqual([]);
   });
 
+  it('换快照：视图和历史不动，选区里已经不存在的对象去掉', () => {
+    const { store, doc } = setup();
+    const [first, second] = doc.pages[0]!.objects;
+    store.getState().setView('doc', { zoom: 2, x: 5, y: 6 });
+    store.getState().setSelection('doc', [first!.id, second!.id]);
+    const before = store.getState().documents.doc!;
+
+    // 第 1 页少了一个对象（比如引擎那边删掉了）
+    const pages = doc.pages.map((page, i) =>
+      i === 0 ? { ...page, objects: page.objects.filter((o) => o.id !== first!.id) } : page,
+    );
+    store.getState().updateSnapshot('doc', { ...doc, version: 7, pages });
+    const next = store.getState().documents.doc!;
+    expect(next.snapshot.version).toBe(7);
+    expect(next.selection).toEqual([second!.id]);
+    expect(next.view).toEqual({ zoom: 2, x: 5, y: 6 });
+    expect(next.history).toBe(before.history);
+    expect(store.getState().activeDocumentId).toBe('doc');
+
+    // 选区没受影响时，选区数组还是原来那个（订阅它的地方不用白忙）
+    const kept = next.selection;
+    store.getState().updateSnapshot('doc', { ...next.snapshot, version: 8 });
+    expect(store.getState().documents.doc!.selection).toBe(kept);
+
+    // 没打开的文档：什么也不做
+    store.getState().updateSnapshot('nope', { ...doc, id: 'nope' });
+    expect(store.getState().documentOrder).toEqual(['doc']);
+  });
+
   it('指针与帧统计只在变化时更新', () => {
     const { store } = setup();
     store.getState().setPointer({ page: 0, x: 1, y: 2 });

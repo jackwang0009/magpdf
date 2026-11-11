@@ -17,6 +17,11 @@ export interface TileEntry {
   pixels: TilePixels | null;
   /** 渲染器持有的纹理；类型故意宽松，缓存本身不依赖 WebGL */
   texture: unknown;
+  /**
+   * 这一页的画面已经变了，这块是旧的。旧瓦片先留着顶上（否则每改一次页面就闪一下白），
+   * 同时重新去要；新的到了由 `set` 换掉。
+   */
+  stale?: boolean;
 }
 
 export class TileCache {
@@ -49,8 +54,15 @@ export class TileCache {
     this.evictToLimit();
   }
 
+  /** 有没有这块瓦片（旧的也算：可以先画着）。 */
   has(id: string): boolean {
     return this.entries.has(id);
+  }
+
+  /** 有这块瓦片，而且不是旧的：不用再去要。 */
+  isFresh(id: string): boolean {
+    const entry = this.entries.get(id);
+    return entry !== undefined && !entry.stale;
   }
 
   /** 取出并标记为最近使用 */
@@ -81,7 +93,17 @@ export class TileCache {
     this.evictToLimit(entry.id);
   }
 
-  /** 某页内容变了（对象移动、引擎推送变更事件）：丢掉该页全部瓦片 */
+  /** 某页画面变了（对象移动、引擎推送变更事件）：该页的瓦片标成旧的，留着先顶上。 */
+  markPageStale(page: number): void {
+    const ids = this.byPage.get(page);
+    if (!ids) return;
+    for (const id of ids) {
+      const entry = this.entries.get(id);
+      if (entry) entry.stale = true;
+    }
+  }
+
+  /** 丢掉某页的全部瓦片（页面没了，或者旧瓦片不能再用） */
   invalidatePage(page: number): void {
     const ids = this.byPage.get(page);
     if (!ids) return;

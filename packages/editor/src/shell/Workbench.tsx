@@ -31,15 +31,22 @@ export interface WorkbenchProps {
   readonly onReady?: (api: DockviewApi) => void;
 }
 
-/** 文档面板：每个文档一个瓦片画布。宿主打开的文档用宿主给的瓦片来源，其余的用模拟来源。 */
+/**
+ * 文档面板：每个文档一个瓦片画布。宿主打开的文档，瓦片找宿主要、修改交给宿主；
+ * 其余的（模拟文档）用模拟来源，修改直接落在 store 上。
+ */
 function CanvasPanel(props: IDockviewPanelProps<{ documentId: string }>) {
   const host = useEditorHost();
   const documentId = props.params.documentId;
   const provider = host?.tileProvider(documentId);
-  return provider ? (
-    <TileCanvas documentId={documentId} store={editorStore} provider={provider} />
-  ) : (
-    <TileCanvas documentId={documentId} store={editorStore} />
+  const editor = host?.documentEditor(documentId);
+  return (
+    <TileCanvas
+      documentId={documentId}
+      store={editorStore}
+      {...(provider ? { provider } : {})}
+      {...(editor ? { editor } : {})}
+    />
   );
 }
 

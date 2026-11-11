@@ -1,10 +1,18 @@
 import { metrics, palette } from '@magpdf/ui';
+import type { DocumentEditor, PageTransform } from '../document/documentEditor';
 import { linearHitTester } from '../document/hitTest';
 import { PageLayout } from '../document/pageLayout';
-import type { DocumentSnapshot } from '../document/types';
+import {
+  documentTransformToPage,
+  rectToRectMatrix,
+  translationMatrix,
+} from '../document/pageSpace';
+import type { Matrix } from '../document/pageSpace';
+import type { DocumentSnapshot, PageSnapshot } from '../document/types';
 import { MM_PER_INCH, PT_PER_INCH, translateRect, unionRects } from '../geometry';
 import type { Point, Rect, Size } from '../geometry';
 import { format, t } from '../i18n';
+import { findObject } from '../store/editorStore';
 import type { EditorStore } from '../store/editorStore';
 import type {
   InteractionOverlay,
@@ -54,6 +62,11 @@ export interface CanvasControllerOptions {
   /** 已定位（position: relative/absolute）的容器，控制器往里面放两个 canvas */
   readonly container: HTMLElement;
   readonly provider?: TileProvider;
+  /**
+   * 这份文档的修改入口。有的话，工具产生的修改（移动、缩放、删除、撤销、重做）交给它；
+   * 没有的话（模拟文档）直接改 store 里的快照。
+   */
+  readonly editor?: DocumentEditor;
   /** 瓦片缓存上限（字节），默认 96 MB */
   readonly cacheBytes?: number;
 }
@@ -84,6 +97,7 @@ export class CanvasController {
   private readonly renderer: GlTileRenderer | null;
   private readonly provider: TileProvider;
   private readonly ownsProvider: boolean;
+  private readonly editor: DocumentEditor | null;
   private readonly resizeObserver: ResizeObserver | null;
   private readonly unsubscribe: () => void;
 
@@ -106,6 +120,7 @@ export class CanvasController {
     this.store = options.store;
     this.documentId = options.documentId;
     this.container = options.container;
+    this.editor = options.editor ?? null;
     this.snapshot = this.store.getState().documents[this.documentId]?.snapshot;
     this.layout = buildLayout(this.snapshot);
 
@@ -261,6 +276,14 @@ export class CanvasController {
       case 'view.actualSize':
         this.actualSize();
         return true;
+      case 'edit.undo':
+      case 'edit.redo':
+        // 撤销记录在引擎里（方案 4.2）。模拟文档没有撤销，按键照旧算处理过了，免得落到浏览器的默认行为上。
+        if (this.editor) {
+          if (command === 'edit.undo') this.editor.undo();
+          else this.editor.redo();
+        }
+        return true;
       default: {
         if (command.startsWith('edit.')) {
           this.applyEffects(this.tools.command(command, this.toolContext()));
@@ -415,11 +438,13 @@ export class CanvasController {
       previous.pages.length !== snapshot.pages.length ||
       pagesResized(previous, snapshot)
     ) {
+      // 页面的排布变了：旧瓦片的位置和大小都对不上了，在途的请求也一样
       this.layout = buildLayout(snapshot);
+      this.scheduler.reset();
       this.cache.clear();
     } else {
       for (let i = 0; i < snapshot.pages.length; i++) {
-        if (snapshot.pages[i] !== previous.pages[i]) this.scheduler.invalidatePage(i);
+        if (pageRepainted(previous.pages[i]!, snapshot.pages[i]!)) this.scheduler.invalidatePage(i);
       }
     }
     this.invalidate();
@@ -467,6 +492,7 @@ export class CanvasController {
         const entry = this.cache.peek(id);
         return entry !== undefined && (entry.texture !== null || !this.renderer);
       },
+      isFresh: (id) => this.cache.isFresh(id),
     });
 
     if (this.renderer && !this.renderer.isLost) {
@@ -760,23 +786,44 @@ export class CanvasController {
 
   private objectById(id: string): ObjectRef | undefined {
     const doc = this.document;
-    if (!doc) return undefined;
-    // 对象 id 带页码前缀（p{n}-...），先按前缀直达
-    const match = /^p(\d+)-/.exec(id);
-    const candidates = match ? [doc.snapshot.pages[Number(match[1])]] : doc.snapshot.pages;
-    for (const page of candidates) {
-      if (!page) continue;
-      const object = page.objects.find((o) => o.id === id);
-      if (object) {
-        const pageRect = this.layout.pageRect(page.index);
-        return {
-          page: page.index,
-          object,
-          docRect: translateRect(object.bbox, pageRect.x, pageRect.y),
-        };
-      }
+    const found = doc && findObject(doc, id);
+    if (!found || found.page >= this.layout.pageCount) return undefined;
+    const pageRect = this.layout.pageRect(found.page);
+    return {
+      page: found.page,
+      object: found.object,
+      docRect: translateRect(found.object.bbox, pageRect.x, pageRect.y),
+    };
+  }
+
+  /** 把对象按所在的页分组（页序号 → 对象 id），找不到的对象略过。 */
+  private idsByPage(ids: readonly string[]): Map<number, string[]> {
+    const pages = new Map<number, string[]>();
+    for (const id of ids) {
+      const ref = this.objectById(id);
+      if (!ref) continue;
+      const list = pages.get(ref.page);
+      if (list) list.push(id);
+      else pages.set(ref.page, [id]);
     }
-    return undefined;
+    return pages;
+  }
+
+  /** 把文档坐标里的一个变换交给修改入口：按页分开，各页换成自己的页面坐标里的矩阵。 */
+  private transformViaEditor(
+    editor: DocumentEditor,
+    ids: readonly string[],
+    inDocument: Matrix,
+  ): void {
+    const changes: PageTransform[] = [];
+    for (const [page, pageIds] of this.idsByPage(ids)) {
+      changes.push({
+        page,
+        ids: pageIds,
+        matrix: documentTransformToPage(inDocument, this.layout.pageRect(page)),
+      });
+    }
+    if (changes.length > 0) editor.transformObjects(changes);
   }
 
   private hitAt(screen: Point): string | null {
@@ -798,9 +845,25 @@ export class CanvasController {
           state.setSelection(this.documentId, effect.ids);
           break;
         case 'moveObjects':
-          state.moveObjects(this.documentId, effect.ids, effect.dx, effect.dy);
+          if (this.editor) {
+            this.transformViaEditor(
+              this.editor,
+              effect.ids,
+              translationMatrix(effect.dx, effect.dy),
+            );
+          } else {
+            state.moveObjects(this.documentId, effect.ids, effect.dx, effect.dy);
+          }
           break;
         case 'resizeObjects': {
+          if (this.editor) {
+            this.transformViaEditor(
+              this.editor,
+              [...effect.rects.keys()],
+              rectToRectMatrix(effect.from, effect.to),
+            );
+            break;
+          }
           const local = new Map<string, Rect>();
           for (const [id, docRect] of effect.rects) {
             const ref = this.objectById(id);
@@ -812,7 +875,8 @@ export class CanvasController {
           break;
         }
         case 'deleteObjects':
-          state.deleteObjects(this.documentId, effect.ids);
+          if (this.editor) this.editor.deleteObjects(effect.ids);
+          else state.deleteObjects(this.documentId, effect.ids);
           break;
         case 'setView':
           this.setView(effect.view);
@@ -845,6 +909,18 @@ function buildLayout(snapshot: DocumentSnapshot | undefined): PageLayout {
   return new PageLayout(
     snapshot ? snapshot.pages.map((p) => ({ width: p.width, height: p.height })) : [],
   );
+}
+
+/**
+ * 这一页的画面是不是变了（瓦片要重画）。给了修订号的页只看修订号；
+ * 没给的（模拟文档）页面对象换了就算变了。
+ */
+function pageRepainted(before: PageSnapshot, after: PageSnapshot): boolean {
+  if (before === after) return false;
+  if (before.revision !== undefined || after.revision !== undefined) {
+    return before.revision !== after.revision;
+  }
+  return true;
 }
 
 function pagesResized(a: DocumentSnapshot, b: DocumentSnapshot): boolean {

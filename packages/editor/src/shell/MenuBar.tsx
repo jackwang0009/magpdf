@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { Icon } from '@magpdf/ui';
 import { t } from '../i18n';
+import { useEditorStore } from '../store/editorStore';
 import type { CommandId } from '../tools/shortcuts';
 import { defaultShortcutMap } from '../tools/shortcuts';
 import type { WorkspaceId } from '../workspace/workspaceTypes';
+import { useEditorHost } from './editorHost';
 import { useShellCommands } from './shellContext';
 
 interface MenuItem {
@@ -34,6 +36,10 @@ export function MenuBar({ workspace, showRulers, showFrameStats }: MenuBarProps)
   const commands = useShellCommands();
   const [open, setOpen] = useState<string | null>(null);
   const barRef = useRef<HTMLElement>(null);
+  // 撤销记录在引擎里：只有引擎打开的文档能撤销，模拟文档没有
+  const host = useEditorHost();
+  const activeDocumentId = useEditorStore((s) => s.activeDocumentId);
+  const canUndo = Boolean(activeDocumentId && host?.documentEditor(activeDocumentId));
 
   const menus: Menu[] = [
     {
@@ -59,8 +65,8 @@ export function MenuBar({ workspace, showRulers, showFrameStats }: MenuBarProps)
       id: 'edit',
       label: t.menu.edit,
       items: [
-        { id: 'undo', label: t.menuItems.undo, disabled: true },
-        { id: 'redo', label: t.menuItems.redo, disabled: true },
+        { id: 'undo', label: t.menuItems.undo, command: 'edit.undo', disabled: !canUndo },
+        { id: 'redo', label: t.menuItems.redo, command: 'edit.redo', disabled: !canUndo },
         { id: 'sep1', label: '', separator: true },
         { id: 'cut', label: t.menuItems.cut, disabled: true },
         { id: 'copy', label: t.menuItems.copy, disabled: true },

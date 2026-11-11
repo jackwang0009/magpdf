@@ -3,8 +3,9 @@ import type { Point, Rect } from '../geometry';
 import type { PageObject, PageSnapshot } from './types';
 
 /**
- * 命中测试接口。P0 用线性扫描（每页对象不多）；上万个对象的页面由引擎侧的 R-tree 负责（方案 3.4、第 7 节），
- * 届时实现同一接口、走进程间查询即可。
+ * 命中测试接口。P0 在界面这边按包围盒线性扫描：悬停时每帧都要查，状态机又是同步的，不能每次去问引擎。
+ * 引擎那边的规则（哪些对象点选时跳过）随对象列表一起给过来（`PageObject.pickable`）。
+ * 上万个对象的页面、按路径和字形精确判断要靠引擎的 R-tree（方案 3.4、第 7 节），那时这个接口要改成异步的。
  */
 export type MarqueeMode = 'intersect' | 'contain';
 
@@ -17,8 +18,9 @@ export interface HitTester {
   objectsAtPoint(page: PageSnapshot, point: Point, tolerance: number): PageObject[];
 }
 
+/** 画布上点选、框选能不能选到：锁定的对象不能（《交互设计》2.1），看不见的对象也不能（方案 4.3）。 */
 function selectable(object: PageObject): boolean {
-  return !object.locked;
+  return !object.locked && object.pickable !== false;
 }
 
 export const linearHitTester: HitTester = {

@@ -234,6 +234,34 @@ describe('选择工具状态机', () => {
       width: rect.width + 10,
       height: rect.height + 10,
     });
+    // 同时给出选区包围盒缩放前后的样子：交给引擎的是“把前一个映到后一个”的变换
+    expect(resize).toMatchObject({
+      from: rect,
+      to: { x: rect.x, y: rect.y, width: rect.width + 10, height: rect.height + 10 },
+    });
+  });
+
+  it('多选缩放：前后两个包围盒是整个选区的，每个对象按同一个变换缩放', () => {
+    const ctx = context(['a', 'b']);
+    const a = ctx.objectById('a')!.docRect;
+    const b = ctx.objectById('b')!.docRect;
+    // 选区从 a 的左上角到 b 的右下角；拖右边中点把宽度加一倍
+    const box = { x: a.x, y: a.y, width: b.x + b.width - a.x, height: a.height };
+    const east = { x: box.x + box.width, y: box.y + box.height / 2 };
+    const result = run(
+      { kind: 'idle' },
+      [
+        pointer('pointerdown', east),
+        pointer('pointermove', { x: east.x + box.width, y: east.y }),
+        pointer('pointerup', { x: east.x + box.width, y: east.y }),
+      ],
+      ctx,
+    );
+    const resize = result.effects.find((e) => e.type === 'resizeObjects');
+    expect(resize).toMatchObject({ from: box, to: { ...box, width: box.width * 2 } });
+    const rects = resize && resize.type === 'resizeObjects' ? resize.rects : new Map();
+    expect(rects.get('a')).toMatchObject({ x: a.x, width: a.width * 2 });
+    expect(rects.get('b')).toMatchObject({ x: a.x + (b.x - a.x) * 2, width: b.width * 2 });
   });
 
   it('旋转热区按下进入旋转状态（光标随之改变）', () => {

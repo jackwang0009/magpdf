@@ -2,10 +2,12 @@ import type { Rect } from '../geometry';
 
 /**
  * 界面持有的文档只读快照（方案 3.1）：对象列表、包围盒、少量属性。
- * 正式类型由 V06 从 Rust 生成到 @magpdf/protocol，这里先用模拟数据的形状；字段命名尽量与《接口协议》一致。
+ * 模拟文档和引擎打开的文档共用这一套形状：引擎的对象摘要（`@magpdf/protocol` 的 `ObjectSummary`，
+ * PDF 用户空间）由 `engine/engineSession.ts` 换算成这里的页面坐标。
  */
 
-export type ObjectType = 'text' | 'path' | 'image' | 'component';
+/** 对象种类（方案 4.1）。`other` 是引擎认不出种类的对象。 */
+export type ObjectType = 'text' | 'path' | 'image' | 'shading' | 'form' | 'component' | 'other';
 
 export type ComponentKind = 'barcode' | 'textStamp' | 'amountWords';
 
@@ -65,7 +67,13 @@ export interface PageObject {
   /** 页面坐标，pt，左上角为原点，y 向下 */
   readonly bbox: Rect;
   readonly locked?: boolean;
-  readonly appearance: MockAppearance;
+  /**
+   * 为 false 时在画布上点选、框选都跳过它：不可见文字、完全透明的对象、铺满页面的白色底块（方案 4.3）。
+   * 这些对象仍然列在图层面板里，可以从那里选中。缺省为 true。
+   */
+  readonly pickable?: boolean;
+  /** 模拟文档的外观。引擎打开的文档由引擎渲染的位图显示，没有这一项。 */
+  readonly appearance?: MockAppearance;
 }
 
 export interface PageSnapshot {
@@ -76,6 +84,12 @@ export interface PageSnapshot {
   readonly height: number;
   /** 从底到顶的绘制顺序 */
   readonly objects: readonly PageObject[];
+  /**
+   * 页面画面的修订号：它变了，这一页的瓦片才需要重画。
+   * 引擎打开的文档用它，因为换一个页面对象不等于画面变了（对象列表是后到的，修改先在界面上乐观更新）。
+   * 模拟文档不给，页面对象换了就算画面变了。
+   */
+  readonly revision?: number;
 }
 
 export interface DocumentSnapshot {

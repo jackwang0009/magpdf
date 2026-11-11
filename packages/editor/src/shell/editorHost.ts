@@ -1,8 +1,9 @@
 import { createContext, useContext } from 'react';
 import type { TileProvider } from '../canvas/tileProvider';
+import type { DocumentEditor } from '../document/documentEditor';
 
 /**
- * 外壳向“宿主”要的东西：真实文档怎么打开、它们的瓦片找谁要。
+ * 外壳向“宿主”要的东西：真实文档怎么打开、它们的瓦片找谁要、修改交给谁。
  * 桌面应用里宿主是接着引擎的 `EngineSession`；没有宿主时（浏览器里看界面、测试）外壳用模拟文档。
  */
 export interface EditorHost {
@@ -13,6 +14,8 @@ export interface EditorHost {
   openDocument(): Promise<void>;
   /** 某份文档的瓦片来源。不是宿主打开的文档返回 undefined，画布退回模拟来源。 */
   tileProvider(documentId: string): TileProvider | undefined;
+  /** 某份文档的修改入口。不是宿主打开的文档返回 undefined，修改直接落在 store 的快照上。 */
+  documentEditor(documentId: string): DocumentEditor | undefined;
   /** 宿主有事要告诉用户（引擎重启了、文档没能恢复）。返回取消订阅的函数。 */
   onNotice(listener: (notice: HostNotice) => void): () => void;
 }

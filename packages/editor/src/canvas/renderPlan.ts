@@ -46,9 +46,9 @@ export interface RenderPlan {
   readonly pages: readonly PagePlacement[];
   /** 其他档位里能临时顶上的瓦片，先画；粗的在前 */
   readonly fallback: readonly TileQuad[];
-  /** 目标档位里已有的瓦片，后画 */
+  /** 目标档位里已有的瓦片（包括已经变旧、正等着换的），后画 */
   readonly tiles: readonly TileQuad[];
-  /** 可见但缺失的瓦片，按优先级排序 */
+  /** 可见、要去请求的瓦片：缺的，以及画着但已经变旧的；按优先级排序 */
   readonly missing: readonly TileRequestSpec[];
   /** 视口周边的预取，优先级低于 missing */
   readonly prefetch: readonly TileRequestSpec[];
@@ -60,13 +60,21 @@ export interface PlanInput {
   /** 视口尺寸，CSS 像素 */
   readonly viewport: Size;
   readonly devicePixelRatio: number;
+  /** 这块瓦片现在画得出来吗（旧的也算） */
   readonly has: (id: string) => boolean;
+  /**
+   * 画得出来的瓦片是不是最新的。不是的话照常画（先顶着），同时列进要请求的瓦片里。
+   * 不给时凡是画得出来的都当作最新的。
+   */
+  readonly isFresh?: (id: string) => boolean;
   /** 预取范围：视口向四周扩大的比例，默认 0.5（各方向半个视口） */
   readonly prefetchRatio?: number;
 }
 
 export function computeRenderPlan(input: PlanInput): RenderPlan {
   const { layout, view, viewport, has } = input;
+  /** 有，而且不用重新要 */
+  const settled = (id: string) => has(id) && (input.isFresh?.(id) ?? true);
   const prefetchRatio = input.prefetchRatio ?? 0.5;
   const targetLevel = pickLevel(view.zoom * input.devicePixelRatio);
   const visRect = visibleDocRect(view, viewport);
@@ -104,6 +112,10 @@ export function computeRenderPlan(input: PlanInput): RenderPlan {
         const docRect = toDoc(tileLocal, pageRect);
         if (has(id)) {
           tiles.push({ id, key, docRect });
+          // 旧瓦片先画着，同时重新要
+          if (!settled(id)) {
+            missing.push(spec(id, key, grid, tileLocal, distanceSq(rectCenter(docRect), center)));
+          }
         } else {
           missing.push(spec(id, key, grid, tileLocal, distanceSq(rectCenter(docRect), center)));
           missingLocal.push(tileLocal);
@@ -120,7 +132,7 @@ export function computeRenderPlan(input: PlanInput): RenderPlan {
       const local = toLocal(prefetchInter, pageRect);
       for (const key of tilesInPageRect(grid, local, page, targetLevel)) {
         const id = tileKeyString(key);
-        if (seen.has(id) || has(id)) continue;
+        if (seen.has(id) || settled(id)) continue;
         seen.add(id);
         const tileLocal = tilePageRect(grid, key.tx, key.ty);
         const docRect = toDoc(tileLocal, pageRect);
@@ -138,7 +150,7 @@ export function computeRenderPlan(input: PlanInput): RenderPlan {
         0,
       )) {
         const id = tileKeyString(key);
-        if (seen.has(id) || has(id)) continue;
+        if (seen.has(id) || settled(id)) continue;
         seen.add(id);
         const tileLocal = tilePageRect(thumbGrid, key.tx, key.ty);
         prefetch.push(spec(id, key, thumbGrid, tileLocal, Number.MAX_SAFE_INTEGER / 2));

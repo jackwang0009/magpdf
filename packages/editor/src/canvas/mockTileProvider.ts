@@ -97,6 +97,8 @@ function drawObject(
 ): void {
   const a = object.appearance;
   const b = object.bbox;
+  // 没有外观的对象来自引擎打开的文档，那种文档不走模拟渲染
+  if (!a) return;
   switch (a.kind) {
     case 'textBars': {
       ctx.fillStyle = a.color;

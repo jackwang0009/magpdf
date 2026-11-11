@@ -19,11 +19,33 @@ export class FakeTransport implements EngineTransport {
   };
 
   private readonly listeners = new Set<(event: EngineEvent) => void>();
+  private readonly gates = new Map<string, Promise<void>>();
   private nextRequestId = 1;
 
   request<T = unknown>(method: string, params?: unknown): Promise<T> {
     this.requests.push({ method, params });
-    return Promise.resolve().then(() => this.handle(method, params) as T);
+    return Promise.resolve().then(async () => {
+      // 结果在请求到达时就算好（引擎是按到达顺序处理的），被扣住的只是应答
+      const outcome = this.handle(method, params) as T;
+      const gate = this.gates.get(method);
+      if (gate) await gate;
+      return outcome;
+    });
+  }
+
+  /** 把某个方法后面的应答都扣住，直到调用返回的函数放行。用来摆出“应答晚到”的先后顺序。 */
+  hold(method: string): () => void {
+    let release = () => {};
+    this.gates.set(
+      method,
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+    );
+    return () => {
+      this.gates.delete(method);
+      release();
+    };
   }
 
   onEvent(listener: (event: EngineEvent) => void): () => void {

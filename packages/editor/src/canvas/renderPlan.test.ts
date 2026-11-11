@@ -42,6 +42,28 @@ describe('每帧渲染计划', () => {
     expect(second.missing.filter((m) => cache.has(m.id))).toHaveLength(0);
   });
 
+  it('变旧的瓦片照常画，同时列进要请求的瓦片里', () => {
+    const y = layout.pageRect(0).y;
+    const first = planAt(1, y);
+    const cached = new Set([...first.missing, ...first.prefetch].map((m) => m.id));
+    const stale = first.missing[0]!.id;
+    const stalePrefetch = first.prefetch[0]!.id;
+    const plan = computeRenderPlan({
+      layout,
+      view: { zoom: 1, x: 0, y },
+      viewport,
+      devicePixelRatio: 1,
+      has: (id) => cached.has(id),
+      isFresh: (id) => id !== stale && id !== stalePrefetch,
+    });
+    // 可见的旧瓦片：画着，并且要重新请求；不用别的档位来顶（它自己还在）
+    expect(plan.tiles.map((quad) => quad.id)).toContain(stale);
+    expect(plan.missing.map((m) => m.id)).toEqual([stale]);
+    expect(plan.fallback).toEqual([]);
+    // 视口外的旧瓦片：按预取重新请求
+    expect(plan.prefetch.map((m) => m.id)).toEqual([stalePrefetch]);
+  });
+
   it('目标档位缺失时用更粗一档已缓存的瓦片顶上（先粗后细）', () => {
     const y = layout.pageRect(0).y;
     const plan = planAt(1, y, (id) => id.startsWith('0/0/'));

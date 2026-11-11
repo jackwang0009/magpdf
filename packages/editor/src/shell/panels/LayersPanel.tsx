@@ -9,7 +9,10 @@ const TYPE_ICON: Record<PageObject['type'], IconName> = {
   text: 'text',
   path: 'shape',
   image: 'scan',
+  shading: 'palette',
+  form: 'group',
   component: 'components',
+  other: 'more',
 };
 
 /** 图层面板：按页列出对象（顶层在上），点选与画布选区同步。 */

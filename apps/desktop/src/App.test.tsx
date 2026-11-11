@@ -74,6 +74,7 @@ describe('App', () => {
     const host: EditorHost = {
       openDocument,
       tileProvider: () => undefined,
+      documentEditor: () => undefined,
       onNotice: () => () => undefined,
     };
     container = document.createElement('div');

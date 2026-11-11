@@ -299,8 +299,17 @@ function onPointerUp(
     case 'pressedHandle':
       return transition(idle);
     case 'scaling': {
-      const rects = scalePreview({ ...state, currentDoc: event.doc });
-      return transition(idle, { type: 'overlay', overlay: null }, { type: 'resizeObjects', rects });
+      const final = { ...state, currentDoc: event.doc };
+      return transition(
+        idle,
+        { type: 'overlay', overlay: null },
+        {
+          type: 'resizeObjects',
+          rects: scalePreview(final),
+          from: state.bbox,
+          to: scaleTarget(final),
+        },
+      );
     }
     case 'rotating':
       // 旋转提交需要引擎侧的变换矩阵支持（P1）；P0 只保留状态与光标
@@ -426,10 +435,15 @@ function movePreview(state: Extract<SelectState, { kind: 'moving' }>): Map<strin
   return out;
 }
 
-function scalePreview(state: Extract<SelectState, { kind: 'scaling' }>): Map<string, Rect> {
+/** 拖到当前位置时，选区的包围盒变成什么样 */
+function scaleTarget(state: Extract<SelectState, { kind: 'scaling' }>): Rect {
   const dx = state.currentDoc.x - state.startDoc.x;
   const dy = state.currentDoc.y - state.startDoc.y;
-  const target = resizeRectByHandle(state.bbox, state.handle, dx, dy, state.keepRatio);
+  return resizeRectByHandle(state.bbox, state.handle, dx, dy, state.keepRatio);
+}
+
+function scalePreview(state: Extract<SelectState, { kind: 'scaling' }>): Map<string, Rect> {
+  const target = scaleTarget(state);
   const out = new Map<string, Rect>();
   for (const [id, rect] of state.startRects) out.set(id, mapRectBetween(rect, state.bbox, target));
   return out;

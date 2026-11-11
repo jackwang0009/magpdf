@@ -21,6 +21,8 @@ export { PageLayout } from './document/pageLayout';
 export type { PageLayoutOptions } from './document/pageLayout';
 export { linearHitTester } from './document/hitTest';
 export type { HitTester, MarqueeMode } from './document/hitTest';
+export * from './document/pageSpace';
+export type { DocumentEditor, PageTransform } from './document/documentEditor';
 
 // 视图
 export * from './view/viewState';

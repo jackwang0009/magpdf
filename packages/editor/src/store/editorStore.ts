@@ -56,6 +56,11 @@ export interface EditorState {
   readonly collapsedPanels: readonly PanelId[];
 
   openDocument(snapshot: DocumentSnapshot, options?: { activate?: boolean }): void;
+  /**
+   * 换掉一份已经打开的文档的快照（引擎推送了变化、对象列表到了）。视图不动；
+   * 选区里已经不存在的对象去掉。文档没有打开时什么也不做。
+   */
+  updateSnapshot(id: string, snapshot: DocumentSnapshot): void;
   closeDocument(id: string): void;
   activateDocument(id: string): void;
   setView(id: string, view: ViewState): void;
@@ -166,6 +171,15 @@ export function createEditorStore(): EditorStore {
             (options?.activate ?? true) || !state.activeDocumentId
               ? snapshot.id
               : state.activeDocumentId,
+        });
+      },
+
+      updateSnapshot(id, snapshot) {
+        updateDocument(id, (doc) => {
+          if (doc.snapshot === snapshot) return doc;
+          const next = { ...doc, snapshot };
+          const selection = doc.selection.filter((sid) => findObject(next, sid) !== undefined);
+          return selection.length === doc.selection.length ? next : { ...next, selection };
         });
       },
 
@@ -314,11 +328,17 @@ export function activeDocument(state: EditorState): DocumentState | undefined {
   return state.activeDocumentId ? state.documents[state.activeDocumentId] : undefined;
 }
 
+/**
+ * 按 id 找对象。对象 id 带页序号前缀（`p{n}-…`）时直接去那一页找，否则逐页找。
+ */
 export function findObject(
-  doc: DocumentState,
+  doc: Pick<DocumentState, 'snapshot'>,
   id: string,
 ): { page: number; object: PageObject } | undefined {
-  for (const page of doc.snapshot.pages) {
+  const prefix = /^p(\d+)-/.exec(id);
+  const pages = prefix ? [doc.snapshot.pages[Number(prefix[1])]] : doc.snapshot.pages;
+  for (const page of pages) {
+    if (!page) continue;
     const object = page.objects.find((o) => o.id === id);
     if (object) return { page: page.index, object };
   }

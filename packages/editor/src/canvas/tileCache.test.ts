@@ -48,6 +48,29 @@ describe('瓦片 LRU 缓存', () => {
     expect(cache.bytes).toBe(100);
   });
 
+  it('页面画面变了：这一页的瓦片标成旧的，留着先顶上，放进新的就换掉', () => {
+    const onEvict = vi.fn();
+    const cache = new TileCache(1000, onEvict);
+    cache.set(entry('p0', 100, 0));
+    cache.set(entry('p1', 100, 1));
+    cache.markPageStale(0);
+    // 旧的还在（画得出来），但不算最新；别的页不受影响
+    expect(cache.has('p0')).toBe(true);
+    expect(cache.isFresh('p0')).toBe(false);
+    expect(cache.isFresh('p1')).toBe(true);
+    expect(cache.isFresh('没有这块')).toBe(false);
+    expect(onEvict).not.toHaveBeenCalled();
+
+    const replacement = entry('p0', 120, 0);
+    cache.set(replacement);
+    expect(cache.isFresh('p0')).toBe(true);
+    expect(cache.peek('p0')).toBe(replacement);
+    expect(cache.bytes).toBe(220);
+    // 旧的那块交给渲染器释放纹理
+    expect(onEvict).toHaveBeenCalledTimes(1);
+    expect(onEvict.mock.calls[0]![0].stale).toBe(true);
+  });
+
   it('淘汰时通知渲染器释放纹理', () => {
     const onEvict = vi.fn();
     const cache = new TileCache(100, onEvict);

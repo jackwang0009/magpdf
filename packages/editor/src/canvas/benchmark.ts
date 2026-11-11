@@ -22,7 +22,7 @@ export interface BenchmarkResult {
   readonly tiles: {
     readonly completed: number;
     readonly aborted: number;
-    readonly stale: number;
+    readonly failed: number;
     readonly cacheCount: number;
     readonly cacheMB: number;
     readonly mockRendered: number | null;
@@ -114,7 +114,7 @@ export async function runBenchmark(
     tiles: {
       completed: schedulerStats.completed,
       aborted: schedulerStats.aborted,
-      stale: schedulerStats.stale,
+      failed: schedulerStats.failed,
       cacheCount: controller.cache.count,
       cacheMB: Math.round((controller.cache.bytes / 1024 / 1024) * 10) / 10,
       mockRendered: mock?.stats.rendered ?? null,

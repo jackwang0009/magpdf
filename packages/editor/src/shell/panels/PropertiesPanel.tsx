@@ -54,7 +54,7 @@ export function PropertiesPanel() {
         <label>{t.properties.rotation}</label>
         <Field value="0°" />
       </div>
-      {object.appearance.kind === 'barcode' ? (
+      {object.appearance?.kind === 'barcode' ? (
         <>
           <SectionHeader title={t.properties.componentParams} />
           <div className="mg-props-grid">
@@ -77,7 +77,7 @@ export function PropertiesPanel() {
           </p>
         </>
       ) : null}
-      {object.appearance.kind === 'stamp' ? (
+      {object.appearance?.kind === 'stamp' ? (
         <>
           <SectionHeader title={t.properties.componentParams} />
           <div className="mg-props-grid">

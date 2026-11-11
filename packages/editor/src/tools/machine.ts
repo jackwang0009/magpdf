@@ -85,7 +85,17 @@ export type ToolEffect =
       readonly dx: number;
       readonly dy: number;
     }
-  | { readonly type: 'resizeObjects'; readonly rects: ReadonlyMap<string, Rect> }
+  | {
+      readonly type: 'resizeObjects';
+      /** 每个对象缩放之后的文档矩形 */
+      readonly rects: ReadonlyMap<string, Rect>;
+      /**
+       * 选区的包围盒，缩放之前和之后（文档坐标）。所有对象做的是同一个变换：把 `from` 映到 `to` 的
+       * 缩放加平移。交给引擎的是这个变换，不是一个个矩形。
+       */
+      readonly from: Rect;
+      readonly to: Rect;
+    }
   | { readonly type: 'deleteObjects'; readonly ids: readonly string[] }
   | { readonly type: 'setView'; readonly view: ViewState }
   | { readonly type: 'setTool'; readonly tool: ToolId }
