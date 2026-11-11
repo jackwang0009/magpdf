@@ -130,3 +130,99 @@ pub fn render_rect(
     };
     Ok(Bitmap::new(width, height, data.0, data.1))
 }
+
+/// 分层渲染时只画页面上的哪些对象（拖动预览，方案 3.2）。对象用页内层级序号指代，0 在最下面。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LayerFilter<'a> {
+    /// 去掉这些对象，其余照常画：拖动时的底图。
+    Without(&'a [usize]),
+    /// 只画这些对象：拖动时跟着鼠标走的那一层。背景通常给全透明（`0x0000_0000`）。
+    Only(&'a [usize]),
+}
+
+/// 和 [`render_rect`] 一样取整页上的一块，但只画 `filter` 留下的对象。
+///
+/// 背景给全透明时，位图里是**没有预乘**的 BGRA：半透明的像素，颜色分量是对象本来的颜色，透明度单独在
+/// 第四个字节里（`tests/layers.rs` 里有用例守着这一点）。
+///
+/// 用的是 PDFium 的公开接口，没有改分支：渲染前把不要的对象设成“不活动”（`FPDFPageObj_SetIsActive`），
+/// 渲染完设回来。活动状态一变，PDFium 会给对象打上“已修改”的标记，这个标记记在页面句柄里的对象上：
+///
+/// - 页面句柄不重新生成内容流就关掉（引擎渲染瓦片就是这样：打开页面、渲染、关掉），什么也不会留下，
+///   文档没有变；
+/// - 之后如果在**同一个页面句柄**上调 [`Page::generate_content`]，被隐藏过的对象所在的内容流会被重写，
+///   即使这些对象并没有改过。不要这样用。
+///
+/// 方案 3.2 设想的 `MAG_RenderPageFiltered`（《接口协议》9.3）连这个标记也不会留下，但要改 PDFium
+/// 分支。以后引擎如果让页面一直开着（省掉每块瓦片重新解析页面的时间），就需要它了。
+///
+/// 序号超出范围返回 [`Error::PageObject`]，这时什么也不画，对象的状态也不变。
+pub fn render_rect_filtered(
+    page: &Page<'_>,
+    surface: PageSurface,
+    rect: PixelRect,
+    flags: RenderFlags,
+    background: u32,
+    filter: LayerFilter<'_>,
+) -> Result<Bitmap> {
+    let hidden = Hidden::apply(page, filter)?;
+    let bitmap = render_rect(page, surface, rect, flags, background);
+    drop(hidden);
+    bitmap
+}
+
+/// 暂时不参与渲染的对象。析构时设回“活动”，中途出错也一样。
+struct Hidden<'page> {
+    objects: Vec<raw::FPDF_PAGEOBJECT>,
+    /// 句柄属于这一页，页面要比它们活得久
+    _page: std::marker::PhantomData<&'page Page<'page>>,
+}
+
+impl<'page> Hidden<'page> {
+    fn apply(page: &'page Page<'_>, filter: LayerFilter<'_>) -> Result<Self> {
+        let count = page.object_count();
+        let (listed, hide_listed) = match filter {
+            LayerFilter::Without(indices) => (indices, true),
+            LayerFilter::Only(indices) => (indices, false),
+        };
+        let mut is_listed = vec![false; count];
+        for &index in listed {
+            *is_listed.get_mut(index).ok_or(Error::PageObject)? = true;
+        }
+        let mut hidden = Self {
+            objects: Vec::new(),
+            _page: std::marker::PhantomData,
+        };
+        for (index, listed) in is_listed.into_iter().enumerate() {
+            if listed != hide_listed {
+                continue;
+            }
+            let Some(object) = page.object(index) else {
+                continue;
+            };
+            let handle = object.raw_handle();
+            let mut active: raw::FPDF_BOOL = 0;
+            // SAFETY: handle 是这一页上有效的对象句柄；active 指向栈上的变量。
+            let known = unsafe { raw::FPDFPageObj_GetIsActive(handle, &raw mut active) };
+            // 本来就不活动的对象不归这里管，渲染完也不去动它
+            if known == 0 || active == 0 {
+                continue;
+            }
+            // SAFETY: 同上。失败时提前返回，已经隐藏的对象由 `hidden` 析构时恢复。
+            if unsafe { raw::FPDFPageObj_SetIsActive(handle, 0) } == 0 {
+                return Err(Error::PageObject);
+            }
+            hidden.objects.push(handle);
+        }
+        Ok(hidden)
+    }
+}
+
+impl Drop for Hidden<'_> {
+    fn drop(&mut self) {
+        for &handle in &self.objects {
+            // SAFETY: 句柄在 `apply` 里取自仍然活着的页面，这期间没有对象被移除。
+            unsafe { raw::FPDFPageObj_SetIsActive(handle, 1) };
+        }
+    }
+}

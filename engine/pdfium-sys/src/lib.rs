@@ -37,4 +37,4 @@ pub use library::Library;
 pub use object::{ObjectKind, PageObject, TextRenderMode};
 pub use page::{DetachedObject, Page, RenderFlags, RenderOptions};
 pub use text::{CharInfo, TextPage};
-pub use tile::{PageSurface, PixelRect, TILE_SIZE, render_rect};
+pub use tile::{LayerFilter, PageSurface, PixelRect, TILE_SIZE, render_rect, render_rect_filtered};
