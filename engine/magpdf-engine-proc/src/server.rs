@@ -128,7 +128,11 @@ impl std::fmt::Debug for Engine {
     }
 }
 
-/// 运行引擎，直到 `session.shutdown`，或主进程退出导致管道实例无法再创建。
+/// 运行引擎，直到 `session.shutdown`，或者主进程那一头的连接断开。
+///
+/// 一个引擎只服务启动它的那个主进程的一条连接：管道名里有主进程的 PID 和随机串，主进程每次都是
+/// 换一个名字重新启动引擎，不会回头再连。所以连接一断（主进程崩溃、被结束，或者它决定换掉这个引擎）
+/// 引擎就退出，不留下来等。
 pub async fn run(config: EngineConfig) -> Result<i32> {
     let engine = Arc::new(Engine::start(config)?);
     let pipe_name = engine.pipe.clone();
@@ -141,19 +145,11 @@ pub async fn run(config: EngineConfig) -> Result<i32> {
         "engine started"
     );
     let mut server = pipe::create_server(&pipe_name)?;
-    while pipe::accept(&mut server).await?.is_some() {
+    if pipe::accept(&mut server).await?.is_some() {
         serve_connection(engine.clone(), server).await;
-        if engine.shutdown.load(Ordering::SeqCst) {
-            break;
+        if !engine.shutdown.load(Ordering::SeqCst) {
+            tracing::info!("主进程的连接断了，引擎退出");
         }
-        // 主进程断开（被结束或崩溃）后继续等下一个连接。
-        server = match pipe::recreate(&pipe_name) {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::info!("主进程已退出，引擎结束：{e}");
-                break;
-            }
-        };
     }
     engine.engine.shutdown();
     Ok(0)

@@ -31,7 +31,8 @@ pub fn pipe_name(host_pid: u32, token: &str) -> String {
     format!(r"\\.\pipe\magpdf-{host_pid}-{token}")
 }
 
-/// 引擎侧：创建第一个服务端实例（字节流模式）。
+/// 引擎侧：创建服务端实例（字节流模式）。一个引擎只有这一个实例，只接启动它的主进程的一条连接；
+/// `first_pipe_instance` 保证同名的管道不是别人先建好的。
 pub fn create_server(name: &str) -> std::io::Result<Server> {
     ServerOptions::new()
         .pipe_mode(PipeMode::Byte)
@@ -39,12 +40,7 @@ pub fn create_server(name: &str) -> std::io::Result<Server> {
         .create(name)
 }
 
-/// 引擎侧：再接一个服务端实例（上一个客户端断开后调用）。
-pub fn recreate(name: &str) -> std::io::Result<Server> {
-    ServerOptions::new().pipe_mode(PipeMode::Byte).create(name)
-}
-
-/// 引擎侧：等一个客户端连上；返回 `Ok(None)` 表示主进程已经退出（无法再创建管道实例）。
+/// 引擎侧：等主进程连上；返回 `Ok(None)` 表示对方连上之后马上又断开了。
 pub async fn accept(server: &mut Server) -> std::io::Result<Option<()>> {
     match server.connect().await {
         Ok(()) => Ok(Some(())),
@@ -76,30 +72,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn client_can_connect_twice() {
+    async fn the_client_connects_and_a_second_server_with_the_same_name_is_refused() {
         let name = pipe_name(std::process::id(), &random_token(8).unwrap());
         let mut server = create_server(&name).unwrap();
-        let pending = tokio::spawn({
-            let name = name.clone();
-            async move {
-                let accepted = accept(&mut server).await;
-                assert_eq!(accepted.unwrap(), Some(()));
-                drop(server);
-                let mut next = recreate(&name).unwrap();
-                let accepted = accept(&mut next).await;
-                assert_eq!(accepted.unwrap(), Some(()));
-            }
+        // 同名的管道已经有人建了：`first_pipe_instance` 让第二个创建失败，冒名顶替的服务端起不来。
+        assert!(create_server(&name).is_err());
+
+        let pending = tokio::spawn(async move {
+            let accepted = accept(&mut server).await;
+            assert_eq!(accepted.unwrap(), Some(()));
         });
         let mut errors = Vec::new();
-        let mut connected = 0;
+        let mut connected = false;
         for _ in 0..200 {
-            if connected == 2 {
-                break;
-            }
             match connect_client(&name) {
                 Ok(client) => {
                     drop(client);
-                    connected += 1;
+                    connected = true;
+                    break;
                 }
                 Err(e) => {
                     errors.push(e);
@@ -107,10 +97,10 @@ mod tests {
                 }
             }
         }
-        assert_eq!(connected, 2, "客户端连不上管道：{errors:?}");
+        assert!(connected, "客户端连不上管道：{errors:?}");
         tokio::time::timeout(std::time::Duration::from_secs(5), pending)
             .await
-            .expect("服务端没有接受两个连接")
+            .expect("服务端没有接受连接")
             .unwrap();
     }
 }

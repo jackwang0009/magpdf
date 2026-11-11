@@ -27,7 +27,8 @@ fn sample(name: &str) -> String {
 /// 一个被测的引擎进程，加上测试这一侧（扮演主进程）的连接。
 struct Engine {
     child: Child,
-    client: NamedPipeClient,
+    /// 测试这一侧的管道句柄；`hang_up` 之后是 `None`。
+    client: Option<NamedPipeClient>,
     session: String,
     recovery: PathBuf,
     next_id: u64,
@@ -76,7 +77,7 @@ impl Engine {
         };
         Self {
             child,
-            client,
+            client: Some(client),
             session,
             recovery,
             next_id: 1,
@@ -85,13 +86,22 @@ impl Engine {
         }
     }
 
+    fn pipe(&mut self) -> &mut NamedPipeClient {
+        self.client.as_mut().expect("管道已经关掉了")
+    }
+
+    /// 关掉测试这一侧的管道句柄。在引擎看来，这和主进程被结束是一回事。
+    fn hang_up(&mut self) {
+        self.client = None;
+    }
+
     /// 发一条请求，不等响应。
     async fn send(&mut self, method: &str, params: Value) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
         let request = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
         let framed = frame::encode(&request).unwrap();
-        self.client.write_all(&framed).await.unwrap();
+        self.pipe().write_all(&framed).await.unwrap();
         id
     }
 
@@ -99,9 +109,9 @@ impl Engine {
     async fn read_one(&mut self) {
         let read = async {
             let mut len = [0u8; 4];
-            self.client.read_exact(&mut len).await.unwrap();
+            self.pipe().read_exact(&mut len).await.unwrap();
             let mut body = vec![0u8; u32::from_le_bytes(len) as usize];
-            self.client.read_exact(&mut body).await.unwrap();
+            self.pipe().read_exact(&mut body).await.unwrap();
             body
         };
         let body = tokio::time::timeout(STEP_TIMEOUT, read)
@@ -741,6 +751,26 @@ async fn unknown_method_is_rejected_and_shutdown_exits_cleanly() {
             Instant::now() < deadline,
             "session.shutdown 之后引擎没有退出"
         );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
+    assert!(status.success(), "{status}");
+}
+
+/// 主进程没了（崩溃或被结束，管道随之断开），引擎要自己退出。管道名里有主进程的 PID 和随机串，
+/// 不会再有人连上来；留下来等只会变成没人管的进程，还占着文档。
+#[tokio::test]
+async fn the_engine_exits_when_the_host_goes_away() {
+    let mut engine = Engine::start(None).await;
+    engine.hello().await;
+    engine.open("freight-bl-composite.pdf").await;
+
+    engine.hang_up();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let status = loop {
+        if let Some(status) = engine.child.try_wait().unwrap() {
+            break status;
+        }
+        assert!(Instant::now() < deadline, "管道断开 5 秒之后引擎还在运行");
         tokio::time::sleep(Duration::from_millis(20)).await;
     };
     assert!(status.success(), "{status}");

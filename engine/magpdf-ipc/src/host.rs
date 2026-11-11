@@ -11,6 +11,7 @@
 //! 文档类请求原样转发，这里不解析业务字段（《接口协议》第 2 节）。
 
 use std::collections::{HashMap, VecDeque};
+use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -100,6 +101,9 @@ pub enum HostError {
     #[error("引擎的协议版本是 {engine}，主进程是 {host}")]
     Protocol { engine: u32, host: u32 },
 }
+
+/// `CreateProcess` 的 `CREATE_NO_WINDOW`：不给控制台程序开窗口。
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 type Pending = HashMap<u64, oneshot::Sender<Result<Value, RpcError>>>;
 
@@ -326,7 +330,9 @@ async fn start_engine(
         .args(&launch.extra_args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::inherit());
+        .stderr(Stdio::inherit())
+        // 引擎是控制台程序。主进程是窗口程序、自己没有控制台时，不加这个标志系统会给引擎另开一个黑窗口。
+        .creation_flags(CREATE_NO_WINDOW);
     if let Some(dir) = &launch.dll_dir {
         let mut path = std::ffi::OsString::from(dir.as_os_str());
         path.push(";");
