@@ -55,6 +55,10 @@ pnpm --filter @magpdf/desktop build
 cargo build --release -p magpdf-engine-proc
 cargo build --release -p magpdf-desktop --features tauri/custom-protocol
 pnpm --filter @magpdf/desktop e2e
+
+# 性能测量用的页面（5000 个对象的 A4 页、300 dpi 整页“扫描件”等）生成到 tests/out/perf。
+# 在它们上面量拖动的帧间隔：见 docs/p0/V04-分层渲染与拖动预览原型.md 第 3.1 节
+python tests/corpus/perf/generate.py
 ```
 
 代码检查：`cargo fmt --all --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo deny check`、
