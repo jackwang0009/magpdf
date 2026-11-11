@@ -4,7 +4,8 @@
  * 起真实的桌面程序（主进程 + 引擎进程 + WebView2），Playwright 经 CDP 连进 WebView2，用真实的鼠标键盘
  * 事件走一遍：
  *   命令行打开两份 PDF → 页面由引擎渲染出来 → 滚轮缩放 → 强制结束引擎后自动恢复显示
- *   → 只能叠加内容的页：出提示条，原有对象拖不动 → 能改的页：点选、拖动、微移、删除、撤销，看画面
+ *   → 只能叠加内容的页：出提示条，原有对象拖不动
+ *   → 能改的页：点选、拖动（拖到一半对象本身已经跟着走）、微移、删除、撤销，看画面；再拖两秒量帧间隔
  *   → 关标签页 → 主进程退出后引擎跟着退出。
  *
  * 先构建发布版（界面打进可执行文件里）：
@@ -19,8 +20,13 @@
  *   MAGPDF_E2E_PDF       看渲染、缩放、恢复用的 PDF，默认 tests/corpus/synthetic/freight-bl-composite.pdf。
  *                        它的第 1 页在原版 PDFium 下只能叠加内容，在修过生成器的构建下可以修改，两种都认
  *   MAGPDF_E2E_EDIT_PDF  做修改用的 PDF，第 1 页必须能修改，默认 tests/corpus/synthetic/color-devicegray.pdf
+ *   MAGPDF_E2E_WINDOW    被测程序的窗口大小，写成 宽x高（屏幕像素，比如 1920x1040）；不设就用程序默认的大小。
+ *                        量帧间隔时用它换一个大一些的画布
+ *   MAGPDF_E2E_DRAG_MS   量帧间隔时拖多久（毫秒），默认 2000。超过 2000 时结果里多一项 overBySecond：
+ *                        每一秒里有几帧超过 16.7 ms
  *
- * 结果打印成一行 JSON（各步耗时，修改的延迟），截图存到 tests/out/e2e/。测试窗口不抢焦点，不动真实的鼠标键盘。
+ * 结果打印成一行 JSON（各步耗时，修改的延迟，拖动预览就绪的延迟和拖动时的帧间隔），截图存到 tests/out/e2e/。
+ * 测试窗口不抢焦点，不动真实的鼠标键盘。
  */
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
@@ -47,6 +53,10 @@ const outDir = join(repo, 'tests/out/e2e');
 const RESTORE_LIMIT_MS = 5000;
 /** 量修改延迟时微移多少次。 */
 const NUDGES = 30;
+/** 量拖动的帧间隔时拖多久（ms）。MAGPDF_E2E_DRAG_MS 可以改长：别的程序偶尔占一下显卡，两秒不一定碰得上。 */
+const DRAG_MS = parseDuration(process.env.MAGPDF_E2E_DRAG_MS, 2000);
+/** 被测程序的窗口要改成多大；没有设 MAGPDF_E2E_WINDOW 时是 null，用程序默认的大小。 */
+const windowSize = parseWindowSize(process.env.MAGPDF_E2E_WINDOW);
 /** 《交互设计》9.3 的文案。 */
 const OVERLAY_ONLY_BANNER =
   '第 1 页无法安全修改原有内容：页面使用了软件尚不能完整保留的效果。可以在这一页上添加内容。';
@@ -75,6 +85,21 @@ async function freePort() {
 
 function sleep(ms) {
   return new Promise((done) => setTimeout(done, ms));
+}
+
+/** 毫秒数；没有给时用 `fallback`，写错了直接报错。 */
+function parseDuration(text, fallback) {
+  if (text === undefined || text === '') return fallback;
+  assert.match(text, /^[1-9]\d*$/, `时长要写成毫秒数，现在是 ${text}`);
+  return Number(text);
+}
+
+/** “宽x高” → `{ width, height }`；没有给时返回 null，写错了直接报错，不悄悄用默认值。 */
+function parseWindowSize(text) {
+  if (text === undefined || text === '') return null;
+  const match = /^(\d+)x(\d+)$/.exec(text);
+  assert.ok(match, `MAGPDF_E2E_WINDOW 要写成 宽x高（比如 1920x1040），现在是 ${text}`);
+  return { width: Number(match[1]), height: Number(match[2]) };
 }
 
 function isRunning(pid) {
@@ -109,6 +134,19 @@ function enginePid(appPid) {
   ).trim();
   const pid = Number.parseInt(out, 10);
   return Number.isInteger(pid) ? pid : null;
+}
+
+/** 把主进程的窗口挪到屏幕左上角、改成指定的大小（屏幕像素）。不激活窗口，不改它和别的窗口的前后次序。 */
+function resizeWindow(appPid, { width, height }) {
+  const SWP_NOZORDER_NOACTIVATE = 0x0014;
+  execFileSync('powershell.exe', [
+    '-NoProfile',
+    '-Command',
+    `$api = Add-Type -PassThru -Namespace MagpdfE2e -Name Window -MemberDefinition '[DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);';` +
+      ` $window = (Get-Process -Id ${appPid}).MainWindowHandle;` +
+      ` if ($window -eq [IntPtr]::Zero) { exit 2 };` +
+      ` if (-not $api::SetWindowPos($window, [IntPtr]::Zero, 0, 0, ${width}, ${height}, ${SWP_NOZORDER_NOACTIVATE})) { exit 3 }`,
+  ]);
 }
 
 async function connect(port) {
@@ -220,6 +258,18 @@ async function parkMouse(page) {
   await page.mouse.move(corner.x, corner.y);
 }
 
+/**
+ * 最近截的几张图。测试失败时另存一份（`failureEvidence`）：比对两张截图的断言失败之后，要看的就是
+ * 这两张图，而平常存下来的那些文件下一次运行就被盖掉了。
+ */
+const recentShots = [];
+
+function remember(shot) {
+  recentShots.push(shot);
+  if (recentShots.length > 4) recentShots.shift();
+  return shot;
+}
+
 /** 截一张图存下来，连同第 1 页所在的区域一起返回。先把鼠标挪开，等画面是最新的。 */
 async function capture(page, name) {
   await parkMouse(page);
@@ -228,7 +278,7 @@ async function capture(page, name) {
   assert.ok(area.width > 50 && area.height > 50, `页面没有显示在画布上：${JSON.stringify(area)}`);
   const png = await page.screenshot({ scale: 'css' });
   writeFileSync(join(outDir, `${name}.png`), png);
-  return { name, area, base64: png.toString('base64') };
+  return remember({ name, area, base64: png.toString('base64') });
 }
 
 /**
@@ -271,37 +321,61 @@ function assertPageIsDrawn(counts, when) {
   );
 }
 
-/** 两张截图在页面区域里有多大比例的像素不一样（任一通道差 8 以上才算）。 */
-function pageDifference(page, before, after) {
+/**
+ * 不挪鼠标截一张图（拖到一半的时候用）。等画面是最新的；`area` 沿用 `like` 那张截图的页面区域。
+ */
+async function captureInPlace(page, name, like) {
+  await page.waitForFunction(() => window.__magpdf.controller().upToDate);
+  const png = await page.screenshot({ scale: 'css' });
+  writeFileSync(join(outDir, `${name}.png`), png);
+  return remember({ name, area: like.area, base64: png.toString('base64') });
+}
+
+/**
+ * 两张截图有多大比例的像素不一样（任一通道差 8 以上才算）。
+ * 默认比第 1 页所在的区域；给了 `region`（屏幕上的矩形，CSS 像素）就只比那一块；
+ * 再给 `exclude` 的话，落在它里面的像素不算。要比的范围里一个像素也没有时返回 0。
+ */
+function pageDifference(page, before, after, region = before.area, exclude = null) {
   return page.evaluate(
-    async ({ a, b, area }) => {
+    async ({ a, b, area, skip }) => {
+      const [x0, y0] = [Math.ceil(area.x), Math.ceil(area.y)];
+      const [width, height] = [Math.floor(area.width), Math.floor(area.height)];
+      if (width <= 0 || height <= 0) return 0;
       const pixels = async (base64) => {
         const bytes = Uint8Array.from(atob(base64), (ch) => ch.charCodeAt(0));
         const bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
         const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
         const context = canvas.getContext('2d');
         context.drawImage(bitmap, 0, 0);
-        return context.getImageData(
-          Math.ceil(area.x),
-          Math.ceil(area.y),
-          Math.floor(area.width),
-          Math.floor(area.height),
-        ).data;
+        return context.getImageData(x0, y0, width, height).data;
       };
       const [left, right] = await Promise.all([pixels(a), pixels(b)]);
+      const skipped = (x, y) =>
+        skip !== null &&
+        x >= skip.x &&
+        x < skip.x + skip.width &&
+        y >= skip.y &&
+        y < skip.y + skip.height;
+      let compared = 0;
       let different = 0;
-      for (let i = 0; i < left.length; i += 4) {
-        if (
-          Math.abs(left[i] - right[i]) > 8 ||
-          Math.abs(left[i + 1] - right[i + 1]) > 8 ||
-          Math.abs(left[i + 2] - right[i + 2]) > 8
-        ) {
-          different++;
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          if (skipped(x0 + x, y0 + y)) continue;
+          compared++;
+          const i = (y * width + x) * 4;
+          if (
+            Math.abs(left[i] - right[i]) > 8 ||
+            Math.abs(left[i + 1] - right[i + 1]) > 8 ||
+            Math.abs(left[i + 2] - right[i + 2]) > 8
+          ) {
+            different++;
+          }
         }
       }
-      return different / (left.length / 4);
+      return compared === 0 ? 0 : different / compared;
     },
-    { a: before.base64, b: after.base64, area: before.area },
+    { a: before.base64, b: after.base64, area: region, skip: exclude },
   );
 }
 
@@ -354,6 +428,142 @@ async function drag(page, target, dx, dy, midway = async () => undefined) {
   await page.mouse.move(target.x + dx, target.y + dy, { steps: 6 });
   await midway();
   await page.mouse.up();
+}
+
+/**
+ * 对象拖动 (dx, dy) 前后在屏幕上占的地方（CSS 像素）：
+ * `home` 是原来的地方，`landed` 是挪过去之后的地方，`landedInner` 是后者往里收一点。
+ * `home` 和 `landedInner` 四周往里收了几个像素，躲开选框的线。
+ */
+function dragRegions(target, dx, dy) {
+  const width = target.bbox.width * target.scale;
+  const height = target.bbox.height * target.scale;
+  const inset = (size) => Math.min(3, Math.max(0, (size - 4) / 2));
+  const inner = (x, y) => ({
+    x: x + inset(width),
+    y: y + inset(height),
+    width: width - 2 * inset(width),
+    height: height - 2 * inset(height),
+  });
+  const [left, top] = [target.x - width / 2, target.y - height / 2];
+  return {
+    home: inner(left, top),
+    landed: { x: left + dx, y: top + dy, width, height },
+    landedInner: inner(left + dx, top + dy),
+  };
+}
+
+/** 等拖动预览的两层瓦片到齐（方案 3.2），返回它的情况：用了多久、两层各几块瓦片。 */
+async function dragPreviewReady(page) {
+  const handle = await page.waitForFunction(
+    () => {
+      const preview = window.__magpdf.controller().dragPreview;
+      return preview?.ready ? preview : false;
+    },
+    null,
+    { timeout: 10_000, polling: 5 },
+  );
+  return handle.jsonValue();
+}
+
+/**
+ * 量拖动时的帧间隔（《P0 技术验证计划》V04）：按住对象不停地挪 DRAG_MS 毫秒，页面里每一帧记一个时间。
+ * 最后回到原处松手，没有位移，文档不变。
+ */
+async function measureDrag(page) {
+  const target = await pickTarget(page);
+  await page.mouse.click(target.x, target.y);
+  await page.mouse.move(target.x, target.y);
+  await page.mouse.down();
+  await page.mouse.move(target.x + 12, target.y + 8, { steps: 2 });
+  const preview = await dragPreviewReady(page);
+  const before = await page.evaluate(() => {
+    const { store } = window.__magpdf;
+    const controller = window.__magpdf.controller();
+    // 画布自己的帧统计（脚本时间）只在打开“帧时间统计”时才记
+    if (!store.getState().showFrameStats) store.getState().toggleFrameStats();
+    controller.stats.reset();
+    const probe = { times: [], running: true };
+    const tick = (time) => {
+      if (!probe.running) return;
+      probe.times.push(time);
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+    window.__frameProbe = probe;
+    const canvas = controller.container.querySelector('.mg-canvas-gl');
+    return {
+      engineTiles: controller.tileProvider.stats.engineTiles,
+      // 每一帧要画多大一块、页面放大了多少：帧时间要对着这两样看
+      canvas: [canvas.width, canvas.height],
+      zoom: controller.view.zoom,
+    };
+  });
+
+  const started = performance.now();
+  let moves = 0;
+  while (performance.now() - started < DRAG_MS) {
+    const angle = (moves++ / 40) * 2 * Math.PI;
+    await page.mouse.move(
+      target.x + 70 + 60 * Math.cos(angle),
+      target.y + 40 + 35 * Math.sin(angle),
+    );
+  }
+
+  const measured = await page.evaluate(() => {
+    const controller = window.__magpdf.controller();
+    const probe = window.__frameProbe;
+    probe.running = false;
+    const intervals = [];
+    for (let i = 1; i < probe.times.length; i++)
+      intervals.push(probe.times[i] - probe.times[i - 1]);
+    const stats = controller.stats.summary();
+    return {
+      intervals,
+      script: { median: stats.workP50, p95: stats.workP95, max: stats.workMax },
+      engineTiles: controller.tileProvider.stats.engineTiles,
+      stillLayered: controller.dragPreview?.ready === true,
+    };
+  });
+  await page.mouse.move(target.x, target.y);
+  await page.mouse.up();
+  await page.evaluate(() => {
+    const state = window.__magpdf.store.getState();
+    if (state.showFrameStats) state.toggleFrameStats();
+  });
+  await page.keyboard.press('Escape');
+
+  assert.ok(measured.stillLayered, '拖动过程中分层预览没有一直在用');
+  assert.equal(
+    measured.engineTiles,
+    before.engineTiles,
+    '拖动过程中不该再向引擎要瓦片（方案 3.2）',
+  );
+  const round = (value) => Math.round(value * 10) / 10;
+  // 超过 16.7 ms 的帧落在第几秒：别的程序隔一阵占一下显卡造成的掉帧是一簇一簇的
+  const overBySecond = Array.from({ length: Math.ceil(DRAG_MS / 1000) }, () => 0);
+  let elapsed = 0;
+  for (const interval of measured.intervals) {
+    elapsed += interval;
+    const second = Math.min(overBySecond.length - 1, Math.floor(elapsed / 1000));
+    if (interval > 16.7) overBySecond[second]++;
+  }
+  return {
+    readyMs: round(preview.readyMs),
+    baseTiles: preview.baseTiles,
+    objectTiles: preview.objectTiles,
+    canvas: before.canvas,
+    zoom: Math.round(before.zoom * 1000) / 1000,
+    frames: measured.intervals.length,
+    intervalMs: summarize(measured.intervals),
+    over16ms: measured.intervals.filter((interval) => interval > 16.7).length,
+    ...(DRAG_MS > 2000 ? { overBySecond } : {}),
+    scriptMs: {
+      median: round(measured.script.median),
+      p95: round(measured.script.p95),
+      max: round(measured.script.max),
+    },
+  };
 }
 
 /** 等修改生效：文档到了这一版，受影响的瓦片重画完了。等不到时把当时的状态写进错误里。 */
@@ -497,9 +707,15 @@ async function checkEditing(page) {
   await page.mouse.click(target.x, target.y);
   assert.deepEqual((await documentState(page)).selection, [target.id]);
 
-  // 拖动：对象跟到新位置，页面上受影响的地方重画
+  // 拖动：按住拖出去，中途停住看一眼，再松手。对象跟到新位置，页面上受影响的地方重画
   const [dx, dy] = [40, 24];
-  await drag(page, target, dx, dy);
+  let preview = null;
+  let midDrag = null;
+  await drag(page, target, dx, dy, async () => {
+    // 两层瓦片到齐之后，对象本身已经跟着鼠标走了（方案 3.2）
+    preview = await dragPreviewReady(page);
+    midDrag = await captureInPlace(page, 'smoke-5-dragging', pristine);
+  });
   await editSettled(page, ++version, '拖动');
   const moved = await boxOf(page, target.id);
   assert.ok(
@@ -511,6 +727,24 @@ async function checkEditing(page) {
   const afterMove = await capture(page, 'smoke-5-moved');
   const moveChange = await pageDifference(page, pristine, afterMove);
   assert.ok(moveChange > 0.0005, `拖动之后页面的画面没有变（${(moveChange * 100).toFixed(3)}%）`);
+  // 拖到一半的时候，对象腾出来的地方已经空了，和松手之后一样——而不是对象还留在原处、只多一个虚线框。
+  // 只比腾出来的那部分（原来的地方减去对象现在占的地方）。
+  const { home, landed, landedInner } = dragRegions(target, dx, dy);
+  const vacated = await pageDifference(page, pristine, midDrag, home, landed);
+  const settledGap = await pageDifference(page, midDrag, afterMove, home, landed);
+  const percent = (value) => `${(value * 100).toFixed(1)}%`;
+  assert.ok(
+    vacated > 0.03,
+    `拖动中途对象还留在原处：腾出来的地方只有 ${percent(vacated)} 的像素变了`,
+  );
+  assert.ok(
+    settledGap < vacated / 4,
+    `拖动中途的画面和松手之后对不上：对象腾出来的地方有 ${percent(settledGap)} 的像素不同（对象离开造成的变化是 ${percent(vacated)}）`,
+  );
+  // 对象在新位置上的像素，预览和最终结果有多少不一样。预览是把渲染好的位图按整像素挪过去，最终结果是
+  // 引擎在新位置重新渲染的：视图的缩放不在瓦片的档位上时，文字和图像边缘的深浅会不一样；对象被别的对象
+  // 压着、或者带混合模式时差得更多（V04 报告第 4 节）。只记下来，不作判定。
+  const previewMismatch = await pageDifference(page, midDrag, afterMove, landedInner);
 
   // 微移：来回各一步，量从按键到 doc.changed、到画面重画完的时间
   await page.mouse.click(target.x + dx, target.y + dy);
@@ -533,6 +767,10 @@ async function checkEditing(page) {
     edits: samples.length,
     changedMs: summarize(samples.map((sample) => sample.changed)),
     repaintedMs: summarize(samples.map((sample) => sample.repainted)),
+    // 第一次拖动：从开始拖到两层瓦片到齐
+    previewReadyMs: Math.round(preview.readyMs * 10) / 10,
+    // 对象在新位置上，预览和松手后重新渲染的结果有多大比例的像素不一样
+    previewMismatch: Math.round(previewMismatch * 1000) / 1000,
   };
 
   // 删除
@@ -568,9 +806,18 @@ async function checkEditing(page) {
   return latency;
 }
 
-/** 测试失败时界面是什么样子：存一张截图，返回打开的文档、活动文档的状态和正在显示的提示。 */
+/**
+ * 测试失败时界面是什么样子：存一张截图，把失败之前截的最后几张图也另存一份，
+ * 返回打开的文档、活动文档的状态和正在显示的提示。
+ */
 async function failureEvidence(page) {
-  if (!page) return { unavailable: '还没有连上界面' };
+  // 失败之前截的最后几张图另存一份，文件名前面加 failure-
+  const earlier = recentShots.map((shot) => {
+    const path = join(outDir, `failure-${shot.name}.png`);
+    writeFileSync(path, Buffer.from(shot.base64, 'base64'));
+    return basename(path);
+  });
+  if (!page) return { unavailable: '还没有连上界面', earlier };
   const screenshot = join(outDir, 'smoke-failure.png');
   writeFileSync(screenshot, await page.screenshot({ scale: 'css' }));
   const seen = await page.evaluate(() => {
@@ -591,7 +838,7 @@ async function failureEvidence(page) {
       banner: document.querySelector('.mg-doc-banner')?.textContent ?? null,
     };
   });
-  return { screenshot, ...seen };
+  return { screenshot, earlier, ...seen };
 }
 
 async function main() {
@@ -649,6 +896,29 @@ async function main() {
     assert.deepEqual(await page.locator('.mg-doc-tab-title').allTextContents(), names);
     let completed = await tilesSettled(page, 1);
     result.firstPaintMs = Math.round(performance.now() - launched);
+    if (windowSize) {
+      // 首屏量完之后再改窗口大小，免得把起 PowerShell 的时间算进去
+      resizeWindow(app.pid, windowSize);
+      await page.waitForFunction(
+        (width) => Math.abs(window.innerWidth * window.devicePixelRatio - width) <= 48,
+        windowSize.width,
+        { timeout: 10_000 },
+      );
+      result.window = await page.evaluate(() => [window.innerWidth, window.innerHeight]);
+      completed = await tilesSettled(page, completed);
+    }
+    // 画布的 WebGL 跑在哪块显卡上（也可能是软件渲染）、屏幕的缩放：帧时间要对着这些看。
+    // 画布有多大记在 drag 一项里（量帧间隔的那一刻）。
+    result.display = await page.evaluate(() => {
+      const gl = document
+        .createElement('canvas')
+        .getContext('webgl2', { powerPreference: 'high-performance' });
+      const info = gl?.getExtension('WEBGL_debug_renderer_info');
+      return {
+        gpu: gl && info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : null,
+        devicePixelRatio: window.devicePixelRatio,
+      };
+    });
     assert.equal((await documentState(page)).name, names[1]);
     assertPageIsDrawn(await inspectPage(page, 'smoke-1-opened'), '打开之后');
     assert.equal(await page.locator('.mg-canvas-message').count(), 0, '画布上不该有提示层');
@@ -698,6 +968,11 @@ async function main() {
 
     // 5. 修改：切到能改的那一份
     await activate(page, editPdf);
+    if (windowSize) {
+      // 窗口改过大小：这一份也按新的画布重新“适合页面”，页面有多大就画多大
+      await page.keyboard.press('Control+0');
+      await tilesSettled(page, 1);
+    }
     const editable = await fidelityOfFirstPage(page, editPdf);
     assert.equal(
       editable.status,
@@ -705,6 +980,8 @@ async function main() {
       `${names[0]} 的第 1 页在这个 PDFium 构建下不能修改（引擎给的原因：${editable.reason}），用 MAGPDF_E2E_EDIT_PDF 换一份`,
     );
     result.edit = await checkEditing(page);
+    // 文档已经撤销回原样：再按住同一个对象拖一阵（默认两秒），量帧间隔
+    result.drag = await measureDrag(page);
 
     // 6. 关掉标签页，文档从界面上消失
     for (let left = 2; left > 0; left--) {
