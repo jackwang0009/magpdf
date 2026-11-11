@@ -9,7 +9,7 @@ import {
 } from '../document/pageSpace';
 import type { Matrix } from '../document/pageSpace';
 import type { DocumentSnapshot, PageSnapshot } from '../document/types';
-import { MM_PER_INCH, PT_PER_INCH, translateRect, unionRects } from '../geometry';
+import { MM_PER_INCH, PT_PER_INCH, intersectRect, translateRect, unionRects } from '../geometry';
 import type { Point, Rect, Size } from '../geometry';
 import { format, t } from '../i18n';
 import { findObject } from '../store/editorStore';
@@ -21,6 +21,7 @@ import type {
   ToolEffect,
   ToolPointerEvent,
 } from '../tools/machine';
+import { mapRectBetween } from '../tools/handles';
 import { hasFrozenObject } from '../tools/machine';
 import type { CommandId } from '../tools/shortcuts';
 import { isTextInputTarget } from '../tools/shortcuts';
@@ -38,20 +39,24 @@ import {
   screenToDoc,
   scrollToPageTop,
   viewEquals,
+  visibleDocRect,
   zoomAt,
 } from '../view/viewState';
 import type { ViewState } from '../view/viewState';
+import { DragLayers, layerTileSpecs } from './dragLayers';
 import { FrameStats, formatMs } from './frameStats';
 import { GlTileRenderer, parseCssColor } from './glRenderer';
 import { MockTileProvider } from './mockTileProvider';
 import { drawOverlay } from './overlay';
 import type { OverlayScene } from './overlay';
 import { computeRenderPlan } from './renderPlan';
+import type { RenderPlan, TileRequestSpec } from './renderPlan';
 import { TileCache } from './tileCache';
 import type { TileEntry } from './tileCache';
 import type { TileProvider } from './tileProvider';
 import { releasePixels } from './tileProvider';
 import { TileScheduler } from './tileScheduler';
+import { levelPxPerPt } from './tiles';
 
 /**
  * 画布控制器：把 store、瓦片调度、WebGL 合成、叠加层和工具状态机接在一起。
@@ -77,6 +82,30 @@ const WHEEL_ZOOM_SENSITIVITY = 1 / 400;
 const STATS_PUSH_INTERVAL = 500;
 const FRAME_GAP_RESET = 100;
 const SCROLLBAR_THICKNESS = 6;
+
+// ---- 拖动预览（方案 3.2）----
+/** 对象层四周多渲染的一圈（设备像素）：描边和抗锯齿会略微超出包围盒 */
+const LAYER_MARGIN_PX = 4;
+/** 对象层最多用几块瓦片。对象比视口大很多时只取视口周围的部分；还是超过就不做分层预览 */
+const MAX_OBJECT_TILES = 128;
+/** 一次最多拖几个对象还做分层预览：对象的编号要随每一批瓦片请求发给引擎 */
+const MAX_LAYER_OBJECTS = 500;
+/** 松手之后预览最多留多久（ms）。正常情况下这一页的新瓦片几十毫秒就到齐 */
+const HOLD_LIMIT_MS = 1500;
+/** 松手之后对象应该在的位置和快照里的差多少算对不上（pt） */
+const HOLD_TOLERANCE_PT = 0.5;
+
+/** 一次拖动预览的情况，测量和端到端测试用。 */
+export interface DragPreviewInfo {
+  /** 两层的瓦片到齐了，画布正在用分层的画法 */
+  readonly ready: boolean;
+  /** 从开始拖到两层到齐用了多久（ms）；还没到齐是 null */
+  readonly readyMs: number | null;
+  readonly baseTiles: number;
+  readonly objectTiles: number;
+  /** 已经松手，预览还留着等新瓦片 */
+  readonly held: boolean;
+}
 
 /** 文档 id → 控制器，供快捷键分发和基准脚本查找 */
 export const canvasRegistry = new Map<string, CanvasController>();
@@ -116,6 +145,23 @@ export class CanvasController {
   /** 上一次从 store 同步过来的选区，用来判断是否要丢掉工具内部的选区覆盖值 */
   private knownSelection: readonly string[] | null = null;
   private pendingVisibleTiles = 0;
+  /** 拖动预览的两层瓦片。没有在拖，或者这一次拖动用不了分层预览时是 null */
+  private dragLayers: DragLayers | null = null;
+  /** 对象层渲染时被拖对象的外框（文档坐标），和现在该把它画到哪里 */
+  private dragFrom: Rect | null = null;
+  private dragTo: Rect | null = null;
+  /** 已经松手：预览留着，等这一页的新瓦片到齐再撤 */
+  private dragHeld: {
+    /** 松手那一刻这一页的修订号 */
+    readonly revision: number | undefined;
+    readonly deadline: number;
+    /** 修改生效的话，各个对象应该在的位置（文档坐标） */
+    readonly expected: ReadonlyMap<string, Rect>;
+  } | null = null;
+  /** 这一次拖动试过分层预览而用不了（对象跨页、瓦片渲染失败），拖动结束前不再试 */
+  private dragGaveUp: readonly string[] | null = null;
+  /** 最近结束的一次拖动预览 */
+  private lastDrag: DragPreviewInfo | null = null;
   private disposed = false;
 
   constructor(options: CanvasControllerOptions) {
@@ -187,6 +233,8 @@ export class CanvasController {
     this.detachEvents();
     this.resizeObserver?.disconnect();
     this.unsubscribe();
+    this.dragLayers?.dispose();
+    this.dragLayers = null;
     this.scheduler.dispose();
     this.cache.clear();
     if (this.ownsProvider) this.provider.dispose?.();
@@ -217,6 +265,16 @@ export class CanvasController {
    */
   get upToDate(): boolean {
     return this.frameHandle === null && this.pendingVisibleTiles === 0;
+  }
+
+  /** 正在进行的拖动预览（方案 3.2）；没有时是 null。 */
+  get dragPreview(): DragPreviewInfo | null {
+    return this.dragLayers ? this.describeDrag(this.dragLayers) : null;
+  }
+
+  /** 最近结束的一次拖动预览；还没有过是 null。 */
+  get lastDragPreview(): DragPreviewInfo | null {
+    return this.lastDrag;
   }
 
   get hasWebGL(): boolean {
@@ -504,6 +562,7 @@ export class CanvasController {
       },
       isFresh: (id) => this.cache.isFresh(id),
     });
+    this.syncDragLayers(plan, now);
 
     if (this.renderer && !this.renderer.isLost) {
       const r = this.renderer;
@@ -521,11 +580,14 @@ export class CanvasController {
           entry.texture as WebGLTexture,
         );
       }
+      this.drawDragLayers(r, view, scale);
       r.endFrame();
     }
 
     this.scheduler.setWanted([...plan.missing, ...plan.prefetch], doc.snapshot.version);
     this.pendingVisibleTiles = plan.missing.length;
+    // 松手之后预览还留着：每一帧都要看新瓦片到齐了没有
+    if (this.dragHeld) this.invalidate();
 
     this.drawOverlayLayer(
       doc.selection,
@@ -548,14 +610,21 @@ export class CanvasController {
     if (!ctx) return;
     const view = this.view;
     const state = this.store.getState();
-    const selectedRects: Rect[] = [];
-    for (const id of selection) {
-      const ref = this.objectById(id);
-      if (ref) selectedRects.push(docRectToScreen(view, ref.docRect));
-    }
-    const preview = this.overlay?.preview
+    const dragged = this.overlay?.preview
       ? Array.from(this.overlay.preview.values(), (r) => docRectToScreen(view, r))
       : [];
+    // 分层预览在用的时候，对象本身已经跟着鼠标走了：选框也跟过去（不带控制点），不再画虚线框
+    const layered = dragged.length > 0 && this.dragLayers?.ready === true && !this.dragHeld;
+    const selectedRects: Rect[] = [];
+    if (layered) {
+      selectedRects.push(...dragged);
+    } else {
+      for (const id of selection) {
+        const ref = this.objectById(id);
+        if (ref) selectedRects.push(docRectToScreen(view, ref.docRect));
+      }
+    }
+    const preview = layered ? [] : dragged;
     const selectionBox = selectedRects.length ? unionRects(selectedRects) : null;
     const hoverRect = this.hoverRect(view, selection);
     const current = this.currentPage ?? 0;
@@ -575,13 +644,15 @@ export class CanvasController {
       hover: hoverRect,
       selected: selectedRects,
       selectionBox,
-      handles: !hasFrozenObject(
-        {
-          pages: this.document?.snapshot.pages ?? [],
-          objectById: (id) => this.objectById(id),
-        },
-        selection,
-      ),
+      handles:
+        !layered &&
+        !hasFrozenObject(
+          {
+            pages: this.document?.snapshot.pages ?? [],
+            objectById: (id) => this.objectById(id),
+          },
+          selection,
+        ),
       marquee: this.overlay?.marquee ?? null,
       zoomRect: this.overlay?.zoomRect ?? null,
       preview,
@@ -783,6 +854,244 @@ export class CanvasController {
     if (this.tools.effective === 'hand') this.fitPage();
   };
 
+  // ---------- 拖动预览（方案 3.2） ----------
+  //
+  // 拖动（或拖控制点缩放）一开始，向瓦片来源要两层：去掉被拖对象的底图，和只有被拖对象的透明图层。
+  // 两层到齐之前照旧画虚线框；到齐之后每一帧只是把对象层挪到（或缩放到）新的位置叠在底图上，
+  // 不再向引擎要任何东西。松手后预览留着，等这一页重画好的瓦片到齐再撤，中间不会闪回原来的位置。
+
+  /** 每一帧开头：按工具的拖动状态起、停两层瓦片。 */
+  private syncDragLayers(plan: RenderPlan, now: number): void {
+    const preview = this.overlay?.preview;
+    const ids = preview ? [...preview.keys()] : [];
+    let layers = this.dragLayers;
+
+    // 松手之后留着的预览：新瓦片到齐了（或者等不到了）就撤；这时又拖起别的来也撤
+    if (layers && this.dragHeld) {
+      if (!preview && !this.dragSettled(layers, plan, now)) return;
+      this.endDragLayers();
+      layers = null;
+    }
+    // 拖动中：取消了、换了对象、缩放档变了、有瓦片没渲染出来
+    if (
+      layers &&
+      (!preview ||
+        !sameIds(layers.objects, ids) ||
+        layers.level !== plan.targetLevel ||
+        layers.failed ||
+        this.renderer?.isLost)
+    ) {
+      // 渲染不出来的话这一次拖动不再试；缩放档变了则按新的档位重新来
+      if (preview && layers.failed) this.dragGaveUp = ids;
+      this.endDragLayers();
+      layers = null;
+    }
+    if (!preview) {
+      this.dragGaveUp = null;
+      return;
+    }
+    if (!layers) {
+      if (this.dragGaveUp && sameIds(this.dragGaveUp, ids)) return;
+      layers = this.startDragLayers(preview, plan);
+      if (!layers) {
+        this.dragGaveUp = ids;
+        return;
+      }
+    }
+    this.dragTo = unionRects([...preview.values()]);
+    // 拖动途中视口挪了（滚轮）：这一页新露出来的部分补要底图
+    layers.requestBase(this.visibleLayerSpecs(layers.page, layers.level));
+  }
+
+  /** 起两层瓦片。这一次拖动做不了分层预览时返回 null，画布照旧画虚线框。 */
+  private startDragLayers(preview: ReadonlyMap<string, Rect>, plan: RenderPlan): DragLayers | null {
+    const doc = this.document;
+    const renderer = this.renderer;
+    // 只对交给修改入口的文档（引擎打开的）做；瓦片来源要能按层渲染
+    if (!doc || !this.editor || !this.provider.layers || !renderer || renderer.isLost) return null;
+    const ids = [...preview.keys()];
+    if (ids.length === 0 || ids.length > MAX_LAYER_OBJECTS) return null;
+    const refs: ObjectRef[] = [];
+    for (const id of ids) {
+      const ref = this.objectById(id);
+      if (!ref) return null;
+      refs.push(ref);
+    }
+    // 两层是按页渲染的：选区跨页时不做
+    const page = refs[0]!.page;
+    if (refs.some((ref) => ref.page !== page)) return null;
+    const from = unionRects(refs.map((ref) => ref.docRect));
+    if (!from) return null;
+    const level = plan.targetLevel;
+    const baseSpecs = this.visibleLayerSpecs(page, level);
+    // 对象层盖住对象现在所在的地方，四周多留一圈。对象比视口大很多时只取视口周围各一个视口的范围：
+    // 拖动中够得着的基本就是这些
+    const margin = LAYER_MARGIN_PX / levelPxPerPt(level);
+    const visible = visibleDocRect(this.view, this.viewport);
+    const reach: Rect = {
+      x: visible.x - visible.width,
+      y: visible.y - visible.height,
+      width: visible.width * 3,
+      height: visible.height * 3,
+    };
+    const region = intersectRect(
+      {
+        x: from.x - margin,
+        y: from.y - margin,
+        width: from.width + 2 * margin,
+        height: from.height + 2 * margin,
+      },
+      reach,
+    );
+    if (!region) return null;
+    const pageRect = this.layout.pageRect(page);
+    const objectSpecs = layerTileSpecs(
+      this.layout.pageSize(page),
+      page,
+      level,
+      translateRect(region, -pageRect.x, -pageRect.y),
+    );
+    if (baseSpecs.length === 0 || objectSpecs.length === 0) return null;
+    if (objectSpecs.length > MAX_OBJECT_TILES) return null;
+
+    const layers = new DragLayers({
+      provider: this.provider,
+      page,
+      level,
+      objects: ids,
+      documentVersion: doc.snapshot.version,
+      upload: (pixels, width, height) => renderer.uploadTexture(pixels, width, height),
+      release: (texture) => renderer.deleteTexture(texture),
+      onChange: () => this.invalidate(),
+    });
+    layers.requestBase(baseSpecs);
+    layers.requestObjects(objectSpecs);
+    this.dragLayers = layers;
+    this.dragFrom = from;
+    this.dragTo = from;
+    this.dragHeld = null;
+    return layers;
+  }
+
+  /** 一页在视口里的那部分，在 `level` 档位下的瓦片。 */
+  private visibleLayerSpecs(page: number, level: number): TileRequestSpec[] {
+    const pageRect = this.layout.pageRect(page);
+    const visible = intersectRect(visibleDocRect(this.view, this.viewport), pageRect);
+    if (!visible) return [];
+    return layerTileSpecs(
+      this.layout.pageSize(page),
+      page,
+      level,
+      translateRect(visible, -pageRect.x, -pageRect.y),
+    );
+  }
+
+  /** 两层到齐之后：底图盖在这一页平常的瓦片上面，对象层画在被拖到的位置。 */
+  private drawDragLayers(r: GlTileRenderer, view: ViewState, scale: number): void {
+    const layers = this.dragLayers;
+    const from = this.dragFrom;
+    const to = this.dragTo;
+    if (!layers?.ready || !from || !to) return;
+    const pageRect = this.layout.pageRect(layers.page);
+    const toDoc = (tile: Rect) => translateRect(tile, pageRect.x, pageRect.y);
+    for (const tile of layers.base()) {
+      r.drawQuad(
+        tileDeviceRect(toDoc(tile.pageRect), pageRect, view, scale),
+        tile.texture as WebGLTexture,
+      );
+    }
+    const resized =
+      Math.abs(to.width - from.width) > 1e-6 || Math.abs(to.height - from.height) > 1e-6;
+    // 只是挪动：偏移取整到设备像素，对象层和渲染出来时一样清楚
+    const dx = Math.round((to.x - from.x) * scale);
+    const dy = Math.round((to.y - from.y) * scale);
+    for (const tile of layers.objectLayer()) {
+      const docRect = toDoc(tile.pageRect);
+      if (resized) {
+        // 缩放：把这块瓦片按“原来的外框 → 现在的外框”拉伸。相邻瓦片共用一条边，不各自取整，免得出缝
+        const mapped = mapRectBetween(docRect, from, to);
+        r.drawQuad(
+          {
+            x: (mapped.x - view.x) * scale,
+            y: (mapped.y - view.y) * scale,
+            width: mapped.width * scale,
+            height: mapped.height * scale,
+          },
+          tile.texture as WebGLTexture,
+        );
+      } else {
+        const rect = tileDeviceRect(docRect, pageRect, view, scale);
+        r.drawQuad({ ...rect, x: rect.x + dx, y: rect.y + dy }, tile.texture as WebGLTexture);
+      }
+    }
+  }
+
+  /**
+   * 松手了，修改正要交给修改入口。预览已经在用的话留着它，`to` 是被拖对象最后的外框；
+   * 还没准备好就不留了（之后到的瓦片可能是修改之后渲染的，位置对不上）。
+   */
+  private holdDragLayers(ids: readonly string[], to: Rect): void {
+    const layers = this.dragLayers;
+    const from = this.dragFrom;
+    if (!layers) return;
+    // 上一次松手留下的预览还在，这又来了一次修改（比如紧接着按方向键）：那份预览已经对不上了
+    if (this.dragHeld || !layers.ready || !from || !sameIds(layers.objects, ids)) {
+      this.endDragLayers();
+      return;
+    }
+    const expected = new Map<string, Rect>();
+    for (const id of ids) {
+      const ref = this.objectById(id);
+      if (ref) expected.set(id, mapRectBetween(ref.docRect, from, to));
+    }
+    this.dragTo = to;
+    this.dragHeld = {
+      revision: this.document?.snapshot.pages[layers.page]?.revision,
+      deadline: performance.now() + HOLD_LIMIT_MS,
+      expected,
+    };
+  }
+
+  /** 松手之后留着的预览可以撤了吗。 */
+  private dragSettled(layers: DragLayers, plan: RenderPlan, now: number): boolean {
+    const held = this.dragHeld;
+    if (!held || layers.failed || now > held.deadline) return true;
+    // 对象不在该在的位置上：修改被拒绝了、撤回了，或者引擎给的结果不一样
+    for (const [id, expected] of held.expected) {
+      const ref = this.objectById(id);
+      if (!ref || !rectsClose(ref.docRect, expected, HOLD_TOLERANCE_PT)) return true;
+    }
+    // 这一页重画过了，而且视口里它的瓦片都换成了新的
+    const page = this.document?.snapshot.pages[layers.page];
+    return (
+      page?.revision !== held.revision &&
+      !plan.missing.some((spec) => spec.key.page === layers.page)
+    );
+  }
+
+  private endDragLayers(): void {
+    const layers = this.dragLayers;
+    if (!layers) return;
+    this.lastDrag = this.describeDrag(layers);
+    layers.dispose();
+    this.dragLayers = null;
+    this.dragFrom = null;
+    this.dragTo = null;
+    this.dragHeld = null;
+    this.invalidate();
+  }
+
+  private describeDrag(layers: DragLayers): DragPreviewInfo {
+    const counts = layers.counts;
+    return {
+      ready: layers.ready,
+      readyMs: layers.readyMs,
+      baseTiles: counts.base,
+      objectTiles: counts.objects,
+      held: this.dragHeld !== null,
+    };
+  }
+
   // ---------- 工具上下文与副作用 ----------
 
   private toolContext(): ToolContext {
@@ -864,6 +1173,10 @@ export class CanvasController {
           break;
         case 'moveObjects':
           if (this.editor) {
+            // 拖动预览在用的话留着它，等重画好的瓦片到齐（要赶在快照被改之前记下预期的位置）
+            if (this.dragFrom) {
+              this.holdDragLayers(effect.ids, translateRect(this.dragFrom, effect.dx, effect.dy));
+            }
             this.transformViaEditor(
               this.editor,
               effect.ids,
@@ -875,11 +1188,9 @@ export class CanvasController {
           break;
         case 'resizeObjects': {
           if (this.editor) {
-            this.transformViaEditor(
-              this.editor,
-              [...effect.rects.keys()],
-              rectToRectMatrix(effect.from, effect.to),
-            );
+            const ids = [...effect.rects.keys()];
+            this.holdDragLayers(ids, effect.to);
+            this.transformViaEditor(this.editor, ids, rectToRectMatrix(effect.from, effect.to));
             break;
           }
           const local = new Map<string, Rect>();
@@ -948,6 +1259,21 @@ function pagesResized(a: DocumentSnapshot, b: DocumentSnapshot): boolean {
     if (pa.width !== pb.width || pa.height !== pb.height) return true;
   }
   return false;
+}
+
+/** 两组对象 id 是不是同一组（顺序也一样）。 */
+function sameIds(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((id, i) => id === b[i]);
+}
+
+/** 两个矩形的四条边都相差不超过 `tolerance`。 */
+function rectsClose(a: Rect, b: Rect, tolerance: number): boolean {
+  return (
+    Math.abs(a.x - b.x) <= tolerance &&
+    Math.abs(a.y - b.y) <= tolerance &&
+    Math.abs(a.x + a.width - (b.x + b.width)) <= tolerance &&
+    Math.abs(a.y + a.height - (b.y + b.height)) <= tolerance
+  );
 }
 
 /** 文档矩形 → 设备像素矩形 */

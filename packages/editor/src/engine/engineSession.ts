@@ -33,6 +33,7 @@ import { format, t } from '../i18n';
 import type { EditorHost, HostNotice } from '../shell/editorHost';
 import type { EditorStore } from '../store/editorStore';
 import { EngineTileProvider } from './engineTileProvider';
+import { engineIds, objectId, pageOfObject } from './objectIds';
 import { describeError, isEngineRestarted, isRpcError } from './transport';
 import type { EngineEvent, EngineTransport } from './transport';
 
@@ -695,27 +696,6 @@ const OBJECT_TYPES: Record<ObjectKind, ObjectType> = {
   form: 'form',
   unknown: 'other',
 };
-
-/** 界面里的对象 id：页序号加引擎的对象编号。带页序号是为了按 id 找对象时不用逐页找。 */
-function objectId(page: number, engineId: number): string {
-  return `p${page}-${engineId}`;
-}
-
-/** 对象 id 里的页序号；不是引擎对象的 id 时返回 null。 */
-function pageOfObject(id: string): number | null {
-  const match = /^p(\d+)-\d+$/.exec(id);
-  return match ? Number(match[1]) : null;
-}
-
-/** 这些对象在引擎里的编号；不是引擎对象的 id 略过。 */
-function engineIds(ids: readonly string[]): number[] {
-  const out: number[] = [];
-  for (const id of ids) {
-    const match = /^p\d+-(\d+)$/.exec(id);
-    if (match) out.push(Number(match[1]));
-  }
-  return out;
-}
 
 /** 引擎的对象摘要换成界面的对象：包围盒从 PDF 用户空间换到页面坐标。 */
 function toPageObject(page: number, summary: ObjectSummary, display: Matrix): PageObject {

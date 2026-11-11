@@ -7,8 +7,21 @@ import type { Rect } from '../geometry';
  * - `pxPerPt` 是渲染分辨率（设备像素 / pt），等价于 dpi = pxPerPt × 72。
  * - 返回的位图尺寸必须等于 `pixelRect` 的宽高；边缘瓦片比 `tileSize` 小。
  * - 请求可能被 `signal` 取消（视图已经移走），实现应尽早放弃并以 AbortError 拒绝。
- * - 像素为不透明 RGBA；Uint8Array 形式按行主序、无行填充。
+ * - 像素为不透明 RGBA；Uint8Array 形式按行主序、无行填充。只有对象层（`layer.mode` 为 `only`）带透明度，
+ *   颜色分量要预乘好。
  */
+
+/**
+ * 分层渲染里的一层（拖动预览，方案 3.2）：拖动开始时把页面分成“去掉被拖对象的底图”和“只有被拖对象的
+ * 透明图层”，拖动过程中界面只挪动后者。
+ */
+export interface TileLayer {
+  /** `without`：去掉这些对象的底图；`only`：只有这些对象，别处全透明 */
+  readonly mode: 'without' | 'only';
+  /** 对象 id（文档快照里的），都在这一页上 */
+  readonly objects: readonly string[];
+}
+
 export interface TileRequest {
   readonly page: number;
   /** 缩放档索引（见 tiles.ts 的 TILE_LEVELS） */
@@ -23,6 +36,8 @@ export interface TileRequest {
   readonly pageRect: Rect;
   /** 发出请求时的文档版本；结果回来时版本已变则丢弃 */
   readonly documentVersion: number;
+  /** 只画页面的一层；省略时画整页。只有 `layers` 为 true 的来源才会收到带它的请求。 */
+  readonly layer?: TileLayer;
   readonly signal: AbortSignal;
 }
 
@@ -47,6 +62,8 @@ export interface TileProvider {
    * 让排队发生在界面侧，这样视图移动后还能按新优先级重排；未提供时调度器用默认值。
    */
   readonly concurrency?: number;
+  /** 能不能按层渲染（`TileRequest.layer`）。不能的话画布不做分层的拖动预览，拖动时只画虚线框。 */
+  readonly layers?: boolean;
   dispose?(): void;
 }
 

@@ -331,3 +331,103 @@ describe('EngineTileProvider', () => {
     ).rejects.toSatisfy(isAbortError);
   });
 });
+
+describe('EngineTileProvider：分层渲染（拖动预览，方案 3.2）', () => {
+  const rect = { x: 0, y: 0, width: 256, height: 256 };
+
+  /** 一块半透明的引擎瓦片：没有预乘的 BGRA，左半边一半透明，右半边全透明，第一行不透明 */
+  function translucentTile(): Uint8Array {
+    const pixels = new Uint8Array(ENGINE_TILE_SIZE * ENGINE_TILE_SIZE * 4);
+    for (let y = 0; y < ENGINE_TILE_SIZE; y++) {
+      for (let x = 0; x < ENGINE_TILE_SIZE; x++) {
+        const i = (y * ENGINE_TILE_SIZE + x) * 4;
+        // BGRA：蓝 10，绿 100，红 200
+        pixels.set([10, 100, 200, y === 0 ? 255 : x < 128 ? 128 : 0], i);
+      }
+    }
+    return pixels;
+  }
+
+  it('能按层渲染；请求里带上层的画法和对象在引擎里的编号', async () => {
+    const transport = new FakeTransport();
+    transport.renderWith(() => engineTile());
+    const tiles = provider(transport);
+    expect(tiles.layers).toBe(true);
+
+    await tiles.renderTile(
+      tileRequest(rect, { layer: { mode: 'without', objects: ['p0-12', 'p0-7'] } }),
+    );
+    await tiles.renderTile(tileRequest(rect, { layer: { mode: 'only', objects: ['p0-12'] } }));
+    await tiles.renderTile(tileRequest(rect));
+    expect(
+      transport.sent<RenderTilesParams>(METHOD.RENDER_TILES).map((params) => params.layer),
+    ).toEqual([
+      { mode: 'without', objectIds: [12, 7] },
+      { mode: 'only', objectIds: [12] },
+      // 整页的瓦片不带这个参数
+      undefined,
+    ]);
+  });
+
+  it('同一个位置上，整页的瓦片和各层的瓦片各渲染各的；同一层的几块画布瓦片仍然共用一次渲染', async () => {
+    const transport = new FakeTransport();
+    transport.renderWith(() => engineTile());
+    const tiles = provider(transport);
+    const base = { mode: 'without', objects: ['p0-3'] } as const;
+    const only = { mode: 'only', objects: ['p0-3'] } as const;
+    const neighbour = { x: 256, y: 0, width: 256, height: 256 };
+
+    await Promise.all([
+      tiles.renderTile(tileRequest(rect)),
+      tiles.renderTile(tileRequest(rect, { layer: base })),
+      tiles.renderTile(tileRequest(neighbour, { layer: base })),
+      tiles.renderTile(tileRequest(rect, { layer: only })),
+      tiles.renderTile(tileRequest(neighbour, { layer: only })),
+      // 换一个对象就是另一层
+      tiles.renderTile(tileRequest(rect, { layer: { mode: 'only', objects: ['p0-4'] } })),
+    ]);
+    expect(transport.sent(METHOD.RENDER_TILES)).toHaveLength(4);
+    expect(tiles.stats.reused).toBe(2);
+  });
+
+  it('对象层的像素预乘透明度；底图和整页的瓦片原样', async () => {
+    const transport = new FakeTransport();
+    transport.renderWith(() => translucentTile());
+    const tiles = provider(transport);
+
+    const only = await tiles.renderTile(
+      tileRequest(rect, { layer: { mode: 'only', objects: ['p0-3'] } }),
+    );
+    const pixels = only.pixels as RawPixels;
+    // 不透明的像素不变（换成 RGBA）
+    expect(rgbaAt(pixels, 5, 0)).toEqual([200, 100, 10, 255]);
+    // 一半透明：颜色分量乘上 128/255，四舍五入
+    expect(rgbaAt(pixels, 5, 1)).toEqual([100, 50, 5, 128]);
+    // 全透明：颜色分量是 0，合成时不会给底下加颜色
+    expect(rgbaAt(pixels, 200, 1)).toEqual([0, 0, 0, 0]);
+
+    const base = await tiles.renderTile(
+      tileRequest(rect, { layer: { mode: 'without', objects: ['p0-3'] } }),
+    );
+    expect(rgbaAt(base.pixels as RawPixels, 5, 1)).toEqual([200, 100, 10, 128]);
+  });
+
+  it('预乘和不预乘的换算，逐个值核对', () => {
+    const source = new Uint8Array(ENGINE_TILE_SIZE * ENGINE_TILE_SIZE * 4);
+    // 第一行前四个像素：BGRA
+    source.set([255, 255, 255, 255, 255, 255, 255, 1, 255, 0, 51, 254, 30, 20, 10, 0]);
+    const first = { x: 0, y: 0, width: 4, height: 1 };
+    expect(Array.from(cropBgraToRgba(source, { x: 0, y: 0 }, first, true))).toEqual([
+      ...[255, 255, 255, 255],
+      ...[1, 1, 1, 1],
+      ...[51, 0, 254, 254],
+      ...[0, 0, 0, 0],
+    ]);
+    expect(Array.from(cropBgraToRgba(source, { x: 0, y: 0 }, first))).toEqual([
+      ...[255, 255, 255, 255],
+      ...[255, 255, 255, 1],
+      ...[51, 0, 255, 254],
+      ...[10, 20, 30, 0],
+    ]);
+  });
+});

@@ -1,8 +1,9 @@
 import { EVENT, METHOD } from '@magpdf/protocol';
 import type { DocChanged, RenderTilesParams, RenderTilesResult, TileReady } from '@magpdf/protocol';
 import { AbortError } from '../canvas/tileProvider';
-import type { TileProvider, TileRequest, TileResult } from '../canvas/tileProvider';
+import type { TileLayer, TileProvider, TileRequest, TileResult } from '../canvas/tileProvider';
 import type { Rect } from '../geometry';
+import { engineIds } from './objectIds';
 import { TileGoneError, describeError, isEngineRestarted } from './transport';
 import type { EngineEvent, EngineTransport } from './transport';
 
@@ -27,7 +28,10 @@ export interface EngineTileProviderOptions {
   readonly target: (page: number) => EngineTileTarget | null;
   /** 等 `render.tileReady` 的上限（ms），默认 30 秒。渲染失败时引擎不会发任何消息，只能靠它。 */
   readonly timeoutMs?: number;
-  /** 最多留几块引擎瓦片的像素（每块 1 MB），默认 12。 */
+  /**
+   * 最多留几块引擎瓦片的像素（每块 1 MB），默认 24。拖动预览开始时一次要两层瓦片（底图和对象层），
+   * 留得太少的话，共用同一块引擎瓦片的几块画布瓦片会各渲染一次。
+   */
   readonly cacheTiles?: number;
 }
 
@@ -43,6 +47,9 @@ interface Waiter {
  * 画布的瓦片是 256 像素见方，引擎的是 512（见 `tiles.ts` 开头的说明）。这里把画布要的每一块对到盖住它的
  * 那块引擎瓦片上：`render.tiles` 请求渲染，等 `render.tileReady`，经 `magpdf://tile/…` 取回像素，再裁出
  * 画布要的那一块，同时把 BGRA 换成 RGBA。一块引擎瓦片最多被四块画布瓦片用到，所以取回的像素先留一会儿。
+ *
+ * 分层渲染（拖动预览，方案 3.2）走的是同一条路，`render.tiles` 多带一个 `layer`。对象层的像素引擎给的
+ * 是没有预乘的，裁的时候顺手预乘。
  */
 export class EngineTileProvider implements TileProvider {
   /**
@@ -50,6 +57,7 @@ export class EngineTileProvider implements TileProvider {
    * 给 4 才能让它们一起等同一次渲染。
    */
   readonly concurrency = 4;
+  readonly layers = true;
   /** 统计：取回的引擎瓦片数、因槽位被占而重试的次数、用上已取回像素的次数 */
   readonly stats = { engineTiles: 0, retries: 0, reused: 0 };
 
@@ -69,7 +77,7 @@ export class EngineTileProvider implements TileProvider {
     this.transport = options.transport;
     this.target = options.target;
     this.timeoutMs = options.timeoutMs ?? 30_000;
-    this.capacity = Math.max(1, options.cacheTiles ?? 12);
+    this.capacity = Math.max(1, options.cacheTiles ?? 24);
     this.unsubscribe = this.transport.onEvent((event) => this.onEvent(event));
   }
 
@@ -78,10 +86,16 @@ export class EngineTileProvider implements TileProvider {
     const origin = engineTileOrigin(request.pixelRect);
     const source = await abortable(this.engineTile(request, origin), request.signal);
     const { width, height } = request.pixelRect;
+    // 只有对象层带透明度
+    const premultiply = request.layer?.mode === 'only';
     return {
       width,
       height,
-      pixels: { data: cropBgraToRgba(source, origin, request.pixelRect), width, height },
+      pixels: {
+        data: cropBgraToRgba(source, origin, request.pixelRect, premultiply),
+        width,
+        height,
+      },
     };
   }
 
@@ -93,7 +107,9 @@ export class EngineTileProvider implements TileProvider {
   }
 
   private engineTile(request: TileRequest, origin: PixelPoint): Promise<Uint8Array> {
-    const key = `${request.page}@${request.pxPerPt}:${origin.x},${origin.y}#${request.documentVersion}`;
+    const layer = request.layer;
+    const which = layer ? `|${layer.mode}:${layer.objects.join(',')}` : '';
+    const key = `${request.page}@${request.pxPerPt}:${origin.x},${origin.y}#${request.documentVersion}${which}`;
     const known = this.tiles.get(key);
     if (known) {
       this.tiles.delete(key);
@@ -101,7 +117,7 @@ export class EngineTileProvider implements TileProvider {
       this.stats.reused++;
       return known;
     }
-    const loading = this.load(request.page, request.pxPerPt, origin);
+    const loading = this.load(request.page, request.pxPerPt, origin, layer);
     this.tiles.set(key, loading);
     // 失败的不留着，下次重新要；这里接住拒绝，免得没人等的时候变成未处理的拒绝
     loading.catch(() => {
@@ -115,7 +131,12 @@ export class EngineTileProvider implements TileProvider {
     return loading;
   }
 
-  private async load(page: number, scale: number, origin: PixelPoint): Promise<Uint8Array> {
+  private async load(
+    page: number,
+    scale: number,
+    origin: PixelPoint,
+    layer: TileLayer | undefined,
+  ): Promise<Uint8Array> {
     for (let attempt = 0; ; attempt++) {
       const target = this.disposed ? null : this.target(page);
       if (!target) throw new AbortError('文档现在不可用');
@@ -127,6 +148,7 @@ export class EngineTileProvider implements TileProvider {
           scale,
           tiles: [origin],
           priority: 'visible',
+          ...(layer ? { layer: { mode: layer.mode, objectIds: engineIds(layer.objects) } } : {}),
         };
         const result = await this.transport.request<RenderTilesResult>(METHOD.RENDER_TILES, params);
         const requestId = result.requestIds[0];
@@ -235,8 +257,15 @@ export function engineTileOrigin(rect: Rect): PixelPoint {
 /**
  * 从一块引擎瓦片（512×512、BGRA）里裁出 `rect`（整页像素坐标）这一块，换成 RGBA。
  * `origin` 是这块引擎瓦片的左上角。
+ *
+ * `premultiply` 为真时把颜色分量乘上透明度：引擎给的对象层是没有预乘的，画布的合成器按预乘的混合。
  */
-export function cropBgraToRgba(source: Uint8Array, origin: PixelPoint, rect: Rect): Uint8Array {
+export function cropBgraToRgba(
+  source: Uint8Array,
+  origin: PixelPoint,
+  rect: Rect,
+  premultiply = false,
+): Uint8Array {
   const left = rect.x - origin.x;
   const top = rect.y - origin.y;
   if (
@@ -252,10 +281,19 @@ export function cropBgraToRgba(source: Uint8Array, origin: PixelPoint, rect: Rec
   for (let y = 0; y < rect.height; y++) {
     let s = ((top + y) * ENGINE_TILE_SIZE + left) * 4;
     for (let x = 0; x < rect.width; x++) {
-      out[o] = source[s + 2]!;
-      out[o + 1] = source[s + 1]!;
-      out[o + 2] = source[s]!;
-      out[o + 3] = source[s + 3]!;
+      const alpha = source[s + 3]!;
+      if (!premultiply || alpha === 255) {
+        out[o] = source[s + 2]!;
+        out[o + 1] = source[s + 1]!;
+        out[o + 2] = source[s]!;
+      } else if (alpha !== 0) {
+        // 四舍五入到最近的整数：(c × a + 127) / 255
+        out[o] = Math.trunc((source[s + 2]! * alpha + 127) / 255);
+        out[o + 1] = Math.trunc((source[s + 1]! * alpha + 127) / 255);
+        out[o + 2] = Math.trunc((source[s]! * alpha + 127) / 255);
+      }
+      // 全透明的像素颜色分量留 0
+      out[o + 3] = alpha;
       o += 4;
       s += 4;
     }
