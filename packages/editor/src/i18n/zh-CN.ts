@@ -268,6 +268,15 @@ export const zhCN = {
     webglUnavailable: 'WebGL2 不可用，无法显示画布',
     label: '画布',
   },
+  host: {
+    noticeTitle: '提示',
+    errorTitle: '出错了',
+    ok: '知道了',
+    openFailed: '这个文件打不开：{reason}',
+    engineRestored: '引擎出了问题，已经自动重新启动，文档也重新载入了。撤销记录已清空。',
+    documentNotRestored: '“{name}”没能重新载入，已经关闭。',
+    engineFailed: '引擎没能重新启动：{reason}。请重新打开 MagPDF。',
+  },
   mock: {
     contractName: '合同.pdf',
     billOfLadingName: '提单.pdf',

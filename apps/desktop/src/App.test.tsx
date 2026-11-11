@@ -1,6 +1,7 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import type { EditorHost } from '@magpdf/editor';
 
 import { App } from './App';
 
@@ -60,6 +61,49 @@ describe('App', () => {
     expect(container.querySelectorAll('.mg-menu')).toHaveLength(8);
     expect(container.querySelector('.mg-options')).not.toBeNull();
     expect(container.querySelector('.mg-status')).not.toBeNull();
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it('接了宿主之后，「打开」交给宿主；打不开时把原因告诉用户', async () => {
+    const openDocument = vi
+      .fn<EditorHost['openDocument']>()
+      .mockRejectedValueOnce({ code: 2002, message: '需要打开密码' })
+      .mockResolvedValue(undefined);
+    const host: EditorHost = {
+      openDocument,
+      tileProvider: () => undefined,
+      onNotice: () => () => undefined,
+    };
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<App host={host} />);
+    });
+
+    const pressOpen = () =>
+      act(async () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'o', ctrlKey: true }));
+      });
+    await pressOpen();
+    expect(openDocument).toHaveBeenCalledTimes(1);
+    const notice = container.querySelector('.mg-notice');
+    expect(notice?.getAttribute('data-kind')).toBe('error');
+    expect(notice?.querySelector('.mg-notice-message')?.textContent).toBe(
+      '这个文件打不开：需要打开密码',
+    );
+
+    await act(async () => {
+      notice?.querySelector('button')?.click();
+    });
+    expect(container.querySelector('.mg-notice')).toBeNull();
+
+    // 第二次打开成功（或者用户取消了）：不弹提示
+    await pressOpen();
+    expect(openDocument).toHaveBeenCalledTimes(2);
+    expect(container.querySelector('.mg-notice')).toBeNull();
     await act(async () => {
       root.unmount();
     });

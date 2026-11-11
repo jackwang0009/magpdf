@@ -684,7 +684,7 @@
   color: var(--mg-text-muted);
 }
 
-/* ---- 基准对话框 ---- */
+/* ---- 对话框（性能基准、提示框共用） ---- */
 .mg-dialog-backdrop {
   position: fixed;
   inset: 0;
@@ -746,6 +746,17 @@
 .mg-bench-table th:first-child,
 .mg-bench-table td:first-child {
   text-align: left;
+}
+
+/* ---- 提示框 ---- */
+.mg-notice {
+  width: 420px;
+}
+.mg-notice-message {
+  margin: 14px 10px 6px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  user-select: text;
 }
 
 /* ---- dockview 主题：颜色映射到 --mg-* 变量，标签高度 28px（方案 8.2） ---- */

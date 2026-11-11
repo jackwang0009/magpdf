@@ -64,6 +64,19 @@ export * from './store/editorStore';
 export * from './workspace/workspaceTypes';
 export * from './workspace/workspaces';
 
+// 接引擎（《接口协议》第 2、3 节）
+export * from './engine/transport';
+export {
+  EngineTileProvider,
+  ENGINE_TILE_SIZE,
+  engineTileOrigin,
+  cropBgraToRgba,
+} from './engine/engineTileProvider';
+export type { EngineTileProviderOptions, EngineTileTarget } from './engine/engineTileProvider';
+export { EngineSession } from './engine/engineSession';
+export type { EngineSessionOptions } from './engine/engineSession';
+
 // 界面外壳
 export { EditorShell } from './shell/EditorShell';
 export type { EditorShellProps } from './shell/EditorShell';
+export type { EditorHost, HostNotice } from './shell/editorHost';

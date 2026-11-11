@@ -8,6 +8,7 @@ import { editorStore } from '../store/editorStore';
 import type { EditorStore } from '../store/editorStore';
 import { TileCanvas } from '../canvas/TileCanvas';
 import { DocumentTab, DocumentsWatermark } from './DocumentTab';
+import { useEditorHost } from './editorHost';
 import { ComponentsPanel, ComponentStrip } from './panels/ComponentsPanel';
 import { LayersPanel } from './panels/LayersPanel';
 import { PagesPanel } from './panels/PagesPanel';
@@ -30,9 +31,16 @@ export interface WorkbenchProps {
   readonly onReady?: (api: DockviewApi) => void;
 }
 
-/** 文档面板：每个文档一个瓦片画布 */
+/** 文档面板：每个文档一个瓦片画布。宿主打开的文档用宿主给的瓦片来源，其余的用模拟来源。 */
 function CanvasPanel(props: IDockviewPanelProps<{ documentId: string }>) {
-  return <TileCanvas documentId={props.params.documentId} store={editorStore} />;
+  const host = useEditorHost();
+  const documentId = props.params.documentId;
+  const provider = host?.tileProvider(documentId);
+  return provider ? (
+    <TileCanvas documentId={documentId} store={editorStore} provider={provider} />
+  ) : (
+    <TileCanvas documentId={documentId} store={editorStore} />
+  );
 }
 
 const Placeholder = ({ name }: { readonly name: string }) => <PlaceholderPanel name={name} />;

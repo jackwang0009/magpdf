@@ -2,6 +2,32 @@ import { useState } from 'react';
 import { t } from '../i18n';
 import type { BenchmarkResult } from '../canvas/benchmark';
 import { formatMs } from '../canvas/frameStats';
+import type { HostNotice } from './editorHost';
+
+export interface NoticeDialogProps {
+  /** 要告诉用户的事；一次显示一条，点“知道了”再显示下一条 */
+  readonly notice: HostNotice | null;
+  readonly onDismiss: () => void;
+}
+
+/** 提示框：文件打不开、引擎重启过之类用户必须知道的事。 */
+export function NoticeDialog({ notice, onDismiss }: NoticeDialogProps) {
+  if (!notice) return null;
+  const title = notice.kind === 'error' ? t.host.errorTitle : t.host.noticeTitle;
+  return (
+    <div className="mg-dialog-backdrop" role="alertdialog" aria-modal="true" aria-label={title}>
+      <div className="mg-dialog mg-notice" data-kind={notice.kind}>
+        <header className="mg-dialog-title">{title}</header>
+        <p className="mg-notice-message">{notice.message}</p>
+        <div className="mg-dialog-actions">
+          <button type="button" onClick={onDismiss} autoFocus>
+            {t.host.ok}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export interface BenchmarkDialogProps {
   readonly result: BenchmarkResult | null;

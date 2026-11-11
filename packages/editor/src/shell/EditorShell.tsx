@@ -5,6 +5,7 @@ import { runBenchmark } from '../canvas/benchmark';
 import type { BenchmarkResult } from '../canvas/benchmark';
 import { canvasRegistry } from '../canvas/canvasController';
 import { createMockDocument } from '../document/mockDocument';
+import { describeError } from '../engine/transport';
 import { format, t } from '../i18n';
 import { editorStore } from '../store/editorStore';
 import type { EditorStore } from '../store/editorStore';
@@ -23,7 +24,9 @@ import {
   saveWorkspace,
 } from '../workspace/workspaces';
 import type { WorkspaceStorage } from '../workspace/workspaces';
-import { BenchmarkDialog } from './Dialogs';
+import { BenchmarkDialog, NoticeDialog } from './Dialogs';
+import { EditorHostContext } from './editorHost';
+import type { EditorHost, HostNotice } from './editorHost';
 import { MenuBar } from './MenuBar';
 import { OptionsBar } from './OptionsBar';
 import { ShellContext } from './shellContext';
@@ -40,6 +43,11 @@ export interface EditorShellProps {
   readonly initialWorkspace?: WorkspaceId;
   /** 是否在挂载时打开示例文档（默认打开「合同.pdf」与「提单.pdf」） */
   readonly demoDocuments?: boolean;
+  /**
+   * 宿主：真实文档从这里打开，瓦片也找它要（桌面应用里是接着引擎的 EngineSession）。
+   * 不给的话「打开」开的是模拟文档。
+   */
+  readonly host?: EditorHost;
 }
 
 function browserStorage(): WorkspaceStorage | null {
@@ -64,6 +72,7 @@ export function EditorShell({
   storage,
   initialWorkspace,
   demoDocuments = true,
+  host,
 }: EditorShellProps) {
   const persist = storage === undefined ? browserStorage() : storage;
   const rootRef = useRef<HTMLDivElement>(null);
@@ -81,6 +90,12 @@ export function EditorShell({
     result: null,
     running: false,
   });
+  /** 等着给用户看的提示，一次显示一条 */
+  const [notices, setNotices] = useState<readonly HostNotice[]>([]);
+  useEffect(() => {
+    if (!host) return undefined;
+    return host.onNotice((notice) => setNotices((pending) => [...pending, notice]));
+  }, [host]);
 
   const doc = useStoreDoc(store);
   const showRulers = useStoreValue(store, (s) => s.showRulers);
@@ -128,6 +143,11 @@ export function EditorShell({
         return runBenchmark(controller, store, frames ? { framesPerPhase: frames } : {});
       },
       store,
+      /** 当前文档的画布控制器：调度器、缓存和瓦片来源的统计都在它上面 */
+      controller: () => {
+        const id = store.getState().activeDocumentId;
+        return id ? (canvasRegistry.get(id) ?? null) : null;
+      },
       documents: () => store.getState().documentOrder,
       selection: () => store.getState().activeDocumentId,
       open: (preset: 'blank' | 'contract' | 'billOfLading' | 'large') => {
@@ -182,7 +202,14 @@ export function EditorShell({
           void startBenchmark();
           return true;
         case 'file.open':
-          openDocument('billOfLading');
+          if (host) {
+            host.openDocument().catch((error: unknown) => {
+              const message = format(t.host.openFailed, { reason: describeError(error) });
+              setNotices((pending) => [...pending, { kind: 'error', message }]);
+            });
+          } else {
+            openDocument('billOfLading');
+          }
           return true;
         case 'file.close':
           closeActiveDocument();
@@ -276,7 +303,7 @@ export function EditorShell({
       openPanel,
       toggleRulers: () => store.getState().toggleRulers(),
     };
-  }, [store, activeController, persist, workspaceId, benchmark.running]);
+  }, [store, activeController, persist, workspaceId, benchmark.running, host]);
 
   // 全局键盘：工具快捷键、视图命令、Space 临时抓手
   useEffect(() => {
@@ -333,35 +360,41 @@ export function EditorShell({
   );
 
   return (
-    <ShellContext.Provider value={commands}>
-      <div
-        className={`mg-shell mg-root${workspace === 'freight' ? ' mg-ws-freight' : ' mg-ws-basic'}`}
-        ref={rootRef}
-      >
-        <MenuBar workspace={workspace} showRulers={showRulers} showFrameStats={showFrameStats} />
-        <div className="mg-topbar">
-          <Toolbar />
-          <OptionsBar workspace={workspace} />
-          <ToolbarSwatches />
-        </div>
-        <div className={`mg-body${componentMode === 'hidden' ? ' mg-hide-components' : ''}`}>
-          <Workbench
-            store={store}
-            workspace={layout}
-            onLayoutChange={onLayoutChange}
-            onReady={(api) => {
-              apiRef.current = api;
-            }}
+    <EditorHostContext.Provider value={host ?? null}>
+      <ShellContext.Provider value={commands}>
+        <div
+          className={`mg-shell mg-root${workspace === 'freight' ? ' mg-ws-freight' : ' mg-ws-basic'}`}
+          ref={rootRef}
+        >
+          <MenuBar workspace={workspace} showRulers={showRulers} showFrameStats={showFrameStats} />
+          <div className="mg-topbar">
+            <Toolbar />
+            <OptionsBar workspace={workspace} />
+            <ToolbarSwatches />
+          </div>
+          <div className={`mg-body${componentMode === 'hidden' ? ' mg-hide-components' : ''}`}>
+            <Workbench
+              store={store}
+              workspace={layout}
+              onLayoutChange={onLayoutChange}
+              onReady={(api) => {
+                apiRef.current = api;
+              }}
+            />
+          </div>
+          <StatusBar />
+          <BenchmarkDialog
+            result={benchmark.result}
+            running={benchmark.running}
+            onClose={() => setBenchmark({ result: null, running: false })}
+          />
+          <NoticeDialog
+            notice={notices[0] ?? null}
+            onDismiss={() => setNotices((pending) => pending.slice(1))}
           />
         </div>
-        <StatusBar />
-        <BenchmarkDialog
-          result={benchmark.result}
-          running={benchmark.running}
-          onClose={() => setBenchmark({ result: null, running: false })}
-        />
-      </div>
-    </ShellContext.Provider>
+      </ShellContext.Provider>
+    </EditorHostContext.Provider>
   );
 }
 
