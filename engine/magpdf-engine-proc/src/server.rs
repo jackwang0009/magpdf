@@ -420,21 +420,28 @@ async fn handle_request(
         }
         method::DOC_SNAPSHOT => {
             let p: DocSnapshotParams = decode(params)?;
-            let (version, sizes) = engine
+            let (version, shapes) = engine
                 .engine
-                .snapshot(p.doc_id)
+                .snapshot(p.doc_id, p.page_ids)
                 .await
                 .map_err(map_engine_error)?;
-            let pages = sizes
+            let pages = shapes
                 .iter()
-                .enumerate()
-                .map(|(index, (width, height))| {
-                    let index = u32::try_from(index).unwrap_or(u32::MAX);
+                .map(|shape| {
+                    let index = u32::try_from(shape.index).unwrap_or(u32::MAX);
                     PageInfo {
                         page_id: index,
                         index,
-                        width: *width,
-                        height: *height,
+                        width: shape.width,
+                        height: shape.height,
+                        // PDFium 给的是 90° 的倍数（0–3），协议里写度数。
+                        rotate: shape
+                            .detail
+                            .map(|d| u16::try_from(d.rotation.rem_euclid(4)).unwrap_or(0) * 90),
+                        crop_box: shape
+                            .detail
+                            .and_then(|d| d.visible)
+                            .map(|b| [b.left, b.bottom, b.right, b.top]),
                     }
                 })
                 .collect();
@@ -787,6 +794,7 @@ fn wire_object(object: &ObjectSummary) -> messages::ObjectSummary {
         bbox: object.bounds.map(|b| [b.left, b.bottom, b.right, b.top]),
         z: u32::try_from(object.z).unwrap_or(u32::MAX),
         locked: false,
+        pickable: object.pickable,
     }
 }
 

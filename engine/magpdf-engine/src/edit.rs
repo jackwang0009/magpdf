@@ -34,6 +34,9 @@ pub struct ObjectSummary {
     pub z: usize,
     pub kind: ObjectKind,
     pub bounds: Option<Rect>,
+    /// 在画布上点选、框选时算不算数。不可见文字、完全透明的对象、铺满页面的白底不算（方案 4.3），
+    /// 它们仍然列在图层面板里，可以从那里选中。
+    pub pickable: bool,
 }
 
 /// 一页上的变化。
@@ -257,11 +260,12 @@ impl<'lib> Session<'lib> {
     pub fn objects(&mut self, page: usize) -> Result<Vec<ObjectSummary>> {
         let page_obj = self.doc.page(page)?;
         let count = page_obj.object_count();
+        let page_box = page_obj.bounding_box();
         let ids = page_ids(&mut self.ids, &mut self.next_id, page, count);
         Ok((0..count)
             .filter_map(|z| {
                 let object = page_obj.object(z)?;
-                Some(summary(*ids.get(z)?, page, z, &object))
+                Some(summary(*ids.get(z)?, page, z, &object, page_box))
             })
             .collect())
     }
@@ -276,6 +280,7 @@ impl<'lib> Session<'lib> {
     ) -> Result<Vec<ObjectSummary>> {
         let page_obj = self.doc.page(page)?;
         let count = page_obj.object_count();
+        let page_box = page_obj.bounding_box();
         let ids = page_ids(&mut self.ids, &mut self.next_id, page, count);
         let mut hits = Vec::new();
         for z in (0..count).rev() {
@@ -285,12 +290,11 @@ impl<'lib> Session<'lib> {
             if !object.bounds().is_some_and(|b| b.contains(x, y)) {
                 continue;
             }
-            if mode == HitMode::Top
-                && skipped_when_picking(&object, page_obj.width(), page_obj.height())
-            {
+            let hit = summary(*id, page, z, &object, page_box);
+            if mode == HitMode::Top && !hit.pickable {
                 continue;
             }
-            hits.push(summary(*id, page, z, &object));
+            hits.push(hit);
             if mode == HitMode::Top {
                 break;
             }
@@ -600,18 +604,32 @@ fn roundtrip_verdict(scratch: &Document<'_>, page: usize) -> Result<Option<&'sta
     Ok(None)
 }
 
-fn summary(id: ObjectId, page: usize, z: usize, object: &PageObject<'_>) -> ObjectSummary {
+/// `page_box` 是页面的可见区域（PDF 用户空间），用来认出铺满页面的底块。
+fn summary(
+    id: ObjectId,
+    page: usize,
+    z: usize,
+    object: &PageObject<'_>,
+    page_box: Option<Rect>,
+) -> ObjectSummary {
+    let bounds = object.bounds();
     ObjectSummary {
         id,
         page,
         z,
         kind: object.kind(),
-        bounds: object.bounds(),
+        bounds,
+        pickable: !skipped_when_picking(object, bounds, page_box),
     }
 }
 
-/// `Top` 点选要跳过的对象：不可见文字、完全透明、铺满页面的白底（方案 4.3）。
-fn skipped_when_picking(object: &PageObject<'_>, page_w: f32, page_h: f32) -> bool {
+/// 点选、框选要跳过的对象：不可见文字、完全透明、铺满页面的白底（方案 4.3）。
+/// 对象的包围盒和页面的可见区域都在 PDF 用户空间里，所以页面旋转、可见区域不从原点开始都不影响判断。
+fn skipped_when_picking(
+    object: &PageObject<'_>,
+    bounds: Option<Rect>,
+    page_box: Option<Rect>,
+) -> bool {
     if object
         .text_render_mode()
         .is_some_and(pdfium_sys::TextRenderMode::is_invisible)
@@ -625,13 +643,11 @@ fn skipped_when_picking(object: &PageObject<'_>, page_w: f32, page_h: f32) -> bo
     if fill_clear && stroke_clear && (fill.is_some() || stroke.is_some()) {
         return true;
     }
-    if let Some(bounds) = object.bounds()
-        && let Some(color) = fill
-    {
-        let covers = bounds.left <= 1.0
-            && bounds.bottom <= 1.0
-            && bounds.right >= page_w - 1.0
-            && bounds.top >= page_h - 1.0;
+    if let (Some(bounds), Some(page_box), Some(color)) = (bounds, page_box, fill) {
+        let covers = bounds.left <= page_box.left + 1.0
+            && bounds.bottom <= page_box.bottom + 1.0
+            && bounds.right >= page_box.right - 1.0
+            && bounds.top >= page_box.top - 1.0;
         if covers && color.r == 255 && color.g == 255 && color.b == 255 && color.a == 255 {
             return true;
         }
@@ -786,6 +802,11 @@ mod tests {
             }
             let objects = session.objects(0).unwrap();
             assert_eq!(objects.len(), 2);
+            // 对象列表里带着“点选时算不算数”，界面在本地做命中测试时靠它。
+            assert_eq!(
+                objects.iter().map(|o| o.pickable).collect::<Vec<_>>(),
+                vec![true, false]
+            );
             let hit = session.hit_test(0, 20.0, 15.0, HitMode::Top).unwrap();
             assert_eq!(hit[0].id, objects[0].id);
             let all = session.hit_test(0, 20.0, 15.0, HitMode::All).unwrap();
@@ -794,6 +815,43 @@ mod tests {
                 vec![objects[1].id, objects[0].id],
                 "All 自上而下"
             );
+        });
+    }
+
+    /// 铺满整页的白色底块点不中，露出下面的对象；同样大的有色底块、比页面小的白块照常能点中。
+    #[test]
+    fn top_hit_skips_a_white_block_that_covers_the_page() {
+        const WHITE: Rgba = Rgba {
+            r: 255,
+            g: 255,
+            b: 255,
+            a: 255,
+        };
+        with_session(|session| {
+            add_rect(session, 0.0, 0.0, 200.0, 100.0, WHITE);
+            add_rect(session, 100.0, 40.0, 60.0, 40.0, WHITE);
+            let objects = session.objects(0).unwrap();
+            assert_eq!(
+                objects.iter().map(|o| o.pickable).collect::<Vec<_>>(),
+                vec![true, false, true]
+            );
+            // 深色矩形上面盖着整页白底：点到的还是深色矩形。
+            let hit = session.hit_test(0, 20.0, 15.0, HitMode::Top).unwrap();
+            assert_eq!(hit[0].id, objects[0].id);
+            // 空白处：什么也点不中。
+            assert!(
+                session
+                    .hit_test(0, 180.0, 10.0, HitMode::Top)
+                    .unwrap()
+                    .is_empty()
+            );
+            // 小白块能点中。
+            let hit = session.hit_test(0, 120.0, 60.0, HitMode::Top).unwrap();
+            assert_eq!(hit[0].id, objects[2].id);
+
+            // 整页底块换成别的颜色，就是一个普通对象了。
+            session.set_fill(&[objects[1].id], DARK).unwrap();
+            assert!(session.objects(0).unwrap()[1].pickable);
         });
     }
 

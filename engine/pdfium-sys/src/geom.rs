@@ -72,6 +72,14 @@ impl Matrix {
         }
     }
 
+    /// 把点 `(x, y)` 变换过去：`(a·x + c·y + e, b·x + d·y + f)`。
+    pub fn apply(self, x: f32, y: f32) -> (f32, f32) {
+        (
+            self.a * x + self.c * y + self.e,
+            self.b * x + self.d * y + self.f,
+        )
+    }
+
     /// 仿射逆。行列式接近 0 时返回 `None`。
     pub fn inverse(self) -> Option<Self> {
         let det = self.a * self.d - self.b * self.c;

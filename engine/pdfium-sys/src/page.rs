@@ -5,6 +5,7 @@ use std::ptr;
 use crate::bitmap::Bitmap;
 use crate::document::Document;
 use crate::error::{Error, Result};
+use crate::geom::Rect;
 use crate::object::PageObject;
 use crate::raw;
 use crate::text::TextPage;
@@ -144,6 +145,20 @@ impl<'doc> Page<'doc> {
     pub fn rotation(&self) -> i32 {
         // SAFETY: handle 有效。
         unsafe { raw::FPDFPage_GetRotation(self.handle) }
+    }
+
+    /// 页面的可见区域（PDF 用户空间，未经旋转）：CropBox 与 MediaBox 的交集，角点已经按大小排好。
+    /// 对象坐标换算到显示坐标要用它的原点和页面旋转，[`Page::width`]、[`Page::height`] 是换算之后的尺寸。
+    pub fn bounding_box(&self) -> Option<Rect> {
+        let mut rect = raw::FS_RECTF {
+            left: 0.0,
+            top: 0.0,
+            right: 0.0,
+            bottom: 0.0,
+        };
+        // SAFETY: handle 有效，rect 指向一个可写的 FS_RECTF。
+        let ok = unsafe { raw::FPDF_GetPageBoundingBox(self.handle, &mut rect) };
+        (ok != 0).then(|| Rect::from_fs(rect))
     }
 
     /// 页面是否带透明（会影响像素比对的背景处理）。

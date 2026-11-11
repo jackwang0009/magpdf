@@ -54,6 +54,25 @@ pub enum EditOp {
     Redo,
 }
 
+/// `doc.snapshot` 里一页的信息。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PageShape {
+    pub index: usize,
+    /// 显示尺寸（pt），已经按页面旋转换好宽高。
+    pub width: f32,
+    pub height: f32,
+    /// 要加载页面才拿得到的部分；列全部页面时不取。
+    pub detail: Option<PageDetail>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PageDetail {
+    /// 页面旋转，90° 的倍数：0–3。
+    pub rotation: i32,
+    /// 可见区域（PDF 用户空间）。
+    pub visible: Option<pdfium_sys::Rect>,
+}
+
 type Reply<T> = oneshot::Sender<std::result::Result<T, EngineError>>;
 
 /// 对 PDFium 线程的请求。
@@ -87,10 +106,12 @@ pub enum Job {
         doc_id: u32,
         reply: oneshot::Sender<bool>,
     },
-    /// 文档版本号和每一页的显示尺寸（pt）。不加载页面，大文档也很快。
+    /// 文档版本号和页面信息。`page_ids` 为空时列出全部页面的显示尺寸，不加载页面，大文档也很快；
+    /// 给了页就只列这几页，加载页面取旋转和可见区域。
     Snapshot {
         doc_id: u32,
-        reply: Reply<(u64, Vec<(f32, f32)>)>,
+        page_ids: Option<Vec<u32>>,
+        reply: Reply<(u64, Vec<PageShape>)>,
     },
     /// 一页上的全部对象，按层级从下到上。
     Objects {
@@ -265,8 +286,14 @@ impl EngineHandle {
     pub async fn snapshot(
         &self,
         doc_id: u32,
-    ) -> std::result::Result<(u64, Vec<(f32, f32)>), EngineError> {
-        self.ask(|reply| Job::Snapshot { doc_id, reply }).await
+        page_ids: Option<Vec<u32>>,
+    ) -> std::result::Result<(u64, Vec<PageShape>), EngineError> {
+        self.ask(|reply| Job::Snapshot {
+            doc_id,
+            page_ids,
+            reply,
+        })
+        .await
     }
 
     pub async fn objects(
@@ -362,8 +389,12 @@ impl PdfiumState {
                 self.docs.retain(|d| d.doc_id != doc_id);
                 let _ = reply.send(self.docs.len() != before);
             }
-            Job::Snapshot { doc_id, reply } => {
-                let _ = reply.send(self.snapshot(doc_id));
+            Job::Snapshot {
+                doc_id,
+                page_ids,
+                reply,
+            } => {
+                let _ = reply.send(self.snapshot(doc_id, page_ids.as_deref()));
             }
             Job::Objects {
                 doc_id,
@@ -442,13 +473,46 @@ impl PdfiumState {
             .ok_or(EngineError::NoDocument { doc_id })
     }
 
-    fn snapshot(&self, doc_id: u32) -> std::result::Result<(u64, Vec<(f32, f32)>), EngineError> {
+    fn snapshot(
+        &self,
+        doc_id: u32,
+        page_ids: Option<&[u32]>,
+    ) -> std::result::Result<(u64, Vec<PageShape>), EngineError> {
         let d = self.find(doc_id)?;
         let doc = d.session.document();
-        let pages = (0..doc.page_count())
-            .map(|index| doc.page_size(index))
-            .collect::<pdfium_sys::Result<Vec<_>>>()
-            .map_err(|e| EngineError::Render(e.to_string()))?;
+        let failed = |e: pdfium_sys::Error| EngineError::Render(e.to_string());
+        let pages = match page_ids {
+            None => (0..doc.page_count())
+                .map(|index| {
+                    let (width, height) = doc.page_size(index).map_err(failed)?;
+                    Ok(PageShape {
+                        index,
+                        width,
+                        height,
+                        detail: None,
+                    })
+                })
+                .collect::<std::result::Result<Vec<_>, EngineError>>()?,
+            Some(ids) => ids
+                .iter()
+                .map(|&page_id| {
+                    let index = page_id as usize;
+                    if index >= doc.page_count() {
+                        return Err(EngineError::NoPage { doc_id, page_id });
+                    }
+                    let geometry = doc.page_geometry(index).map_err(failed)?;
+                    Ok(PageShape {
+                        index,
+                        width: geometry.width,
+                        height: geometry.height,
+                        detail: Some(PageDetail {
+                            rotation: geometry.rotation,
+                            visible: geometry.bounds,
+                        }),
+                    })
+                })
+                .collect::<std::result::Result<Vec<_>, EngineError>>()?,
+        };
         Ok((d.session.version(), pages))
     }
 

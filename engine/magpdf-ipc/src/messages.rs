@@ -321,11 +321,16 @@ pub struct DocInfo {
 pub type DocOpenResult = DocInfo;
 
 /// `doc.snapshot` 的参数（《接口协议》6.1）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct DocSnapshotParams {
     pub doc_id: u32,
+    /// 只要这几页，按给出的顺序返回，并带上每页的 `rotate` 和 `cropBox`。
+    /// 省略时返回全部页面，只有编号和显示尺寸：取旋转和可见区域要加载页面（解析内容流），
+    /// 几百页的文档不能在打开时全做一遍。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_ids: Option<Vec<u32>>,
 }
 
 /// 页面信息（《接口协议》5.3 `PageInfo` 的子集）。
@@ -340,6 +345,14 @@ pub struct PageInfo {
     pub width: f32,
     /// 显示高度（pt）。
     pub height: f32,
+    /// 页面的 `/Rotate`：0、90、180、270。只有按 `pageIds` 请求时才有。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotate: Option<u16>,
+    /// 页面的可见区域 `[left, bottom, right, top]`（PDF 用户空间，未经旋转）：CropBox 与 MediaBox 的交集，
+    /// 角点已经按大小排好。界面用它和 `rotate` 把对象坐标换算成显示坐标（《接口协议》3.1）。
+    /// 只有按 `pageIds` 请求时才有。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crop_box: Option<[f32; 4]>,
 }
 
 /// `doc.snapshot` 的返回值。原型只给页面列表；对象用 `obj.list` 按页取。
@@ -392,6 +405,10 @@ pub struct ObjectSummary {
     pub z: u32,
     /// 原型还没有锁定功能，恒为 false。
     pub locked: bool,
+    /// 在画布上点选、框选时算不算数（方案 4.3）：不可见文字、完全透明的对象、铺满页面的白色底块为 false。
+    /// 这些对象仍然列出来，可以在图层面板里选中。《接口协议》5.3 里还没有这个字段：界面在本地按包围盒
+    /// 做命中测试（悬停时每帧都要查，不能每次都问引擎），所以要引擎把这条规则的结果一起给出来。
+    pub pickable: bool,
 }
 
 /// `obj.list` 一次最多返回的条数（《接口协议》5.3）。
@@ -766,7 +783,7 @@ mod tests {
             .map_or_else(|| PathBuf::from("bindings"), PathBuf::from)
     }
 
-    /// `constants.ts` 的内容：协议版本、方法名、事件名、错误码。
+    /// `constants.ts` 的内容：协议版本、方法名、事件名、错误码，以及界面要用到的几个数值上限。
     fn constants_ts() -> String {
         let mut out = String::from(
             "// 本文件由 magpdf-ipc 的测试 export_protocol_constants 生成（cargo test -p magpdf-ipc），不要手工修改。\n\n",
@@ -794,7 +811,11 @@ mod tests {
         for code in ErrorCode::ALL {
             writeln!(out, "  {}: {},", code.name(), code.code()).unwrap();
         }
-        out.push_str("} as const;\n");
+        out.push_str("} as const;\n\n");
+        out.push_str(
+            "/** `obj.list` 一次最多返回的条数；对象更多的页面用 `offset` 分几次取（《接口协议》5.3）。 */\n",
+        );
+        writeln!(out, "export const OBJ_LIST_MAX = {OBJ_LIST_MAX} as const;").unwrap();
         out
     }
 

@@ -7,7 +7,7 @@
  */
 import { PROTOCOL_VERSION } from './generated/constants';
 
-export { ERROR_CODE, EVENT, METHOD, PROTOCOL_VERSION } from './generated/constants';
+export { ERROR_CODE, EVENT, METHOD, OBJ_LIST_MAX, PROTOCOL_VERSION } from './generated/constants';
 export type * from './messages';
 
 /** 文档版本号：每条命令携带，引擎按版本顺序推送变更事件（方案 3.1 快照同步）。 */

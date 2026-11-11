@@ -54,3 +54,6 @@ export const ERROR_CODE = {
   E_TILE_GENERATION_STALE: 3006,
   E_INTERNAL: 9001,
 } as const;
+
+/** `obj.list` 一次最多返回的条数；对象更多的页面用 `offset` 分几次取（《接口协议》5.3）。 */
+export const OBJ_LIST_MAX = 2000 as const;

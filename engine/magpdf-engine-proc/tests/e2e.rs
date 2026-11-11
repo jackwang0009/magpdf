@@ -370,6 +370,48 @@ async fn doc_snapshot_lists_pages_in_display_orientation() {
         .call_err(method::DOC_SNAPSHOT, json!({ "docId": doc_id + 100 }))
         .await;
     assert_eq!(missing["code"], ErrorCode::InvalidArgument.code());
+
+    // 指定了页：按给出的顺序只返回这几页，带上旋转和可见区域，界面靠这两样把对象坐标换算到画布上。
+    let detailed = engine
+        .call(
+            method::DOC_SNAPSHOT,
+            json!({ "docId": doc_id, "pageIds": [2, 0] }),
+        )
+        .await;
+    assert_eq!(
+        detailed["pages"],
+        json!([
+            { "pageId": 2, "index": 2, "width": 200.0, "height": 300.0,
+              "rotate": 270, "cropBox": [0.0, 0.0, 300.0, 200.0] },
+            { "pageId": 0, "index": 0, "width": 200.0, "height": 300.0,
+              "rotate": 90, "cropBox": [0.0, 0.0, 300.0, 200.0] },
+        ])
+    );
+    let no_such_page = engine
+        .call_err(
+            method::DOC_SNAPSHOT,
+            json!({ "docId": doc_id, "pageIds": [0, 3] }),
+        )
+        .await;
+    assert_eq!(no_such_page["code"], ErrorCode::InvalidArgument.code());
+
+    // 可见区域不从原点开始的页：CropBox 比 MediaBox 小时取 CropBox，MediaBox 带负坐标时原样给出。
+    let boxes = engine.open("struct-mediabox-cropbox.pdf").await;
+    let detailed = engine
+        .call(
+            method::DOC_SNAPSHOT,
+            json!({ "docId": boxes, "pageIds": [1, 3] }),
+        )
+        .await;
+    assert_eq!(
+        detailed["pages"],
+        json!([
+            { "pageId": 1, "index": 1, "width": 200.0, "height": 100.0,
+              "rotate": 0, "cropBox": [50.0, 50.0, 250.0, 150.0] },
+            { "pageId": 3, "index": 3, "width": 300.0, "height": 200.0,
+              "rotate": 0, "cropBox": [-150.0, -100.0, 150.0, 100.0] },
+        ])
+    );
 }
 
 /// 瓦片渲染完，事件要马上发出去，不能等读循环的定时器（修复前最坏要等 500 ms）。

@@ -15,4 +15,14 @@ width: number,
 /**
  * 显示高度（pt）。
  */
-height: number, };
+height: number, 
+/**
+ * 页面的 `/Rotate`：0、90、180、270。只有按 `pageIds` 请求时才有。
+ */
+rotate?: number | null, 
+/**
+ * 页面的可见区域 `[left, bottom, right, top]`（PDF 用户空间，未经旋转）：CropBox 与 MediaBox 的交集，
+ * 角点已经按大小排好。界面用它和 `rotate` 把对象坐标换算成显示坐标（《接口协议》3.1）。
+ * 只有按 `pageIds` 请求时才有。
+ */
+cropBox?: [number, number, number, number] | null, };

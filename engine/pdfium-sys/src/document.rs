@@ -4,7 +4,7 @@ use std::path::Path;
 use std::ptr;
 
 use crate::error::{Error, LoadError, Result};
-use crate::geom::Rect;
+use crate::geom::{Matrix, Rect};
 use crate::library::Library;
 use crate::page::Page;
 use crate::raw;
@@ -20,6 +20,39 @@ pub struct PageGeometry {
     pub rotation: i32,
     /// `FPDF_GetPageBoundingBox` 的结果（`CropBox` 与 `MediaBox` 的交集）。
     pub bounds: Option<Rect>,
+}
+
+impl PageGeometry {
+    /// PDF 用户空间到显示坐标的矩阵。
+    ///
+    /// 显示坐标是页面显示出来的样子：左上角为原点，x 向右、y 向下，单位 pt，范围 `0..width × 0..height`。
+    /// 页面的 `/Rotate` 和可见区域不从原点开始这两件事都算在里面，和 PDFium 渲染时用的换算一致
+    /// （`CPDF_Page` 的页面矩阵再翻转 y 轴）。记可见区域为 `[l, b, r, t]`：
+    ///
+    /// | `/Rotate` | 显示坐标 |
+    /// |---|---|
+    /// | 0 | `(x − l, t − y)` |
+    /// | 90 | `(y − b, x − l)` |
+    /// | 180 | `(r − x, y − b)` |
+    /// | 270 | `(t − y, r − x)` |
+    ///
+    /// 界面把对象的包围盒换算到画布上用的是同一张表（`packages/editor` 的 `pageSpace.ts`），两边要一起改。
+    /// 拿不到可见区域时返回 `None`。
+    pub fn display_matrix(&self) -> Option<Matrix> {
+        let Rect {
+            left,
+            bottom,
+            right,
+            top,
+        } = self.bounds?;
+        let (a, b, c, d, e, f) = match self.rotation.rem_euclid(4) {
+            0 => (1.0, 0.0, 0.0, -1.0, -left, top),
+            1 => (0.0, 1.0, 1.0, 0.0, -bottom, -left),
+            2 => (-1.0, 0.0, 0.0, 1.0, right, -bottom),
+            _ => (0.0, -1.0, -1.0, 0.0, top, right),
+        };
+        Some(Matrix { a, b, c, d, e, f })
+    }
 }
 
 /// 保存标志，对应 `fpdf_save.h`。
@@ -168,7 +201,8 @@ impl<'lib> Document<'lib> {
         Ok(unsafe { Page::from_raw(handle, self) })
     }
 
-    /// 页面尺寸与旋转。只加载页面读标量，读完立即关闭，不解析内容流对象。
+    /// 页面尺寸、旋转和可见区域。要加载页面（`FPDF_LoadPage` 会解析内容流），读完立即关闭；
+    /// 只要显示尺寸时用 [`Document::page_size`]，它不加载页面。
     pub fn page_geometry(&self, page_index: usize) -> Result<PageGeometry> {
         let count = self.page_count();
         if page_index >= count {

@@ -3,4 +3,10 @@
 /**
  * `doc.snapshot` 的参数（《接口协议》6.1）。
  */
-export type DocSnapshotParams = { docId: number, };
+export type DocSnapshotParams = { docId: number, 
+/**
+ * 只要这几页，按给出的顺序返回，并带上每页的 `rotate` 和 `cropBox`。
+ * 省略时返回全部页面，只有编号和显示尺寸：取旋转和可见区域要加载页面（解析内容流），
+ * 几百页的文档不能在打开时全做一遍。
+ */
+pageIds?: Array<number> | null, };
