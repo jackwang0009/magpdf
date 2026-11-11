@@ -1,8 +1,11 @@
 /**
  * 界面端到端冒烟测试（方案 13.2 第 8 项；《测试计划》“界面端到端”）。
  *
- * 起真实的桌面程序（主进程 + 引擎进程 + WebView2），Playwright 经 CDP 连进 WebView2，走一遍：
- * 命令行打开 PDF → 页面由引擎渲染出来 → 滚轮缩放 → 强制结束引擎后自动恢复显示 → 主进程退出后引擎跟着退出。
+ * 起真实的桌面程序（主进程 + 引擎进程 + WebView2），Playwright 经 CDP 连进 WebView2，用真实的鼠标键盘
+ * 事件走一遍：
+ *   命令行打开两份 PDF → 页面由引擎渲染出来 → 滚轮缩放 → 强制结束引擎后自动恢复显示
+ *   → 只能叠加内容的页：出提示条，原有对象拖不动 → 能改的页：点选、拖动、微移、删除、撤销，看画面
+ *   → 关标签页 → 主进程退出后引擎跟着退出。
  *
  * 先构建发布版（界面打进可执行文件里）：
  *   pnpm --filter @magpdf/desktop build
@@ -12,10 +15,12 @@
  *   pnpm --filter @magpdf/desktop e2e
  *
  * 环境变量：
- *   MAGPDF_DESKTOP_BIN  被测的可执行文件，默认 target/release/magpdf-desktop.exe
- *   MAGPDF_E2E_PDF      打开哪份 PDF，默认 tests/corpus/synthetic/freight-bl-composite.pdf
+ *   MAGPDF_DESKTOP_BIN   被测的可执行文件，默认 target/release/magpdf-desktop.exe
+ *   MAGPDF_E2E_PDF       看渲染、缩放、恢复用的 PDF，默认 tests/corpus/synthetic/freight-bl-composite.pdf。
+ *                        它的第 1 页在原版 PDFium 下只能叠加内容，在修过生成器的构建下可以修改，两种都认
+ *   MAGPDF_E2E_EDIT_PDF  做修改用的 PDF，第 1 页必须能修改，默认 tests/corpus/synthetic/color-devicegray.pdf
  *
- * 结果打印成一行 JSON（各步耗时），截图存到 tests/out/e2e/。测试窗口不抢焦点，不动鼠标键盘。
+ * 结果打印成一行 JSON（各步耗时，修改的延迟），截图存到 tests/out/e2e/。测试窗口不抢焦点，不动真实的鼠标键盘。
  */
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
@@ -33,20 +38,39 @@ const appBin = resolve(
 const samplePdf = resolve(
   process.env.MAGPDF_E2E_PDF ?? join(repo, 'tests/corpus/synthetic/freight-bl-composite.pdf'),
 );
+const editPdf = resolve(
+  process.env.MAGPDF_E2E_EDIT_PDF ?? join(repo, 'tests/corpus/synthetic/color-devicegray.pdf'),
+);
 const outDir = join(repo, 'tests/out/e2e');
 
 /** 《P0 技术验证计划》V06 的通过线：强制结束引擎后 5 秒内恢复显示。 */
 const RESTORE_LIMIT_MS = 5000;
+/** 量修改延迟时微移多少次。 */
+const NUDGES = 30;
+/** 《交互设计》9.3 的文案。 */
+const OVERLAY_ONLY_BANNER =
+  '第 1 页无法安全修改原有内容：页面使用了软件尚不能完整保留的效果。可以在这一页上添加内容。';
 
-function freePort() {
-  return new Promise((done, fail) => {
-    const server = createServer();
-    server.once('error', fail);
-    server.listen(0, '127.0.0.1', () => {
-      const { port } = server.address();
-      server.close(() => done(port));
-    });
-  });
+/**
+ * 向系统要一个空闲的端口。系统的套接字缓冲区一时用光（ENOBUFS，机器上别的程序占着大量端口时会碰到）
+ * 就等一会儿再要，不让它算成测试失败。
+ */
+async function freePort() {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await new Promise((done, fail) => {
+        const server = createServer();
+        server.once('error', fail);
+        server.listen(0, '127.0.0.1', () => {
+          const { port } = server.address();
+          server.close(() => done(port));
+        });
+      });
+    } catch (error) {
+      if (error.code !== 'ENOBUFS' || attempt >= 5) throw error;
+      await sleep(500);
+    }
+  }
 }
 
 function sleep(ms) {
@@ -106,17 +130,66 @@ async function connect(port) {
   return { browser, page };
 }
 
-/** 等画布要的瓦片都到齐：完成数至少 `min`，没有在途和排队的。返回完成数。 */
+/** 等画布要的瓦片都到齐：完成数至少 `min`，没有在途和排队的，画面是最新的。返回完成数。 */
 async function tilesSettled(page, min) {
   const handle = await page.waitForFunction(
     (atLeast) => {
       const controller = window.__magpdf?.controller();
       if (!controller) return false;
       const { stats, inFlight, queued } = controller.scheduler;
-      return stats.completed >= atLeast && inFlight === 0 && queued === 0 ? stats.completed : false;
+      const settled = stats.completed >= atLeast && inFlight === 0 && queued === 0;
+      return settled && controller.upToDate ? stats.completed : false;
     },
     min,
     { timeout: 20_000, polling: 10 },
+  );
+  return handle.jsonValue();
+}
+
+/** 活动文档现在的样子：版本号、选区、第 1 页的对象数。 */
+function documentState(page) {
+  return page.evaluate(() => {
+    const state = window.__magpdf.store.getState();
+    const doc = state.documents[state.activeDocumentId];
+    return {
+      name: doc.snapshot.name,
+      version: doc.snapshot.version,
+      selection: doc.selection,
+      objects: doc.snapshot.pages[0].objects.length,
+    };
+  });
+}
+
+/** 切到某份文档的标签页，等它的画面到齐。 */
+async function activate(page, pdf) {
+  const name = basename(pdf);
+  await page.locator('.mg-doc-tab-title', { hasText: name }).click();
+  await page.waitForFunction((title) => {
+    const state = window.__magpdf.store.getState();
+    return state.documents[state.activeDocumentId]?.snapshot.name === title;
+  }, name);
+  await tilesSettled(page, 1);
+}
+
+/**
+ * 等引擎给出某份文档第 1 页保真校验的结论（方案 2.3）：页面显示之后引擎空闲时自己会做。
+ * 返回 `{ status: 'ok' | 'overlayOnly', reason? }`。直接问引擎，因为界面上只有“只能叠加内容”才有表现。
+ */
+async function fidelityOfFirstPage(page, pdf) {
+  const handle = await page.waitForFunction(
+    async (title) => {
+      const { invoke } = window.__TAURI_INTERNALS__;
+      const doc = (await invoke('open_documents')).find((info) => info.title === title);
+      if (!doc) return false;
+      const snapshot = await invoke('engine_request', {
+        method: 'doc.snapshot',
+        params: { docId: doc.docId },
+      });
+      const { fidelity, fidelityReason } = snapshot.pages[0];
+      return fidelity === 'pending' ? false : { status: fidelity, reason: fidelityReason ?? null };
+    },
+    basename(pdf),
+    { timeout: 20_000, polling: 50 },
   );
   return handle.jsonValue();
 }
@@ -128,7 +201,8 @@ function pageRectOnScreen(page) {
     const view = controller.view;
     const rect = controller.pageLayout.pageRect(0);
     const scale = (view.zoom * 96) / 72;
-    const canvas = document.querySelector('.mg-canvas-gl').getBoundingClientRect();
+    // 画页面的那块画布让开了标尺，它的左上角就是视口的原点
+    const canvas = controller.container.querySelector('.mg-canvas-gl').getBoundingClientRect();
     const left = Math.max(canvas.left, canvas.left + (rect.x - view.x) * scale);
     const top = Math.max(canvas.top, canvas.top + (rect.y - view.y) * scale);
     const right = Math.min(canvas.right, canvas.left + (rect.x + rect.width - view.x) * scale);
@@ -137,41 +211,55 @@ function pageRectOnScreen(page) {
   });
 }
 
+/** 把鼠标挪到画布左上角的标尺交汇处：那里底下没有对象，不会留下悬停的高亮。 */
+async function parkMouse(page) {
+  const corner = await page.evaluate(() => {
+    const rect = window.__magpdf.controller().container.getBoundingClientRect();
+    return { x: rect.left + 6, y: rect.top + 6 };
+  });
+  await page.mouse.move(corner.x, corner.y);
+}
+
+/** 截一张图存下来，连同第 1 页所在的区域一起返回。先把鼠标挪开，等画面是最新的。 */
+async function capture(page, name) {
+  await parkMouse(page);
+  await page.waitForFunction(() => window.__magpdf.controller().upToDate);
+  const area = await pageRectOnScreen(page);
+  assert.ok(area.width > 50 && area.height > 50, `页面没有显示在画布上：${JSON.stringify(area)}`);
+  const png = await page.screenshot({ scale: 'css' });
+  writeFileSync(join(outDir, `${name}.png`), png);
+  return { name, area, base64: png.toString('base64') };
+}
+
 /**
- * 截一张图，数页面区域里的像素：白纸、有内容、既不白也不深的（没渲染出来时是画布的底色）。
+ * 数页面区域里的像素：白纸、有内容、既不白也不深的（没渲染出来时是画布的底色）。
  * 截图在页面里解码（不给 Node 这边加图像库）。
  */
 async function inspectPage(page, name) {
-  const rect = await pageRectOnScreen(page);
-  assert.ok(rect.width > 50 && rect.height > 50, `页面没有显示在画布上：${JSON.stringify(rect)}`);
-  const png = await page.screenshot({ scale: 'css' });
-  writeFileSync(join(outDir, `${name}.png`), png);
-  const counts = await page.evaluate(
-    async ({ base64, area }) => {
-      const bytes = Uint8Array.from(atob(base64), (ch) => ch.charCodeAt(0));
-      const bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
-      const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-      const context = canvas.getContext('2d');
-      context.drawImage(bitmap, 0, 0);
-      const inset = 3;
-      const data = context.getImageData(
-        Math.ceil(area.x) + inset,
-        Math.ceil(area.y) + inset,
-        Math.floor(area.width) - 2 * inset,
-        Math.floor(area.height) - 2 * inset,
-      ).data;
-      let white = 0;
-      let ink = 0;
-      for (let i = 0; i < data.length; i += 4) {
-        const [r, g, b] = [data[i], data[i + 1], data[i + 2]];
-        if (r > 245 && g > 245 && b > 245) white++;
-        else if (r < 200 || g < 200 || b < 200) ink++;
-      }
-      return { total: data.length / 4, white, ink };
-    },
-    { base64: png.toString('base64'), area: rect },
-  );
-  return { ...counts, zoom: rect.zoom };
+  const shot = await capture(page, name);
+  const counts = await page.evaluate(async ({ base64, area }) => {
+    const bytes = Uint8Array.from(atob(base64), (ch) => ch.charCodeAt(0));
+    const bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    const context = canvas.getContext('2d');
+    context.drawImage(bitmap, 0, 0);
+    const inset = 3;
+    const data = context.getImageData(
+      Math.ceil(area.x) + inset,
+      Math.ceil(area.y) + inset,
+      Math.floor(area.width) - 2 * inset,
+      Math.floor(area.height) - 2 * inset,
+    ).data;
+    let white = 0;
+    let ink = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      const [r, g, b] = [data[i], data[i + 1], data[i + 2]];
+      if (r > 245 && g > 245 && b > 245) white++;
+      else if (r < 200 || g < 200 || b < 200) ink++;
+    }
+    return { total: data.length / 4, white, ink };
+  }, shot);
+  return { ...counts, zoom: shot.area.zoom };
 }
 
 function assertPageIsDrawn(counts, when) {
@@ -183,21 +271,347 @@ function assertPageIsDrawn(counts, when) {
   );
 }
 
+/** 两张截图在页面区域里有多大比例的像素不一样（任一通道差 8 以上才算）。 */
+function pageDifference(page, before, after) {
+  return page.evaluate(
+    async ({ a, b, area }) => {
+      const pixels = async (base64) => {
+        const bytes = Uint8Array.from(atob(base64), (ch) => ch.charCodeAt(0));
+        const bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
+        const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+        const context = canvas.getContext('2d');
+        context.drawImage(bitmap, 0, 0);
+        return context.getImageData(
+          Math.ceil(area.x),
+          Math.ceil(area.y),
+          Math.floor(area.width),
+          Math.floor(area.height),
+        ).data;
+      };
+      const [left, right] = await Promise.all([pixels(a), pixels(b)]);
+      let different = 0;
+      for (let i = 0; i < left.length; i += 4) {
+        if (
+          Math.abs(left[i] - right[i]) > 8 ||
+          Math.abs(left[i + 1] - right[i + 1]) > 8 ||
+          Math.abs(left[i + 2] - right[i + 2]) > 8
+        ) {
+          different++;
+        }
+      }
+      return different / (left.length / 4);
+    },
+    { a: before.base64, b: after.base64, area: before.area },
+  );
+}
+
+/**
+ * 在活动文档的第 1 页上挑一个对象来操作：从上往下找第一个够大、而且点它的中心点中的就是它自己的。
+ * 返回对象的编号、包围盒（页面坐标，pt）、中心在屏幕上的位置、每 pt 多少 CSS 像素。
+ */
+async function pickTarget(page) {
+  const target = await page.evaluate(() => {
+    const state = window.__magpdf.store.getState();
+    const doc = state.documents[state.activeDocumentId];
+    const controller = window.__magpdf.controller();
+    const scale = (controller.view.zoom * 96) / 72;
+    const objects = doc.snapshot.pages[0].objects.filter((object) => object.pickable !== false);
+    const contains = (box, x, y) =>
+      x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height;
+    for (let i = objects.length - 1; i >= 0; i--) {
+      const { id, bbox } = objects[i];
+      if (bbox.width * scale < 5 || bbox.height * scale < 5) continue;
+      const [cx, cy] = [bbox.x + bbox.width / 2, bbox.y + bbox.height / 2];
+      if (objects.slice(i + 1).some((above) => contains(above.bbox, cx, cy))) continue;
+      const pageRect = controller.pageLayout.pageRect(0);
+      const canvas = controller.container.querySelector('.mg-canvas-gl').getBoundingClientRect();
+      return {
+        id,
+        bbox,
+        scale,
+        x: canvas.left + (pageRect.x + cx - controller.view.x) * scale,
+        y: canvas.top + (pageRect.y + cy - controller.view.y) * scale,
+      };
+    }
+    return null;
+  });
+  assert.ok(target, '第 1 页上没有找到可以拿来操作的对象');
+  return target;
+}
+
+function boxOf(page, id) {
+  return page.evaluate((objectId) => {
+    const state = window.__magpdf.store.getState();
+    const doc = state.documents[state.activeDocumentId];
+    return doc.snapshot.pages[0].objects.find((object) => object.id === objectId)?.bbox ?? null;
+  }, id);
+}
+
+/** 按住对象的中心拖 (dx, dy) 个 CSS 像素，中途停一下让调用方看一眼，再松开。 */
+async function drag(page, target, dx, dy, midway = async () => undefined) {
+  await page.mouse.move(target.x, target.y);
+  await page.mouse.down();
+  await page.mouse.move(target.x + dx, target.y + dy, { steps: 6 });
+  await midway();
+  await page.mouse.up();
+}
+
+/** 等修改生效：文档到了这一版，受影响的瓦片重画完了。等不到时把当时的状态写进错误里。 */
+async function editSettled(page, version, what) {
+  try {
+    await page.waitForFunction(
+      (expected) => {
+        const state = window.__magpdf.store.getState();
+        const doc = state.documents[state.activeDocumentId];
+        const controller = window.__magpdf.controller();
+        const { inFlight, queued } = controller.scheduler;
+        return (
+          doc.snapshot.version === expected && controller.upToDate && inFlight === 0 && queued === 0
+        );
+      },
+      version,
+      { timeout: 10_000, polling: 10 },
+    );
+  } catch (error) {
+    const seen = await page.evaluate(() => {
+      const controller = window.__magpdf.controller();
+      const { inFlight, queued } = controller.scheduler;
+      return {
+        upToDate: controller.upToDate,
+        inFlight,
+        queued,
+        notice: document.querySelector('.mg-notice-message')?.textContent ?? null,
+      };
+    });
+    throw new Error(
+      `${what}之后等不到文档的第 ${version} 版：${JSON.stringify({ ...(await documentState(page)), ...seen })}`,
+      { cause: error },
+    );
+  }
+}
+
+/**
+ * 在页面里装一个计时器：方向键按下的那一刻开始，记下“文档版本号变了”（收到 doc.changed）和
+ * “画面重画完了”各用了多久。画面在每一帧画完之后看一眼，所以第二个数含等下一帧的时间，和用户看到的一致。
+ */
+function installEditTimer(page) {
+  return page.evaluate(() => {
+    const { store } = window.__magpdf;
+    const timer = { samples: [], current: null };
+    const version = () => {
+      const state = store.getState();
+      return state.documents[state.activeDocumentId]?.snapshot.version ?? -1;
+    };
+    window.addEventListener(
+      'keydown',
+      (event) => {
+        if (event.key.startsWith('Arrow')) {
+          timer.current = { started: performance.now(), version: version() };
+        }
+      },
+      true,
+    );
+    store.subscribe(() => {
+      const current = timer.current;
+      if (current && current.changed === undefined && version() > current.version) {
+        current.changed = performance.now() - current.started;
+      }
+    });
+    const channel = new MessageChannel();
+    channel.port1.onmessage = () => {
+      const current = timer.current;
+      if (current?.changed !== undefined && window.__magpdf.controller()?.upToDate) {
+        timer.samples.push({
+          changed: current.changed,
+          repainted: performance.now() - current.started,
+        });
+        timer.current = null;
+      }
+    };
+    // 每一帧的回调都跑完之后再看，这时画布控制器已经画完这一帧
+    const tick = () => {
+      channel.port2.postMessage(0);
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+    window.__editTimer = timer;
+  });
+}
+
+/** 一组耗时的中位数、P95（最近秩）和最大值，保留一位小数。 */
+function summarize(values) {
+  const sorted = [...values].sort((a, b) => a - b);
+  const at = (q) => sorted[Math.min(sorted.length, Math.max(1, Math.ceil(q * sorted.length))) - 1];
+  const round = (value) => Math.round(value * 10) / 10;
+  return { median: round(at(0.5)), p95: round(at(0.95)), max: round(sorted[sorted.length - 1]) };
+}
+
+/** 只能叠加内容的页（方案 2.3）：提示条在，原有对象能选中但拖不动、删不掉，画面不变。 */
+async function checkOverlayOnlyPage(page) {
+  const banner = page.locator('.mg-doc-banner:visible');
+  await banner.waitFor({ timeout: 5000 });
+  assert.equal(await banner.textContent(), OVERLAY_ONLY_BANNER);
+
+  const before = await capture(page, 'smoke-4-overlay-only');
+  const target = await pickTarget(page);
+  await page.mouse.click(target.x, target.y);
+  assert.deepEqual((await documentState(page)).selection, [target.id]);
+  // 属性面板顶部说明属性只能查看
+  assert.equal(await page.locator('.mg-props-readonly').count(), 1);
+
+  let cursor = null;
+  await drag(page, target, 40, 24, async () => {
+    cursor = await page.evaluate(
+      () => window.__magpdf.controller().container.lastElementChild.style.cursor,
+    );
+    // 拖的过程中对象也不跟着走
+    assert.deepEqual(await boxOf(page, target.id), target.bbox);
+  });
+  assert.equal(cursor, 'not-allowed', '拖不能修改的对象时，光标应当提示“不行”');
+  await page.keyboard.press('Delete');
+  await page.keyboard.press('ArrowRight');
+  await sleep(300);
+
+  const state = await documentState(page);
+  assert.equal(state.version, 0, '只能叠加内容的页不该被改动');
+  assert.deepEqual(await boxOf(page, target.id), target.bbox);
+  assert.equal(await page.locator('.mg-notice').count(), 0, '不该弹提示框');
+  await page.keyboard.press('Escape');
+  const after = await capture(page, 'smoke-4-overlay-only-after');
+  const changed = await pageDifference(page, before, after);
+  assert.ok(changed < 0.001, `页面的画面变了 ${(changed * 100).toFixed(2)}%`);
+}
+
+/**
+ * 能改的页：点选 → 拖动 → 微移若干次（量延迟）→ 删除 → 全部撤销，每一步看文档和画面。
+ * 返回修改的延迟（毫秒）。
+ */
+async function checkEditing(page) {
+  assert.equal(await page.locator('.mg-doc-banner:visible').count(), 0, '能改的页不该有提示条');
+  const initial = await documentState(page);
+  const pristine = await capture(page, 'smoke-5-before-edit');
+  const target = await pickTarget(page);
+  let version = initial.version;
+
+  // 点选
+  await page.mouse.click(target.x, target.y);
+  assert.deepEqual((await documentState(page)).selection, [target.id]);
+
+  // 拖动：对象跟到新位置，页面上受影响的地方重画
+  const [dx, dy] = [40, 24];
+  await drag(page, target, dx, dy);
+  await editSettled(page, ++version, '拖动');
+  const moved = await boxOf(page, target.id);
+  assert.ok(
+    Math.abs(moved.x - (target.bbox.x + dx / target.scale)) < 0.5 &&
+      Math.abs(moved.y - (target.bbox.y + dy / target.scale)) < 0.5,
+    `对象没有挪到该去的地方：${JSON.stringify(target.bbox)} → ${JSON.stringify(moved)}`,
+  );
+  await page.keyboard.press('Escape');
+  const afterMove = await capture(page, 'smoke-5-moved');
+  const moveChange = await pageDifference(page, pristine, afterMove);
+  assert.ok(moveChange > 0.0005, `拖动之后页面的画面没有变（${(moveChange * 100).toFixed(3)}%）`);
+
+  // 微移：来回各一步，量从按键到 doc.changed、到画面重画完的时间
+  await page.mouse.click(target.x + dx, target.y + dy);
+  assert.deepEqual((await documentState(page)).selection, [target.id]);
+  await parkMouse(page);
+  await installEditTimer(page);
+  for (let i = 0; i < NUDGES; i++) {
+    await page.keyboard.press(i % 2 === 0 ? 'ArrowRight' : 'ArrowLeft');
+    await page.waitForFunction((done) => window.__editTimer.samples.length === done, i + 1, {
+      timeout: 20_000,
+      polling: 5,
+    });
+    await editSettled(page, ++version, `第 ${i + 1} 次微移`);
+  }
+  const samples = await page.evaluate(() => window.__editTimer.samples);
+  // 原始样本留一份，汇总里只有分位数
+  writeFileSync(join(outDir, 'edit-latency.json'), JSON.stringify(samples, null, 2));
+  const latency = {
+    objects: initial.objects,
+    edits: samples.length,
+    changedMs: summarize(samples.map((sample) => sample.changed)),
+    repaintedMs: summarize(samples.map((sample) => sample.repainted)),
+  };
+
+  // 删除
+  await page.keyboard.press('Delete');
+  await editSettled(page, ++version, '删除');
+  assert.equal((await documentState(page)).objects, initial.objects - 1);
+  assert.equal(await boxOf(page, target.id), null);
+
+  // 撤销到头：对象回到原处，画面和修改之前一样。再多按一次什么也不发生
+  const steps = version - initial.version;
+  for (let i = 0; i < steps; i++) {
+    await page.keyboard.press('Control+z');
+    await editSettled(page, ++version, `第 ${i + 1} 次撤销`);
+  }
+  await page.keyboard.press('Control+z');
+  await sleep(300);
+  const state = await documentState(page);
+  assert.equal(state.version, version, '没有可撤销的操作时，文档不该变');
+  assert.equal(state.objects, initial.objects);
+  const restored = await boxOf(page, target.id);
+  assert.ok(
+    Math.abs(restored.x - target.bbox.x) < 0.01 && Math.abs(restored.y - target.bbox.y) < 0.01,
+    `撤销之后对象没有回到原处：${JSON.stringify(target.bbox)} → ${JSON.stringify(restored)}`,
+  );
+  assert.equal(await page.locator('.mg-notice').count(), 0, '不该弹提示框');
+  await page.keyboard.press('Escape');
+  const afterUndo = await capture(page, 'smoke-5-undone');
+  const undoChange = await pageDifference(page, pristine, afterUndo);
+  assert.ok(
+    undoChange < moveChange / 10,
+    `全部撤销之后画面和修改之前差 ${(undoChange * 100).toFixed(3)}%（拖动造成的差别是 ${(moveChange * 100).toFixed(3)}%）`,
+  );
+  return latency;
+}
+
+/** 测试失败时界面是什么样子：存一张截图，返回打开的文档、活动文档的状态和正在显示的提示。 */
+async function failureEvidence(page) {
+  if (!page) return { unavailable: '还没有连上界面' };
+  const screenshot = join(outDir, 'smoke-failure.png');
+  writeFileSync(screenshot, await page.screenshot({ scale: 'css' }));
+  const seen = await page.evaluate(() => {
+    const state = window.__magpdf?.store.getState();
+    const doc = state?.documents[state.activeDocumentId];
+    return {
+      documents: state?.documentOrder.map((id) => state.documents[id].snapshot.name) ?? null,
+      active: doc
+        ? {
+            name: doc.snapshot.name,
+            version: doc.snapshot.version,
+            selection: doc.selection,
+            objects: doc.snapshot.pages[0]?.objects.length ?? null,
+            overlayOnly: doc.snapshot.pages[0]?.overlayOnly ?? null,
+          }
+        : null,
+      notice: document.querySelector('.mg-notice-message')?.textContent ?? null,
+      banner: document.querySelector('.mg-doc-banner')?.textContent ?? null,
+    };
+  });
+  return { screenshot, ...seen };
+}
+
 async function main() {
   for (const [what, path] of [
     ['桌面程序', appBin],
     ['引擎', join(dirname(appBin), 'magpdf-engine.exe')],
     ['样本 PDF', samplePdf],
+    ['做修改用的 PDF', editPdf],
   ]) {
     assert.ok(existsSync(path), `找不到${what}：${path}（构建步骤见本文件开头）`);
   }
   mkdirSync(outDir, { recursive: true });
   const scratch = mkdtempSync(join(tmpdir(), 'magpdf-e2e-'));
   const port = await freePort();
-  const result = { app: basename(appBin), pdf: basename(samplePdf) };
+  const names = [basename(editPdf), basename(samplePdf)];
+  const result = { app: basename(appBin), pdf: names[1], editPdf: names[0] };
 
   const launched = performance.now();
-  const app = spawn(appBin, [samplePdf], {
+  // 后给的那一份是活动文档：先在样本上看渲染、缩放和恢复，再切到另一份做修改
+  const app = spawn(appBin, [editPdf, samplePdf], {
     env: {
       ...process.env,
       MAGPDF_WEBVIEW_DEBUG_PORT: String(port),
@@ -208,12 +622,13 @@ async function main() {
     stdio: ['ignore', 'ignore', 'inherit'],
   });
   let browser;
+  let page;
   let engine = null;
+  const problems = [];
   try {
     const session = await connect(port);
     browser = session.browser;
-    const page = session.page;
-    const problems = [];
+    page = session.page;
     page.on('pageerror', (error) => problems.push(`页面里抛了异常：${error.message}`));
     page.on('console', (message) => {
       if (message.type() !== 'error') return;
@@ -224,12 +639,17 @@ async function main() {
     });
 
     // 1. 命令行给的文档已经打开，页面由引擎渲染出来
-    await page.waitForSelector('.mg-doc-tab-title', { timeout: 20_000 });
-    assert.deepEqual(await page.locator('.mg-doc-tab-title').allTextContents(), [
-      basename(samplePdf),
-    ]);
+    await page.waitForFunction(
+      () => document.querySelectorAll('.mg-doc-tab-title').length === 2,
+      null,
+      {
+        timeout: 20_000,
+      },
+    );
+    assert.deepEqual(await page.locator('.mg-doc-tab-title').allTextContents(), names);
     let completed = await tilesSettled(page, 1);
     result.firstPaintMs = Math.round(performance.now() - launched);
+    assert.equal((await documentState(page)).name, names[1]);
     assertPageIsDrawn(await inspectPage(page, 'smoke-1-opened'), '打开之后');
     assert.equal(await page.locator('.mg-canvas-message').count(), 0, '画布上不该有提示层');
 
@@ -260,9 +680,7 @@ async function main() {
     await page.locator('.mg-notice button').click();
     assert.equal(await page.locator('.mg-notice').count(), 0);
     assertPageIsDrawn(await inspectPage(page, 'smoke-3-restored'), '引擎重启之后');
-    assert.deepEqual(await page.locator('.mg-doc-tab-title').allTextContents(), [
-      basename(samplePdf),
-    ]);
+    assert.deepEqual(await page.locator('.mg-doc-tab-title').allTextContents(), names);
     const replacement = enginePid(app.pid);
     assert.ok(replacement && replacement !== engine, '引擎没有换成新的进程');
     engine = replacement;
@@ -271,17 +689,43 @@ async function main() {
       `结束引擎后 ${result.restoreMs} ms 才恢复显示，超过 ${RESTORE_LIMIT_MS} ms`,
     );
 
-    // 4. 关掉标签页，文档从界面上消失
-    await page.locator('.mg-doc-tab-close').click();
-    await page.waitForFunction(() => window.__magpdf.documents().length === 0);
+    // 4. 保真校验：没有人要求，引擎在页面显示之后自己做。样本的第 1 页通不过的话只能叠加内容
+    await page.keyboard.press('Control+0');
+    await tilesSettled(page, 1);
+    result.sampleFidelity = (await fidelityOfFirstPage(page, samplePdf)).status;
+    if (result.sampleFidelity === 'overlayOnly') await checkOverlayOnlyPage(page);
+    else assert.equal(await page.locator('.mg-doc-banner:visible').count(), 0);
+
+    // 5. 修改：切到能改的那一份
+    await activate(page, editPdf);
+    const editable = await fidelityOfFirstPage(page, editPdf);
+    assert.equal(
+      editable.status,
+      'ok',
+      `${names[0]} 的第 1 页在这个 PDFium 构建下不能修改（引擎给的原因：${editable.reason}），用 MAGPDF_E2E_EDIT_PDF 换一份`,
+    );
+    result.edit = await checkEditing(page);
+
+    // 6. 关掉标签页，文档从界面上消失
+    for (let left = 2; left > 0; left--) {
+      await page.locator('.mg-doc-tab-close').first().click();
+      await page.waitForFunction((n) => window.__magpdf.documents().length === n, left - 1);
+    }
 
     assert.deepEqual(problems, [], '运行过程中页面报了错');
+  } catch (error) {
+    // 留下现场：失败那一刻的画面、界面上的文档和提示、页面报过的错。取不到也不要盖住原来的错误
+    const evidence = await failureEvidence(page).catch((reason) => ({
+      unavailable: String(reason),
+    }));
+    console.error(`失败时的现场：${JSON.stringify({ ...evidence, problems })}`);
+    throw error;
   } finally {
     await browser?.close().catch(() => undefined);
     app.kill();
   }
 
-  // 5. 主进程没了，引擎自己退出，不留下没人管的进程
+  // 7. 主进程没了，引擎自己退出，不留下没人管的进程
   if (engine) {
     const gone = performance.now();
     await waitFor('引擎随主进程退出', () => !isRunning(engine), 5000);
