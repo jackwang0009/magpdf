@@ -556,6 +556,20 @@ impl<'lib> Session<'lib> {
     }
 
     /// 对象现在在哪一页、第几层。没列过对象的页上的对象还没有编号，自然也找不到。
+    /// 这些对象在页内的层级序号，顺序和 `ids` 一致。分层渲染（方案 3.2）按序号告诉 PDFium 留哪些对象。
+    /// 有对象不在这一页上，或者这一页的对象还没有列过，报 [`EditError::NoObject`]。
+    pub fn z_indices(&self, page: usize, ids: &[ObjectId]) -> Result<Vec<usize>> {
+        let on_page = self.ids.get(&page).map_or(&[][..], Vec::as_slice);
+        ids.iter()
+            .map(|id| {
+                on_page
+                    .iter()
+                    .position(|known| known == id)
+                    .ok_or(EditError::NoObject(*id))
+            })
+            .collect()
+    }
+
     fn locate(&self, id: ObjectId) -> Result<(usize, usize)> {
         self.ids
             .iter()
@@ -1083,6 +1097,33 @@ mod tests {
             );
             assert_eq!(session.version(), 0);
         }
+    }
+
+    /// 分层渲染按页内序号指对象：编号换成序号，删除、撤销之后跟着变。
+    #[test]
+    fn object_ids_map_to_their_current_z_index() {
+        with_session(|session| {
+            add_rect(session, 100.0, 40.0, 60.0, 40.0, DARK);
+            add_rect(session, 150.0, 10.0, 20.0, 20.0, DARK);
+            let ids: Vec<ObjectId> = session.objects(0).unwrap().iter().map(|o| o.id).collect();
+            assert_eq!(session.z_indices(0, &[ids[2], ids[0]]).unwrap(), vec![2, 0]);
+            assert!(session.z_indices(0, &[]).unwrap().is_empty());
+
+            // 删掉中间的一个，上面的对象往下挪一位；撤销之后回到原位
+            session.delete(&[ids[1]]).unwrap();
+            assert_eq!(session.z_indices(0, &[ids[2]]).unwrap(), vec![1]);
+            assert!(matches!(
+                session.z_indices(0, &[ids[0], ids[1]]),
+                Err(EditError::NoObject(id)) if id == ids[1]
+            ));
+            session.undo().unwrap();
+            assert_eq!(session.z_indices(0, &ids).unwrap(), vec![0, 1, 2]);
+
+            // 不认识的编号、别的页、没有列过对象的页
+            assert!(session.z_indices(0, &[ObjectId(9999)]).is_err());
+            session.add_blank_page(200.0, 100.0).unwrap();
+            assert!(session.z_indices(1, &[ids[0]]).is_err());
+        });
     }
 
     /// 校验的结论只得出一次、只报告一次：修改命令顺带做的校验也算。

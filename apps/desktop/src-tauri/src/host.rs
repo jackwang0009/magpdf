@@ -245,6 +245,7 @@ impl Host {
                     scale,
                     tiles: vec![TileCoord { x, y }],
                     priority: RenderPriority::Visible,
+                    layer: None,
                 },
             )
             .await?;

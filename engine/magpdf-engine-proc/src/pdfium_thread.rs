@@ -13,7 +13,8 @@ use anyhow::{Context, Result};
 use magpdf_engine::edit::{Change, EditError, HitMode, ObjectId, ObjectSummary, Session};
 use magpdf_ipc::messages::DocInfo;
 use pdfium_sys::{
-    Bitmap, Document, Library, Matrix, PageSurface, PixelRect, RenderFlags, render_rect,
+    Bitmap, Document, LayerFilter, Library, Matrix, PageSurface, PixelRect, RenderFlags,
+    render_rect, render_rect_filtered,
 };
 use tokio::sync::{mpsc, oneshot};
 
@@ -58,6 +59,20 @@ pub enum EditOp {
     Undo,
     Redo,
 }
+
+/// 分层渲染里的一层（拖动预览，方案 3.2）。
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Layer {
+    /// 底图：去掉这些对象，其余照常画在白底上。
+    Without(Vec<ObjectId>),
+    /// 对象层：只画这些对象，别处全透明。
+    Only(Vec<ObjectId>),
+}
+
+/// 整页瓦片的底色：不透明的白。
+const PAPER: u32 = 0xFFFF_FFFF;
+/// 对象层的底色：全透明。
+const CLEAR: u32 = 0x0000_0000;
 
 /// 一页的保真校验状态（方案 2.3）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -121,13 +136,14 @@ pub enum Job {
         password: Option<String>,
         reply: Reply<DocInfo>,
     },
-    /// 渲染一块瓦片，返回 512×512 BGRA 和渲染时的文档版本号。
+    /// 渲染一块瓦片，返回 512×512 BGRA 和渲染时的文档版本号。`layer` 有值时只画页面的那一层。
     RenderTile {
         doc_id: u32,
         page_id: u32,
         scale: f32,
         x: u32,
         y: u32,
+        layer: Option<Layer>,
         reply: Reply<(Bitmap, u64)>,
     },
     /// 整页像素尺寸，供恢复后界面重建视图。
@@ -268,15 +284,16 @@ impl EngineHandle {
         doc_id: u32,
         page_id: u32,
         scale: f32,
-        x: u32,
-        y: u32,
+        tile: (u32, u32),
+        layer: Option<Layer>,
     ) -> std::result::Result<(Bitmap, u64), EngineError> {
         self.ask(|reply| Job::RenderTile {
             doc_id,
             page_id,
             scale,
-            x,
-            y,
+            x: tile.0,
+            y: tile.1,
+            layer,
             reply,
         })
         .await
@@ -451,9 +468,10 @@ impl PdfiumState {
                 scale,
                 x,
                 y,
+                layer,
                 reply,
             } => {
-                let rendered = self.render_tile(doc_id, page_id, scale, x, y);
+                let rendered = self.render_tile(doc_id, page_id, scale, (x, y), layer.as_ref());
                 if rendered.is_ok() {
                     // 这一页显示出来了：等队列空了，提前把它的保真校验做掉（方案 2.3）。
                     self.queue_background_check(doc_id, page_id as usize);
@@ -728,24 +746,45 @@ impl PdfiumState {
         doc_id: u32,
         page_id: u32,
         scale: f32,
-        x: u32,
-        y: u32,
+        (x, y): (u32, u32),
+        layer: Option<&Layer>,
     ) -> std::result::Result<(Bitmap, u64), EngineError> {
         let (d, page) = self.page_of(doc_id, page_id)?;
         let version = d.session.version();
+        // 层里的对象换成页内序号。对不上的（不在这一页、已经删掉）整块瓦片不画。
+        let kept = match layer {
+            None => None,
+            Some(Layer::Without(ids)) => Some((false, d.session.z_indices(page, ids)?)),
+            Some(Layer::Only(ids)) => Some((true, d.session.z_indices(page, ids)?)),
+        };
+        // 页面句柄用完就关：分层渲染在句柄里留下的“已修改”标记随它一起没有，文档不受影响
+        // （见 `render_rect_filtered` 的说明）。
         let page = d
             .session
             .document()
             .page(page)
             .map_err(|e| EngineError::Render(e.to_string()))?;
         let surface = PageSurface::new(&page, scale);
-        let bitmap = render_rect(
-            &page,
-            surface,
-            PixelRect::tile(x, y),
-            RenderFlags::NONE,
-            0xFFFF_FFFF,
-        )
+        let rect = PixelRect::tile(x, y);
+        let bitmap = match &kept {
+            None => render_rect(&page, surface, rect, RenderFlags::NONE, PAPER),
+            Some((false, indices)) => render_rect_filtered(
+                &page,
+                surface,
+                rect,
+                RenderFlags::NONE,
+                PAPER,
+                LayerFilter::Without(indices),
+            ),
+            Some((true, indices)) => render_rect_filtered(
+                &page,
+                surface,
+                rect,
+                RenderFlags::NONE,
+                CLEAR,
+                LayerFilter::Only(indices),
+            ),
+        }
         .map_err(|e| EngineError::Render(e.to_string()))?;
         Ok((bitmap, version))
     }

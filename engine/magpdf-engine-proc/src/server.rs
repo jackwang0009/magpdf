@@ -17,10 +17,10 @@ use magpdf_ipc::messages::{
     self, BenchEngineParams, Color, ColorSpace, DocChanged, DocCloseParams, DocInfo, DocOpenParams,
     DocSnapshot, DocSnapshotParams, EchoParams, EditDeleteParams, EditResult, EditSetStyleParams,
     EditTransformParams, ErrorCode, Fidelity, FidelityCheckParams, FidelityResult, HelloParams,
-    HelloResult, HistoryParams, JsonValue, OBJ_LIST_MAX, ObjHitTestParams, ObjListParams,
-    PageChange, PageInfo, PingParams, RenderTilesParams, RenderTilesResult, Request, RequestId,
-    Response, RoundtripParams, RoundtripResult, RpcError, StallParams, TileCoord, TileFetchParams,
-    TileFetchResult, method,
+    HelloResult, HistoryParams, JsonValue, LayerMode, OBJ_LIST_MAX, ObjHitTestParams,
+    ObjListParams, PageChange, PageInfo, PingParams, RenderTilesParams, RenderTilesResult, Request,
+    RequestId, Response, RoundtripParams, RoundtripResult, RpcError, StallParams, TileCoord,
+    TileFetchParams, TileFetchResult, method,
 };
 use magpdf_ipc::shm::{self, Layout, MappedRegion};
 use magpdf_ipc::{PROTOCOL_VERSION, pipe, pump};
@@ -28,7 +28,7 @@ use pdfium_sys::Matrix;
 use tokio::net::windows::named_pipe::NamedPipeServer;
 use tokio::sync::mpsc;
 
-use crate::pdfium_thread::{EditOp, EngineHandle, Notice, PageFidelity};
+use crate::pdfium_thread::{EditOp, EngineHandle, Layer, Notice, PageFidelity};
 use crate::recovery::{DocRecovery, RecoveryFile};
 use crate::slots::{SlotTable, TileKey};
 
@@ -663,19 +663,41 @@ fn schedule_tiles(
     p: RenderTilesParams,
     out: mpsc::UnboundedSender<Outgoing>,
 ) -> Vec<u32> {
-    record_view(engine, &p);
+    // 分层渲染（方案 3.2）：这一批瓦片只画页面的一层。它是拖动预览要的，不是用户换了地方看，
+    // 不记成视图：对象层的瓦片在被拖对象那里，记了的话恢复出来的视图就跑到那里去了。
+    if p.layer.is_none() {
+        record_view(engine, &p);
+    }
+    let layer = p.layer.as_ref().map(|layer| {
+        let ids = object_ids(&layer.object_ids);
+        Arc::new(match layer.mode {
+            LayerMode::Without => Layer::Without(ids),
+            LayerMode::Only => Layer::Only(ids),
+        })
+    });
+    let fingerprint = layer.as_deref().map(layer_fingerprint);
     let mut ids = Vec::with_capacity(p.tiles.len());
     for TileCoord { x, y } in p.tiles {
         let request_id = engine.next_request_id.fetch_add(1, Ordering::Relaxed);
         ids.push(request_id);
-        let key = TileKey::new(p.doc_id, p.page_id, p.scale, x, y);
+        let whole = TileKey::new(p.doc_id, p.page_id, p.scale, x, y);
+        let key = fingerprint.map_or(whole, |fingerprint| whole.in_layer(fingerprint));
         let engine = engine.clone();
         let out = out.clone();
+        let layer = layer.clone();
         tokio::spawn(async move {
-            render_and_publish(&engine, request_id, key, &out).await;
+            render_and_publish(&engine, request_id, key, layer.as_deref(), &out).await;
         });
     }
     ids
+}
+
+/// 一层的指纹：留哪些对象、是去掉还是只留。只用来把各层的瓦片在槽位表里分开。
+fn layer_fingerprint(layer: &Layer) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    layer.hash(&mut hasher);
+    hasher.finish()
 }
 
 /// 记录视图（恢复文件用）：docId、页码、缩放与瓦片位置。每次渲染请求更新一次并立即落盘（演示级实现，
@@ -710,12 +732,19 @@ async fn render_and_publish(
     engine: &Arc<Engine>,
     request_id: u32,
     key: TileKey,
+    layer: Option<&Layer>,
     out: &mpsc::UnboundedSender<Outgoing>,
 ) {
     let scale = key.scale();
     let (bitmap, version) = match engine
         .engine
-        .render_tile(key.doc_id, key.page_id, scale, key.x, key.y)
+        .render_tile(
+            key.doc_id,
+            key.page_id,
+            scale,
+            (key.x, key.y),
+            layer.cloned(),
+        )
         .await
     {
         Ok(rendered) => rendered,

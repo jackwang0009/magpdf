@@ -612,6 +612,27 @@ impl fmt::Display for TileCoord {
     }
 }
 
+/// 分层渲染里的一层留哪些对象（拖动预览，方案 3.2）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum LayerMode {
+    /// 底图：去掉指定的对象，其余照常画在白纸上。
+    Without,
+    /// 对象层：只画指定的对象，别处全透明。像素是**没有预乘**的 BGRA，界面合成时自己预乘。
+    Only,
+}
+
+/// `render.tiles` 的 `layer`：这一批瓦片只画页面的一层。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct TileLayer {
+    pub mode: LayerMode,
+    /// 对象在会话内的编号，都要在这一页上；有对不上的，这一批瓦片渲染不出来。
+    pub object_ids: Vec<u64>,
+}
+
 /// `render.tiles` 的参数（《接口协议》6.3）。V06 原型固定 512×512 瓦片。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -622,6 +643,12 @@ pub struct RenderTilesParams {
     pub scale: f32,
     pub tiles: Vec<TileCoord>,
     pub priority: RenderPriority,
+    /// 分层渲染（拖动预览，方案 3.2）：只画页面的一层。省略时画整页。
+    ///
+    /// 《接口协议》6.3 写的是单独的 `render.layered`，一次返回两张视口大小的位图。原型里位图只有瓦片
+    /// 这一条路（共享内存的槽位是 512×512），所以做成 `render.tiles` 的一个参数：两层各发一批瓦片。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layer: Option<TileLayer>,
 }
 
 /// 渲染优先级（《接口协议》6.3）。

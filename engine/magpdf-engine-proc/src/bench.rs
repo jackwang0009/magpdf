@@ -50,7 +50,7 @@ pub async fn run(engine: &Engine, p: BenchEngineParams) -> Result<BenchEngineRes
     // 1. 共享内存：写入与读出（预渲染一块瓦片作为被测数据）。
     let (bitmap, _) = engine
         .engine
-        .render_tile(doc.doc_id, 0, 1.0, x, y)
+        .render_tile(doc.doc_id, 0, 1.0, (x, y), None)
         .await
         .map_err(|e| err(e.to_string()))?;
     let pixels = bitmap.bgra().to_vec();
@@ -113,7 +113,7 @@ pub async fn run(engine: &Engine, p: BenchEngineParams) -> Result<BenchEngineRes
         let t0 = std::time::Instant::now();
         let (b, _) = engine
             .engine
-            .render_tile(doc.doc_id, 0, 1.0, x, y)
+            .render_tile(doc.doc_id, 0, 1.0, (x, y), None)
             .await
             .map_err(|e| err(e.to_string()))?;
         render_tile.push(t0.elapsed().as_secs_f64() * 1e6);

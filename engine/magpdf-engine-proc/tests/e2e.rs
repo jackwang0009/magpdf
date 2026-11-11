@@ -205,19 +205,29 @@ impl Engine {
 
     /// 请求渲染一块瓦片，等它的 `render.tileReady`。返回（从发请求到事件到达的时间，事件参数）。
     async fn render_tile(&mut self, doc_id: u64, scale: f64, x: u32, y: u32) -> (Duration, Value) {
+        self.render_tile_of(doc_id, scale, (x, y), None).await
+    }
+
+    /// 同上；`layer` 有值时只画页面的一层（分层渲染，方案 3.2）。
+    async fn render_tile_of(
+        &mut self,
+        doc_id: u64,
+        scale: f64,
+        (x, y): (u32, u32),
+        layer: Option<Value>,
+    ) -> (Duration, Value) {
         let sent = Instant::now();
-        let result = self
-            .call(
-                method::RENDER_TILES,
-                json!({
-                    "docId": doc_id,
-                    "pageId": 0,
-                    "scale": scale,
-                    "tiles": [{ "x": x, "y": y }],
-                    "priority": "visible",
-                }),
-            )
-            .await;
+        let mut params = json!({
+            "docId": doc_id,
+            "pageId": 0,
+            "scale": scale,
+            "tiles": [{ "x": x, "y": y }],
+            "priority": "visible",
+        });
+        if let Some(layer) = layer {
+            params["layer"] = layer;
+        }
+        let result = self.call(method::RENDER_TILES, params).await;
         let request_id = result["requestIds"][0].as_u64().expect("requestIds");
         let (at, ready) = self.event(event::RENDER_TILE_READY).await;
         assert_eq!(ready["requestId"], request_id, "{ready}");
@@ -241,13 +251,16 @@ impl Engine {
         (version, changed)
     }
 
+    /// 恢复文件现在的内容；还没有写过时是 `Value::Null`。
+    fn recovery_state(&self) -> Value {
+        std::fs::read(&self.recovery)
+            .ok()
+            .map_or(Value::Null, |bytes| serde_json::from_slice(&bytes).unwrap())
+    }
+
     /// 恢复文件里记了几份文档。
     fn recovery_docs(&self) -> usize {
-        let Ok(bytes) = std::fs::read(&self.recovery) else {
-            return 0;
-        };
-        let state: Value = serde_json::from_slice(&bytes).unwrap();
-        state["docs"].as_array().map_or(0, Vec::len)
+        self.recovery_state()["docs"].as_array().map_or(0, Vec::len)
     }
 }
 
@@ -838,6 +851,128 @@ async fn fidelity_is_checked_ahead_of_time_and_on_request() {
         }
         other => panic!("结论只能是 ok 或 overlayOnly：{other:?}"),
     }
+}
+
+/// 分层渲染（拖动预览，方案 3.2）：`render.tiles` 带上 `layer`，同一块瓦片可以只画底图（去掉选中的对象）
+/// 或者只画对象层（只有选中的对象，别处透明）。渲染完文档没有变，照常能改。
+#[tokio::test]
+async fn layered_tiles_split_a_page_into_a_base_and_an_object_layer() {
+    let mut engine = Engine::start(None).await;
+    engine.hello().await;
+    // 300×200 pt 的一页，上排三个灰度色块。1 倍缩放下第一个色块的中心在像素 (50, 50)，第二个在 (130, 50)。
+    let doc_id = engine.open("color-devicegray.pdf").await;
+    let objects = engine.objects(doc_id).await;
+    let first = objects[0]["id"].as_u64().unwrap();
+    assert_eq!(objects[0]["bbox"], json!([20.0, 120.0, 80.0, 180.0]));
+    let region = shm::open(&engine.session).unwrap();
+
+    /// 一块瓦片里某个像素的 BGRA。
+    fn pixel(tile: &[u8], x: usize, y: usize) -> [u8; 4] {
+        let at = (y * shm::TILE_SIZE as usize + x) * 4;
+        [tile[at], tile[at + 1], tile[at + 2], tile[at + 3]]
+    }
+    const FIRST: (usize, usize) = (50, 50);
+    const SECOND: (usize, usize) = (130, 50);
+    /// 页面之外：1 倍缩放下页面只占瓦片的左上角
+    const OUTSIDE: (usize, usize) = (400, 400);
+    const PAPER: [u8; 4] = [255, 255, 255, 255];
+    const NOTHING: [u8; 4] = [0, 0, 0, 0];
+    let is_ink = |px: [u8; 4]| px[3] == 255 && px[..3].iter().all(|&c| c < 240);
+
+    let tile = async |engine: &mut Engine, layer: Option<Value>| {
+        let (_, ready) = engine.render_tile_of(doc_id, 1.0, (0, 0), layer).await;
+        let slot = u32::try_from(ready["slot"].as_u64().unwrap()).unwrap();
+        let generation = u32::try_from(ready["generation"].as_u64().unwrap()).unwrap();
+        region.read_tile(slot, generation).unwrap()
+    };
+
+    let whole = tile(&mut engine, None).await;
+    assert!(is_ink(pixel(&whole, FIRST.0, FIRST.1)));
+    assert!(is_ink(pixel(&whole, SECOND.0, SECOND.1)));
+    assert_eq!(pixel(&whole, OUTSIDE.0, OUTSIDE.1), PAPER);
+    // 整页的请求记成了视图（恢复文件，每记一次 revision 加一）
+    let view = engine.recovery_state();
+    assert_eq!(view["docs"][0]["pageId"], 0, "{view}");
+
+    // 底图：第一个色块不见了，露出白纸；别的对象都在
+    let base = tile(
+        &mut engine,
+        Some(json!({ "mode": "without", "objectIds": [first] })),
+    )
+    .await;
+    assert_eq!(pixel(&base, FIRST.0, FIRST.1), PAPER);
+    assert_eq!(
+        pixel(&base, SECOND.0, SECOND.1),
+        pixel(&whole, SECOND.0, SECOND.1)
+    );
+    assert_eq!(pixel(&base, OUTSIDE.0, OUTSIDE.1), PAPER);
+
+    // 对象层：只有第一个色块，颜色和整页里的一样；别处（包括页面之外）全透明
+    let only = tile(
+        &mut engine,
+        Some(json!({ "mode": "only", "objectIds": [first] })),
+    )
+    .await;
+    assert_eq!(
+        pixel(&only, FIRST.0, FIRST.1),
+        pixel(&whole, FIRST.0, FIRST.1)
+    );
+    assert_eq!(pixel(&only, SECOND.0, SECOND.1), NOTHING);
+    assert_eq!(pixel(&only, OUTSIDE.0, OUTSIDE.1), NOTHING);
+    // 两层叠起来就是整页：对象层不透明的地方用它，其余用底图
+    let stacked: Vec<u8> = only
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(base.as_chunks::<4>().0)
+        .flat_map(|(top, bottom)| if top[3] == 255 { *top } else { *bottom })
+        .collect();
+    let differing = stacked
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(whole.as_chunks::<4>().0)
+        .filter(|(a, b)| a != b)
+        .count();
+    assert_eq!(differing, 0, "底图加对象层应当和整页一模一样");
+
+    // 对象不在这一页上：这一批瓦片渲染不出来，没有 tileReady；之后的请求不受影响
+    engine
+        .call(
+            method::RENDER_TILES,
+            json!({
+                "docId": doc_id, "pageId": 0, "scale": 1.0, "tiles": [{ "x": 0, "y": 0 }],
+                "priority": "visible",
+                "layer": { "mode": "only", "objectIds": [first, 987_654] },
+            }),
+        )
+        .await;
+
+    // 各层的请求是拖动预览要的，不是用户换了地方看：恢复文件里记的视图没有动过
+    assert_eq!(engine.recovery_state(), view, "分层渲染的请求不该记成视图");
+
+    // 分层渲染不留痕迹：整页的瓦片和之前逐字节相同，文档版本没有变，照常能改
+    let again = tile(&mut engine, None).await;
+    assert!(again == whole, "分层渲染之后整页的瓦片变了");
+    let snapshot = engine
+        .call(method::DOC_SNAPSHOT, json!({ "docId": doc_id }))
+        .await;
+    assert_eq!(snapshot["version"], 0);
+    let (version, _) = engine
+        .edit(
+            method::EDIT_TRANSFORM,
+            json!({ "docId": doc_id, "baseVersion": 0, "ids": [first], "matrix": [1, 0, 0, 1, 80, 0] }),
+        )
+        .await;
+    assert_eq!(version, 1);
+    // 改完之后，第一个色块原来的地方空了，对象层里它在新的位置上
+    let moved = tile(
+        &mut engine,
+        Some(json!({ "mode": "only", "objectIds": [first] })),
+    )
+    .await;
+    assert_eq!(pixel(&moved, FIRST.0, FIRST.1), NOTHING);
+    assert!(is_ink(pixel(&moved, SECOND.0, SECOND.1)));
 }
 
 /// `doc.open` 的失败用《接口协议》第 8 节的错误码区分。

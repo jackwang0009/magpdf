@@ -17,6 +17,9 @@ pub struct TileKey {
     scale_bits: u32,
     pub x: u32,
     pub y: u32,
+    /// 分层渲染（方案 3.2）时这块瓦片属于哪一层：0 是整页，其余是那一层的指纹。
+    /// 同一个位置上，整页的瓦片和各层的瓦片是不同的缓存项。
+    layer: u64,
 }
 
 impl TileKey {
@@ -27,7 +30,15 @@ impl TileKey {
             scale_bits: scale.to_bits(),
             x,
             y,
+            layer: 0,
         }
+    }
+
+    /// 同一个位置上某一层的瓦片。`fingerprint` 由“留哪些对象”算出来，不同的层给不同的值。
+    pub fn in_layer(mut self, fingerprint: u64) -> Self {
+        // 0 留给整页
+        self.layer = fingerprint.max(1);
+        self
     }
 
     /// 请求里的缩放倍数，原样取回。
@@ -180,5 +191,25 @@ mod tests {
             TileKey::new(1, 0, 1.886, 0, 0)
         );
         assert_ne!(TileKey::new(1, 0, 1.0, 0, 0), TileKey::new(1, 0, 2.0, 0, 0));
+    }
+
+    #[test]
+    fn layers_of_the_same_tile_are_separate_entries() {
+        let whole = key(0);
+        assert_ne!(whole, whole.in_layer(7));
+        assert_ne!(whole.in_layer(7), whole.in_layer(8));
+        assert_eq!(whole.in_layer(7), whole.in_layer(7));
+        // 指纹恰好是 0 也不会和整页的瓦片混在一起
+        assert_ne!(whole, whole.in_layer(0));
+
+        let mut t = SlotTable::new(4);
+        let a = t.acquire(whole);
+        t.commit(a, 2);
+        let b = t.acquire(whole.in_layer(7));
+        t.commit(b, 2);
+        assert_ne!(a, b);
+        assert_eq!(t.hit(&whole), Some((a, 2)));
+        assert_eq!(t.hit(&whole.in_layer(7)), Some((b, 2)));
+        assert_eq!(t.hit(&whole.in_layer(8)), None);
     }
 }
