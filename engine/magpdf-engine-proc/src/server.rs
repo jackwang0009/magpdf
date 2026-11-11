@@ -19,7 +19,7 @@ use magpdf_ipc::messages::{
     EditTransformParams, ErrorCode, HelloParams, HelloResult, HistoryParams, JsonValue,
     OBJ_LIST_MAX, ObjHitTestParams, ObjListParams, PageChange, PageInfo, PingParams,
     RenderTilesParams, RenderTilesResult, Request, RequestId, Response, RoundtripParams,
-    RoundtripResult, RpcError, TileCoord, TileFetchParams, TileFetchResult, method,
+    RoundtripResult, RpcError, StallParams, TileCoord, TileFetchParams, TileFetchResult, method,
 };
 use magpdf_ipc::shm::{self, Layout, MappedRegion};
 use magpdf_ipc::{PROTOCOL_VERSION, pipe, pump};
@@ -38,15 +38,18 @@ pub struct EngineConfig {
     pub session: String,
     pub recovery: Option<PathBuf>,
     pub slots: u32,
+    /// 打开只给测试用的方法（`bench.stall`）。
+    pub test_hooks: bool,
 }
 
 impl EngineConfig {
-    /// 解析 `--pipe <名字> --session <ID> [--recovery <路径>] [--slots <n>]`。
+    /// 解析 `--pipe <名字> --session <ID> [--recovery <路径>] [--slots <n>] [--test-hooks]`。
     pub fn from_args(args: impl Iterator<Item = String>) -> Result<Self> {
         let mut pipe = None;
         let mut session = None;
         let mut recovery = None;
         let mut slots = shm::DEFAULT_SLOTS;
+        let mut test_hooks = false;
         let mut it = args;
         while let Some(flag) = it.next() {
             let mut value = || -> Result<String> {
@@ -57,6 +60,7 @@ impl EngineConfig {
                 "--session" => session = Some(value()?),
                 "--recovery" => recovery = Some(PathBuf::from(value()?)),
                 "--slots" => slots = value()?.parse().context("槽位数不是整数")?,
+                "--test-hooks" => test_hooks = true,
                 other => anyhow::bail!("未知参数 {other}"),
             }
         }
@@ -65,6 +69,7 @@ impl EngineConfig {
             session: session.context("缺少 --session")?,
             recovery,
             slots,
+            test_hooks,
         })
     }
 }
@@ -95,6 +100,8 @@ pub struct Engine {
     pub shutdown: AtomicBool,
     pub next_request_id: AtomicU32,
     pub pdfium_revision: String,
+    /// 是否认只给测试用的方法。
+    pub test_hooks: bool,
 }
 
 impl Engine {
@@ -192,6 +199,7 @@ impl Engine {
             shutdown: AtomicBool::new(false),
             next_request_id: AtomicU32::new(1),
             pdfium_revision: format!("pdfium {}", pdfium_sys::Library::linked_version()),
+            test_hooks: config.test_hooks,
         })
     }
 }
@@ -207,6 +215,7 @@ fn answered_inline(method_name: &str) -> bool {
             | method::RENDER_CANCEL
             | method::TILE_FETCH
             | method::BENCH_ECHO
+            | method::BENCH_STALL
     )
 }
 
@@ -524,6 +533,13 @@ async fn handle_request(
         method::BENCH_ECHO => {
             let p: EchoParams = decode(params)?;
             Ok(Some(frame::response_ok(id, &p)))
+        }
+        method::BENCH_STALL if engine.test_hooks => {
+            let p: StallParams = decode(params)?;
+            // 故意把通信循环卡住，用来测主进程的心跳超时。这条请求在读循环里直接处理，
+            // 所以卡住期间别的请求（包括 session.ping）都得不到应答。
+            std::thread::sleep(Duration::from_millis(u64::from(p.ms)));
+            Ok(Some(frame::response_ok(id, &())))
         }
         method::BENCH_ROUNDTRIP => {
             let p: RoundtripParams = decode(params)?;

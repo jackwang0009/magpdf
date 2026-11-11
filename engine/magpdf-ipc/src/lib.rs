@@ -11,6 +11,7 @@
 
 pub mod codec;
 pub mod frame;
+pub mod host;
 pub mod messages;
 pub mod pipe;
 pub mod pump;

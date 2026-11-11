@@ -218,6 +218,8 @@ names! {
         BENCH_ECHO = "bench.echo";
         BENCH_ROUNDTRIP = "bench.roundtrip";
         BENCH_ENGINE = "bench.engine";
+        /// 测试用：让引擎的通信循环卡住一段时间。只有带 `--test-hooks` 启动的引擎认它。
+        BENCH_STALL = "bench.stall";
     }
 }
 
@@ -613,6 +615,14 @@ pub struct TileFetchResult {
 pub type EchoParams = PingParams;
 /// `bench.echo` 的返回值。
 pub type EchoResult = PingParams;
+
+/// `bench.stall` 的参数：通信循环卡住多少毫秒。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct StallParams {
+    pub ms: u32,
+}
 
 /// `bench.roundtrip` 的参数：主进程连续发 `count` 次 `bench.echo`，测量主进程到引擎的往返。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]

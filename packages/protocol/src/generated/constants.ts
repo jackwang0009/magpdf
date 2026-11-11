@@ -24,6 +24,7 @@ export const METHOD = {
   BENCH_ECHO: 'bench.echo',
   BENCH_ROUNDTRIP: 'bench.roundtrip',
   BENCH_ENGINE: 'bench.engine',
+  BENCH_STALL: 'bench.stall',
 } as const;
 
 /** 事件名（《接口协议》第 7 节）。 */

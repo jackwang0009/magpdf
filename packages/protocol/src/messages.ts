@@ -40,6 +40,7 @@ export type { Response } from './generated/Response';
 export type { RoundtripParams } from './generated/RoundtripParams';
 export type { RoundtripResult } from './generated/RoundtripResult';
 export type { RpcError } from './generated/RpcError';
+export type { StallParams } from './generated/StallParams';
 export type { Stats } from './generated/Stats';
 export type { TileCoord } from './generated/TileCoord';
 export type { TileFetchParams } from './generated/TileFetchParams';
