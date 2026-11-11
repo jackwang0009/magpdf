@@ -9,13 +9,16 @@ import {
   resizeRectByHandle,
 } from './handles';
 import type { HandleId } from './handles';
-import { transition } from './machine';
+import { hasFrozenObject, transition } from './machine';
 import type { ToolContext, ToolEffect, ToolMachine, ToolPointerEvent, Transition } from './machine';
 import { ROTATE_CURSOR } from './cursors';
 
 /**
  * 选择工具（V）状态机：点选、Shift 加选、框选、拖动移动、控制点缩放、旋转热区、方向键微移。
  * 《交互设计》2.1–2.2。
+ *
+ * 只能叠加内容的页（方案 2.3）上，原有的对象照常可以点选、框选，但不能修改：选区里只要有一个这样的
+ * 对象，就没有控制点和旋转热区，拖动、微移、删除都不起作用。
  */
 export type SelectState =
   | { readonly kind: 'idle' }
@@ -67,7 +70,9 @@ export type SelectState =
       readonly startAngle: number;
       readonly currentAngle: number;
       readonly ids: readonly string[];
-    };
+    }
+  /** 按住不能修改的对象在拖：什么都不动，光标提示“不行”，等鼠标抬起 */
+  | { readonly kind: 'refused' };
 
 /** 点选容差（px） */
 const HIT_TOLERANCE_PX = 3;
@@ -105,22 +110,32 @@ export const selectTool: ToolMachine<SelectState> = {
         return handleCursor(state.handle);
       case 'rotating':
         return ROTATE_CURSOR;
+      case 'refused':
+        return 'not-allowed';
       case 'pressed':
-        return state.hitId ? 'move' : 'default';
+        return state.hitId && !hasFrozenObject(ctx, dragTargets(ctx, state.hitId))
+          ? 'move'
+          : 'default';
       case 'idle': {
         if (!hover) return 'default';
-        const bbox = selectionScreenRect(ctx);
+        const frozen = hasFrozenObject(ctx, ctx.selection);
+        const bbox = frozen ? null : selectionScreenRect(ctx);
         if (bbox) {
           const handle = hitHandle(bbox, hover);
           if (handle) return handleCursor(handle);
           if (inRotateZone(bbox, hover)) return ROTATE_CURSOR;
         }
         const hit = hitObjectAtScreen(ctx, hover);
-        return hit && ctx.selection.includes(hit) ? 'move' : 'default';
+        return hit && ctx.selection.includes(hit) && !frozen ? 'move' : 'default';
       }
     }
   },
 };
+
+/** 按住 `hitId` 拖动时会一起动的对象：它在选区里就是整个选区，否则只有它自己。 */
+function dragTargets(ctx: ToolContext, hitId: string): readonly string[] {
+  return ctx.selection.includes(hitId) ? ctx.selection : [hitId];
+}
 
 function onPointerDown(
   state: SelectState,
@@ -129,7 +144,8 @@ function onPointerDown(
 ): Transition<SelectState> {
   if (event.button !== 0 || state.kind !== 'idle') return transition(state);
 
-  const bbox = selectionScreenRect(ctx);
+  // 选区里有不能修改的对象时没有控制点和旋转热区，按在那些位置上和按在别处一样
+  const bbox = hasFrozenObject(ctx, ctx.selection) ? null : selectionScreenRect(ctx);
   if (bbox && ctx.selection.length > 0) {
     const handle = hitHandle(bbox, event.screen);
     if (handle) {
@@ -191,7 +207,8 @@ function onPointerMove(
         return transition(state);
       }
       if (state.hitId) {
-        const ids = ctx.selection.includes(state.hitId) ? ctx.selection : [state.hitId];
+        const ids = dragTargets(ctx, state.hitId);
+        if (hasFrozenObject(ctx, ids)) return transition<SelectState>({ kind: 'refused' });
         const startRects = rectsFor(ctx, ids);
         const next: SelectState = {
           kind: 'moving',
@@ -261,6 +278,7 @@ function onPointerMove(
         overlay: { rotation: next.currentAngle - next.startAngle },
       });
     }
+    case 'refused':
     case 'idle':
       return transition(state);
   }
@@ -314,6 +332,8 @@ function onPointerUp(
     case 'rotating':
       // 旋转提交需要引擎侧的变换矩阵支持（P1）；P0 只保留状态与光标
       return transition(idle, { type: 'overlay', overlay: null });
+    case 'refused':
+      return transition(idle);
     case 'idle':
       return transition(state);
   }
@@ -343,7 +363,7 @@ function onCommand(state: SelectState, command: string, ctx: ToolContext): Trans
     case 'edit.nudgeDownLarge':
       return nudge(ctx, 0, step * 10);
     case 'edit.delete':
-      return ctx.selection.length
+      return ctx.selection.length && !hasFrozenObject(ctx, ctx.selection)
         ? transition(idle, { type: 'deleteObjects', ids: ctx.selection })
         : transition(idle);
     case 'edit.deselect':
@@ -362,7 +382,7 @@ function onCommand(state: SelectState, command: string, ctx: ToolContext): Trans
 }
 
 function nudge(ctx: ToolContext, dx: number, dy: number): Transition<SelectState> {
-  if (ctx.selection.length === 0) return transition(idle);
+  if (ctx.selection.length === 0 || hasFrozenObject(ctx, ctx.selection)) return transition(idle);
   return transition(idle, { type: 'moveObjects', ids: ctx.selection, dx, dy });
 }
 

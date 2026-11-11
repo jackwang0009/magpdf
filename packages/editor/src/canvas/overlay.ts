@@ -23,8 +23,10 @@ export interface OverlayScene {
   readonly hover: Rect | null;
   /** 选中对象各自的矩形（多选时画细线） */
   readonly selected: readonly Rect[];
-  /** 选区整体包围盒（画控制点） */
+  /** 选区整体包围盒 */
   readonly selectionBox: Rect | null;
+  /** 选框上画不画 8 个控制点。选区不能修改时不画（方案 2.3：只能叠加内容的页上的原有对象） */
+  readonly handles: boolean;
   readonly marquee: Rect | null;
   readonly zoomRect: Rect | null;
   /** 拖动/缩放预览 */
@@ -99,7 +101,7 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, scene: OverlayScene):
     ctx.lineWidth = metrics.selectionStroke;
     strokeCrisp(ctx, box);
     const size = metrics.handleSize;
-    for (const handle of handleCenters(box)) {
+    for (const handle of scene.handles ? handleCenters(box) : []) {
       const hx = Math.round(handle.center.x) - Math.floor(size / 2) - 0.5;
       const hy = Math.round(handle.center.y) - Math.floor(size / 2) - 0.5;
       ctx.fillStyle = palette.handleFill;

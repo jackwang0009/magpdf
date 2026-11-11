@@ -7,6 +7,7 @@ import { t } from '../i18n';
 import { editorStore } from '../store/editorStore';
 import type { EditorStore } from '../store/editorStore';
 import { TileCanvas } from '../canvas/TileCanvas';
+import { DocumentBanner } from './DocumentBanner';
 import { DocumentTab, DocumentsWatermark } from './DocumentTab';
 import { useEditorHost } from './editorHost';
 import { ComponentsPanel, ComponentStrip } from './panels/ComponentsPanel';
@@ -32,8 +33,8 @@ export interface WorkbenchProps {
 }
 
 /**
- * 文档面板：每个文档一个瓦片画布。宿主打开的文档，瓦片找宿主要、修改交给宿主；
- * 其余的（模拟文档）用模拟来源，修改直接落在 store 上。
+ * 文档面板：顶上是这份文档的提示条（有要说的才出现），下面是瓦片画布。宿主打开的文档，瓦片找宿主要、
+ * 修改交给宿主；其余的（模拟文档）用模拟来源，修改直接落在 store 上。
  */
 function CanvasPanel(props: IDockviewPanelProps<{ documentId: string }>) {
   const host = useEditorHost();
@@ -41,12 +42,15 @@ function CanvasPanel(props: IDockviewPanelProps<{ documentId: string }>) {
   const provider = host?.tileProvider(documentId);
   const editor = host?.documentEditor(documentId);
   return (
-    <TileCanvas
-      documentId={documentId}
-      store={editorStore}
-      {...(provider ? { provider } : {})}
-      {...(editor ? { editor } : {})}
-    />
+    <div className="mg-doc-panel">
+      <DocumentBanner documentId={documentId} />
+      <TileCanvas
+        documentId={documentId}
+        store={editorStore}
+        {...(provider ? { provider } : {})}
+        {...(editor ? { editor } : {})}
+      />
+    </div>
   );
 }
 

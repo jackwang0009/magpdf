@@ -2,6 +2,7 @@ import { Field, Icon, SectionHeader } from '@magpdf/ui';
 import { ptToMm } from '../../geometry';
 import { t } from '../../i18n';
 import { activeDocument, useEditorStore } from '../../store/editorStore';
+import { overlayOnlyDetail } from '../DocumentBanner';
 import { PanelFrame } from './PanelFrame';
 
 /** 属性面板：单个对象显示变换与组件参数；多选显示数量；空选显示提示。 */
@@ -18,9 +19,18 @@ export function PropertiesPanel() {
       </PanelFrame>
     );
   }
+  // 只能叠加内容的页上，原有对象的属性只读，面板顶部说明原因（《交互设计》5.3）
+  const frozen = objects.filter(({ page }) => page.overlayOnly).map(({ page }) => page);
+  const readOnly =
+    frozen.length > 0 ? (
+      <p className="mg-props-readonly" title={overlayOnlyDetail(frozen)}>
+        <Icon name="lock" size={12} /> {t.overlayOnly.properties}
+      </p>
+    ) : null;
   if (objects.length > 1) {
     return (
       <PanelFrame>
+        {readOnly}
         <p className="mg-empty">
           {t.properties.multiSelection.replace('{n}', String(objects.length))}
         </p>
@@ -32,6 +42,7 @@ export function PropertiesPanel() {
   const b = object.bbox;
   return (
     <PanelFrame>
+      {readOnly}
       <div className="mg-props-head">
         <span className="mg-props-name">{object.name}</span>
         {object.type === 'component' && object.componentKind ? (

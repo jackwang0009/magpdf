@@ -10,10 +10,13 @@ import type {
   EditTransformParams,
   EngineFailed,
   EngineRestored,
+  FidelityCheckParams,
+  FidelityResult,
   HistoryParams,
   ObjListParams,
   ObjectKind,
   ObjectSummary,
+  PageInfo,
   RpcError,
 } from '@magpdf/protocol';
 import type { TileProvider } from '../canvas/tileProvider';
@@ -87,6 +90,9 @@ interface EngineDocument {
  * - **修改**：移动、缩放、删除、撤销、重做都发给引擎执行。界面先按预期把对象挪过去（不等引擎），
  *   引擎推送 `doc.changed` 之后重新取这一页的对象，以引擎的为准，画面随之重画；
  *   引擎不接受时界面恢复原状，并告诉用户原因。
+ * - **只能叠加内容的页**（方案 2.3）：页面显示之后引擎会在空闲时做保真校验，结论经 `fidelity.result`
+ *   推送过来，记在页面快照的 `overlayOnly` 上；工具据此不让修改这一页原有的对象，外壳据此显示提示条。
+ *   校验还没做完用户就动手了也没关系：引擎在执行修改命令前自己会校验，不通过就拒绝，界面恢复原状。
  * - **引擎重启**：按路径把文档和新的 `docId` 对上，重新载入；对不上的关掉并告诉用户。
  */
 export class EngineSession implements EditorHost {
@@ -224,6 +230,8 @@ export class EngineSession implements EditorHost {
           height: page.height,
           objects: [],
           revision: ++this.revision,
+          // 界面重新加载之后接回来的文档，引擎那边可能早就校验过了
+          ...overlayOnlyOf(page),
         })),
     };
   }
@@ -256,7 +264,25 @@ export class EngineSession implements EditorHost {
   ): void {
     const current = this.store.getState().documents[document.id]?.snapshot;
     if (!current) return;
-    this.store.getState().updateSnapshot(document.id, update(current));
+    const next = update(current);
+    if (next !== current) this.store.getState().updateSnapshot(document.id, next);
+  }
+
+  /** 记下一页保真校验的结论：`reason` 有值表示只能叠加内容，null 表示可以修改原有对象。 */
+  private setOverlayOnly(document: EngineDocument, index: number, reason: string | null): void {
+    this.mutate(document, (snapshot) => {
+      const page = snapshot.pages[index];
+      if (!page || (page.overlayOnly?.reason ?? null) === reason) return snapshot;
+      const { overlayOnly: _before, ...rest } = page;
+      const next = reason === null ? rest : { ...rest, overlayOnly: { reason } };
+      return { ...snapshot, pages: snapshot.pages.map((p, i) => (i === index ? next : p)) };
+    });
+  }
+
+  /** 这一页是不是只能叠加内容（按界面现在知道的）。 */
+  private isOverlayOnly(document: EngineDocument, index: number): boolean {
+    const snapshot = this.store.getState().documents[document.id]?.snapshot;
+    return snapshot?.pages[index]?.overlayOnly !== undefined;
   }
 
   /** 换掉几页上的对象列表（页序号 → 新列表的算法），画面的修订号不动。 */
@@ -308,6 +334,9 @@ export class EngineSession implements EditorHost {
         if (!current()) return;
         display = displayMatrix({ cropBox: info.cropBox, rotate: info.rotate });
         page.display = display;
+        if (info.fidelity !== 'pending') {
+          this.setOverlayOnly(document, index, overlayOnlyOf(info).overlayOnly?.reason ?? null);
+        }
       }
       const summaries = await this.listObjects(docId, page.pageId);
       if (!current()) return;
@@ -358,6 +387,8 @@ export class EngineSession implements EditorHost {
   private transformObjects(document: EngineDocument, changes: readonly PageTransform[]): void {
     const commands: { readonly ids: number[]; readonly matrix: Matrix }[] = [];
     const patches = new Map<number, (objects: readonly PageObject[]) => readonly PageObject[]>();
+    // 工具不会让只能叠加内容的页上的对象动起来；这里再拦一道，这样的页一个对象也不发给引擎
+    if (changes.some((change) => this.isOverlayOnly(document, change.page))) return;
     for (const change of changes) {
       const display = document.pages[change.page]?.display;
       const matrix = display && pageTransformToUser(display, change.matrix);
@@ -403,6 +434,7 @@ export class EngineSession implements EditorHost {
       const page = pageOfObject(id);
       if (page !== null) patches.set(page, (objects) => objects.filter((o) => !gone.has(o.id)));
     }
+    if ([...patches.keys()].some((page) => this.isOverlayOnly(document, page))) return;
     this.patchObjects(document, patches);
     // 几页上的对象一起删是一条命令，撤销时一起回来
     this.enqueue(document, [...patches.keys()], () =>
@@ -445,7 +477,7 @@ export class EngineSession implements EditorHost {
       } catch (error) {
         // 界面上先改的要撤回来：等会儿按引擎的对象列表重新取
         for (const page of pages) page.reloadAfterEdits = true;
-        this.reportEditFailure(error);
+        this.reportEditFailure(document, pages, error);
       } finally {
         for (const page of pages) {
           page.pendingEdits--;
@@ -492,15 +524,37 @@ export class EngineSession implements EditorHost {
     }
   }
 
-  private reportEditFailure(error: unknown): void {
+  private reportEditFailure(
+    document: EngineDocument,
+    touched: readonly EnginePage[],
+    error: unknown,
+  ): void {
     // 引擎重启另有提示，文档恢复后整份重新载入
     if (isEngineRestarted(error)) return;
     if (isRpcError(error) && error.code === ERROR_CODE.E_PAGE_OVERLAY_ONLY) {
-      this.notify('error', t.host.pageOverlayOnly);
+      // 用户赶在后台的保真校验做完之前动了手。不弹框：对象回到原处，这一页的提示条随校验结论出现。
+      // 引擎拒绝时通常已经把结论推送过来了；万一界面还不知道，点名问一次。
+      const unknown = touched.filter((page) => {
+        const index = document.pages.indexOf(page);
+        return index >= 0 && !this.isOverlayOnly(document, index);
+      });
+      if (unknown.length > 0) this.askFidelity(document, unknown);
       return;
     }
     console.error('修改命令失败', error);
     this.notify('error', format(t.host.editFailed, { reason: describeError(error) }));
+  }
+
+  /** 请引擎马上校验这几页；结论走 `fidelity.result`。 */
+  private askFidelity(document: EngineDocument, pages: readonly EnginePage[]): void {
+    if (document.docId === null) return;
+    const params: FidelityCheckParams = {
+      docId: document.docId,
+      pageIds: pages.map((page) => page.pageId),
+    };
+    this.transport.request(METHOD.FIDELITY_CHECK, params).catch((error: unknown) => {
+      if (!isEngineRestarted(error)) console.error('fidelity.check 失败', error);
+    });
   }
 
   // ---------- 事件 ----------
@@ -509,6 +563,9 @@ export class EngineSession implements EditorHost {
     switch (event.method) {
       case EVENT.DOC_CHANGED:
         this.onDocumentChanged(event.params as DocChanged);
+        break;
+      case EVENT.FIDELITY_RESULT:
+        this.onFidelityResult(event.params as FidelityResult);
         break;
       case EVENT.ENGINE_RESTARTING:
         // 旧的 docId 全部作废，等 engine.restored 给新的（《接口协议》5.1）
@@ -554,6 +611,15 @@ export class EngineSession implements EditorHost {
       const page = document.pages[index];
       if (page && (page.loaded || page.loading !== 0)) void this.loadPage(document, index);
     }
+  }
+
+  /** 一页的保真校验有了结论（方案 2.3）。 */
+  private onFidelityResult(result: FidelityResult): void {
+    const document = this.find(result.docId);
+    if (!document || result.status === 'pending') return;
+    const index = document.pages.findIndex((page) => page.pageId === result.pageId);
+    if (index < 0) return;
+    this.setOverlayOnly(document, index, overlayOnlyOf(result).overlayOnly?.reason ?? null);
   }
 
   /** 新引擎就绪了：按路径把手里的文档和新的 `docId` 对上，重新载入；对不上的关掉。 */
@@ -607,6 +673,18 @@ function pagesOf(snapshot: DocSnapshot): EnginePage[] {
       pendingEdits: 0,
       reloadAfterEdits: false,
     }));
+}
+
+/**
+ * 引擎说的保真校验状态换成页面快照里的 `overlayOnly`：只有“只能叠加内容”时才有这一项。
+ * 快照里的页面信息和 `fidelity.result` 事件字段名不同，都认。
+ */
+function overlayOnlyOf(
+  page: Pick<PageInfo, 'fidelity' | 'fidelityReason'> | Pick<FidelityResult, 'status' | 'reason'>,
+): { overlayOnly?: { reason: string } } {
+  const [status, reason] =
+    'status' in page ? [page.status, page.reason] : [page.fidelity, page.fidelityReason];
+  return status === 'overlayOnly' ? { overlayOnly: { reason: reason ?? '' } } : {};
 }
 
 const OBJECT_TYPES: Record<ObjectKind, ObjectType> = {

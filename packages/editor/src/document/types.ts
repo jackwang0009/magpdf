@@ -90,6 +90,11 @@ export interface PageSnapshot {
    * 模拟文档不给，页面对象换了就算画面变了。
    */
   readonly revision?: number;
+  /**
+   * 有值表示这一页没有通过保真校验（方案 2.3）：只能在上面添加内容，原有的对象可以选中、查看，
+   * 不能移动、缩放、删除。`reason` 是引擎给的具体原因，供排查用；给用户看的说法由界面统一写。
+   */
+  readonly overlayOnly?: { readonly reason: string };
 }
 
 export interface DocumentSnapshot {

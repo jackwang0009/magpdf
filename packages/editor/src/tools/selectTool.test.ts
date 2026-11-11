@@ -8,6 +8,7 @@ import type { Point, Rect } from '../geometry';
 import { cssPxPerPt } from '../view/viewState';
 import type { ViewState } from '../view/viewState';
 import { ROTATE_CURSOR } from './cursors';
+import { hasFrozenObject } from './machine';
 import type { ToolContext, ToolEffect, ToolPointerEvent } from './machine';
 import { NUDGE_STEP_PT, selectTool } from './selectTool';
 import type { SelectState } from './selectTool';
@@ -32,7 +33,10 @@ const layout = new PageLayout([A4]);
 const view: ViewState = { zoom: 1, x: 0, y: 0 };
 const pageOrigin = layout.pageRect(0);
 
-function context(selection: readonly string[] = []): ToolContext {
+function context(
+  selection: readonly string[] = [],
+  pages: readonly PageSnapshot[] = [page],
+): ToolContext {
   const objects = new Map<string, Rect>();
   const byId = new Map<string, PageObject>();
   for (const o of page.objects) {
@@ -49,7 +53,7 @@ function context(selection: readonly string[] = []): ToolContext {
     view,
     viewport: { width: 1200, height: 900 },
     layout,
-    pages: [page],
+    pages,
     hitTester: linearHitTester,
     selection,
     objectById: (id) => {
@@ -292,5 +296,131 @@ describe('选择工具状态机', () => {
     );
     expect(result.state).toEqual({ kind: 'idle' });
     expect(result.effects).toContainEqual({ type: 'overlay', overlay: null });
+  });
+});
+
+describe('选择工具：只能叠加内容的页上的对象（方案 2.3）', () => {
+  /** 同一页，但没有通过保真校验 */
+  const frozen = (selection: readonly string[] = []) =>
+    context(selection, [{ ...page, overlayOnly: { reason: '测试' } }]);
+  const changes = (effects: readonly ToolEffect[]) =>
+    effects.filter((e) => ['moveObjects', 'resizeObjects', 'deleteObjects'].includes(e.type));
+
+  it('照常能点选、框选', () => {
+    const click = run(
+      { kind: 'idle' },
+      [pointer('pointerdown', center('a')), pointer('pointerup', center('a'))],
+      frozen(),
+    );
+    expect(click.effects).toContainEqual({ type: 'setSelection', ids: ['a'] });
+
+    const corner = { x: pageOrigin.x + 10, y: pageOrigin.y + 10 };
+    const far = { x: pageOrigin.x + 300, y: pageOrigin.y + 80 };
+    const marquee = run(
+      { kind: 'idle' },
+      [pointer('pointerdown', corner), pointer('pointermove', far), pointer('pointerup', far)],
+      frozen(),
+    );
+    expect(marquee.effects).toContainEqual({ type: 'setSelection', ids: ['a', 'b'] });
+  });
+
+  it('拖不动：没有位移也没有预览，光标提示“不行”，抬起后回到空闲', () => {
+    const from = center('a');
+    const to = { x: from.x + 30, y: from.y + 40 };
+    const ctx = frozen(['a']);
+    const dragging = run(
+      { kind: 'idle' },
+      [pointer('pointerdown', from), pointer('pointermove', to), pointer('pointermove', to)],
+      ctx,
+    );
+    expect(dragging.state).toEqual({ kind: 'refused' });
+    expect(dragging.effects).toEqual([]);
+    expect(selectTool.cursor(dragging.state, ctx, ctx.docToScreen(to))).toBe('not-allowed');
+
+    const released = run(dragging.state, [pointer('pointerup', to)], ctx);
+    expect(released.state).toEqual({ kind: 'idle' });
+    expect(released.effects).toEqual([]);
+
+    // 没选中就直接按住拖也一样：选中了，但不动
+    const direct = run(
+      { kind: 'idle' },
+      [pointer('pointerdown', from), pointer('pointermove', to), pointer('pointerup', to)],
+      frozen(),
+    );
+    expect(direct.effects).toEqual([{ type: 'setSelection', ids: ['a'] }]);
+  });
+
+  it('没有控制点和旋转热区：按在那些位置上和按在别处一样', () => {
+    const ctx = frozen(['a']);
+    const rect = ctx.objectById('a')!.docRect;
+    const corner = { x: rect.x + rect.width, y: rect.y + rect.height };
+    const outside = { x: rect.x - 12, y: rect.y - 12 };
+
+    // 右下角：能改的页上这里是控制点，现在按下去只是普通的一次按下
+    const press = run({ kind: 'idle' }, [pointer('pointerdown', corner)], ctx);
+    expect(press.state.kind).toBe('pressed');
+    const drag = run(
+      press.state,
+      [pointer('pointermove', { x: corner.x + 10, y: corner.y + 10 })],
+      ctx,
+    );
+    expect(changes(drag.effects)).toEqual([]);
+    expect(drag.state.kind).not.toBe('scaling');
+
+    // 角外侧：能改的页上是旋转热区，现在是点在空白处（取消选中，接着可以框选）
+    const rotate = run({ kind: 'idle' }, [pointer('pointerdown', outside)], ctx);
+    expect(rotate.state.kind).toBe('pressed');
+    expect(rotate.effects).toEqual([{ type: 'setSelection', ids: [] }]);
+
+    // 悬停时也不出缩放、旋转、移动的光标
+    for (const point of [corner, outside, center('a')]) {
+      expect(selectTool.cursor({ kind: 'idle' }, ctx, ctx.docToScreen(point))).toBe('default');
+    }
+    // 对照：同样的位置，在能改的页上分别是缩放、旋转、移动
+    const editable = context(['a']);
+    expect(selectTool.cursor({ kind: 'idle' }, editable, editable.docToScreen(outside))).toBe(
+      ROTATE_CURSOR,
+    );
+    expect(selectTool.cursor({ kind: 'idle' }, editable, editable.docToScreen(center('a')))).toBe(
+      'move',
+    );
+  });
+
+  it('方向键和 Delete 不起作用，Esc、全选照常', () => {
+    for (const command of ['edit.nudgeRight', 'edit.nudgeUpLarge', 'edit.delete'] as const) {
+      const result = run({ kind: 'idle' }, [{ type: 'command', command }], frozen(['a', 'b']));
+      expect(result.effects).toEqual([]);
+    }
+    const esc = run(
+      { kind: 'idle' },
+      [{ type: 'command', command: 'edit.deselect' }],
+      frozen(['a']),
+    );
+    expect(esc.effects).toEqual([{ type: 'setSelection', ids: [] }]);
+    const all = run({ kind: 'idle' }, [{ type: 'command', command: 'edit.selectAll' }], frozen());
+    expect(all.effects).toEqual([{ type: 'setSelection', ids: ['a', 'b'] }]);
+  });
+
+  it('跨页的选区里只要有一个不能改的对象，就算不能改', () => {
+    // 两页：第 1 页不能改，第 2 页能改
+    const pages: PageSnapshot[] = [
+      { ...page, overlayOnly: { reason: '测试' } },
+      { ...page, index: 1, objects: [obj('c', 20, 20)] },
+    ];
+    const pageOf: Record<string, number> = { a: 0, b: 0, c: 1 };
+    const ctx = {
+      pages,
+      objectById: (id: string) => {
+        const index = pageOf[id];
+        const object =
+          index === undefined ? undefined : pages[index]!.objects.find((o) => o.id === id);
+        return object ? { page: index!, object, docRect: object.bbox } : undefined;
+      },
+    };
+    expect(hasFrozenObject(ctx, ['c'])).toBe(false);
+    expect(hasFrozenObject(ctx, ['c', 'a'])).toBe(true);
+    expect(hasFrozenObject(ctx, [])).toBe(false);
+    // 已经不存在的对象不算
+    expect(hasFrozenObject(ctx, ['gone'])).toBe(false);
   });
 });

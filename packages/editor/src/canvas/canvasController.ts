@@ -21,6 +21,7 @@ import type {
   ToolEffect,
   ToolPointerEvent,
 } from '../tools/machine';
+import { hasFrozenObject } from '../tools/machine';
 import type { CommandId } from '../tools/shortcuts';
 import { isTextInputTarget } from '../tools/shortcuts';
 import { ToolManager } from '../tools/toolManager';
@@ -114,6 +115,7 @@ export class CanvasController {
   private cursor = '';
   /** 上一次从 store 同步过来的选区，用来判断是否要丢掉工具内部的选区覆盖值 */
   private knownSelection: readonly string[] | null = null;
+  private pendingVisibleTiles = 0;
   private disposed = false;
 
   constructor(options: CanvasControllerOptions) {
@@ -207,6 +209,14 @@ export class CanvasController {
       width: Math.max(0, this.containerSize.width - offset),
       height: Math.max(0, this.containerSize.height - offset),
     };
+  }
+
+  /**
+   * 画面是不是最新的：没有等着画的帧，上一帧里视口内的瓦片也都是最新内容（没有缺的，也没有还在显示
+   * 旧图、等着换的）。视口外的预取不算。端到端测试靠它量“修改之后画面什么时候重画完”。
+   */
+  get upToDate(): boolean {
+    return this.frameHandle === null && this.pendingVisibleTiles === 0;
   }
 
   get hasWebGL(): boolean {
@@ -515,6 +525,7 @@ export class CanvasController {
     }
 
     this.scheduler.setWanted([...plan.missing, ...plan.prefetch], doc.snapshot.version);
+    this.pendingVisibleTiles = plan.missing.length;
 
     this.drawOverlayLayer(
       doc.selection,
@@ -564,6 +575,13 @@ export class CanvasController {
       hover: hoverRect,
       selected: selectedRects,
       selectionBox,
+      handles: !hasFrozenObject(
+        {
+          pages: this.document?.snapshot.pages ?? [],
+          objectById: (id) => this.objectById(id),
+        },
+        selection,
+      ),
       marquee: this.overlay?.marquee ?? null,
       zoomRect: this.overlay?.zoomRect ?? null,
       preview,

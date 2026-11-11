@@ -1,6 +1,8 @@
+import { Icon } from '@magpdf/ui';
 import { ptToMm } from '../../geometry';
 import { t } from '../../i18n';
 import { activeDocument, useEditorStore } from '../../store/editorStore';
+import { overlayOnlyDetail } from '../DocumentBanner';
 import { useShellCommands } from '../shellContext';
 import { PanelFrame, PanelMenuButton } from './PanelFrame';
 
@@ -38,6 +40,19 @@ export function PagesPanel() {
                 <span className="mg-page-label">
                   {t.pages.row.replace('{n}', String(page.index + 1))}
                 </span>
+                {page.overlayOnly ? (
+                  // 保真校验角标，悬停说明原因（方案 8.6）
+                  <span
+                    className="mg-page-flag"
+                    role="img"
+                    aria-label={t.overlayOnly.badge}
+                    title={[t.overlayOnly.badge, overlayOnlyDetail([page])]
+                      .filter(Boolean)
+                      .join('\n')}
+                  >
+                    <Icon name="lock" size={11} />
+                  </span>
+                ) : null}
                 <span className="mg-page-size">
                   {t.pages.size
                     .replace('{w}', ptToMm(page.width).toFixed(0))

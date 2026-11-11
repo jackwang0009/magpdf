@@ -225,6 +225,22 @@ export const zhCN = {
     row: '第 {n} 页',
     size: '{w}×{h} mm',
   },
+  /** 保真校验没有通过、只能叠加内容的页（方案 2.3）。提示条的说法照《交互设计》9.3。 */
+  overlayOnly: {
+    onePage:
+      '第 {pages} 页无法安全修改原有内容：页面使用了软件尚不能完整保留的效果。可以在这一页上添加内容。',
+    somePages:
+      '第 {pages} 页无法安全修改原有内容：页面使用了软件尚不能完整保留的效果。可以在这些页上添加内容。',
+    manyPages:
+      '第 {pages} 等 {n} 页无法安全修改原有内容：页面使用了软件尚不能完整保留的效果。可以在这些页上添加内容。',
+    pageSeparator: '、',
+    /** 提示条和角标的悬停说明里，引擎给的具体原因 */
+    detail: '详细信息：{reason}',
+    /** 页面面板里的角标 */
+    badge: '只能添加内容',
+    /** 属性面板顶部 */
+    properties: '所在的页无法安全修改原有内容，属性只能查看。',
+  },
   history: {
     empty: '尚无历史记录',
     opened: '打开文档',
@@ -277,8 +293,6 @@ export const zhCN = {
     ok: '知道了',
     openFailed: '这个文件打不开：{reason}',
     editFailed: '修改没有成功：{reason}',
-    pageOverlayOnly:
-      '这一页用了软件还不能完整保留的效果。为了不破坏页面，这一页只能添加内容，不能修改原有的对象。',
     engineRestored: '引擎出了问题，已经自动重新启动，文档也重新载入了。撤销记录已清空。',
     documentNotRestored: '“{name}”没能重新载入，已经关闭。',
     engineFailed: '引擎没能重新启动：{reason}。请重新打开 MagPDF。',

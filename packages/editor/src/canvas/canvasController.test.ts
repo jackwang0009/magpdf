@@ -131,6 +131,38 @@ describe('工具产生的修改交给谁', () => {
     }
   });
 
+  it('只能叠加内容的页上的对象：微移、删除都不交给修改入口，别的页照常', () => {
+    vi.spyOn(GlTileRenderer, 'create').mockReturnValue(stubRenderer());
+    const { editor, calls } = recordingEditor();
+    const { store, controller } = mount({ pages: 2, editor });
+    try {
+      const snapshot = store.getState().documents.doc!.snapshot;
+      const [first, second] = snapshot.pages;
+      // 第 1 页没有通过保真校验
+      store.getState().updateSnapshot('doc', {
+        ...snapshot,
+        pages: [{ ...first!, overlayOnly: { reason: '测试' } }, second!],
+      });
+      const onFirst = first!.objects[0]!.id;
+      const onSecond = second!.objects[0]!.id;
+
+      store.getState().setSelection('doc', [onFirst]);
+      expect(controller.runCommand('edit.nudgeRight')).toBe(true);
+      expect(controller.runCommand('edit.delete')).toBe(true);
+      // 选区里混着能改的对象也一样：整个选区都不动
+      store.getState().setSelection('doc', [onSecond, onFirst]);
+      controller.runCommand('edit.nudgeRight');
+      controller.runCommand('edit.delete');
+      expect(calls).toEqual([]);
+
+      store.getState().setSelection('doc', [onSecond]);
+      controller.runCommand('edit.delete');
+      expect(calls).toEqual([['delete', [onSecond]]]);
+    } finally {
+      controller.dispose();
+    }
+  });
+
   it('文档没有修改入口（模拟文档）：照旧直接改 store 里的快照；撤销没有可做的', () => {
     vi.spyOn(GlTileRenderer, 'create').mockReturnValue(stubRenderer());
     const { store, controller } = mount();

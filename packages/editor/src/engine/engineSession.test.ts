@@ -6,7 +6,7 @@ import { t } from '../i18n';
 import type { HostNotice } from '../shell/editorHost';
 import { createEditorStore } from '../store/editorStore';
 import { EngineSession } from './engineSession';
-import { FakeEngine } from './fakeEngine';
+import { FAKE_OVERLAY_REASON, FakeEngine } from './fakeEngine';
 import type { FakeObject, FakePage } from './fakeEngine';
 
 /** 第 1 页：300×440，不旋转。整页白底（点不中）、一行文字、一个方框。 */
@@ -432,27 +432,6 @@ describe('EngineSession：修改', () => {
     expect(snapshot().version).toBe(0);
   });
 
-  it('这一页只能叠加内容：界面恢复原状，并告诉用户', async () => {
-    const { engine, editor, object, notices, snapshot } = await attached();
-    engine.page(1, 20).overlayOnly = true;
-    const revision = snapshot().pages[0]!.revision;
-
-    editor.transformObjects([{ page: 0, ids: ['p0-2'], matrix: translationMatrix(10, 4) }]);
-    expect(object('p0-2').bbox.x).toBe(30);
-    await flush();
-    expect(object('p0-2').bbox).toEqual({ x: 20, y: 20, width: 100, height: 20 });
-    expect(notices).toEqual([{ kind: 'error', message: t.host.pageOverlayOnly }]);
-    // 文档没有变：版本号、修订号都不动
-    expect(snapshot()).toMatchObject({ version: 0, dirty: false });
-    expect(snapshot().pages[0]!.revision).toBe(revision);
-
-    // 删除也一样被拒绝，删掉的对象回到界面上
-    editor.deleteObjects(['p0-3']);
-    await flush();
-    expect(snapshot().pages[0]!.objects.map((o) => o.id)).toEqual(['p0-1', 'p0-2', 'p0-3']);
-    expect(notices).toHaveLength(2);
-  });
-
   it('引擎报别的错：界面恢复原状，把原因告诉用户', async () => {
     const { engine, editor, object, notices } = await attached();
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -494,6 +473,162 @@ describe('EngineSession：修改', () => {
     expect(engine.transport.sent(METHOD.EDIT_TRANSFORM)).toEqual([]);
     expect(engine.transport.sent(METHOD.EDIT_DELETE)).toEqual([]);
     expect(engine.transport.sent(METHOD.HISTORY_UNDO)).toEqual([]);
+  });
+});
+
+describe('EngineSession：只能叠加内容的页（方案 2.3）', () => {
+  const overlayOnly = { reason: FAKE_OVERLAY_REASON };
+
+  it('保真校验的结论到了：通不过的页记下来，通过的页不受影响', async () => {
+    const { engine, snapshot } = await attached();
+    engine.page(1, 20).overlayOnly = true;
+    const before = snapshot();
+    expect(before.pages.map((p) => p.overlayOnly)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
+
+    // 引擎空闲下来，把显示着的两页校验了
+    engine.finishBackgroundCheck(1, 20);
+    engine.finishBackgroundCheck(1, 21);
+    expect(snapshot().pages.map((p) => p.overlayOnly)).toEqual([
+      overlayOnly,
+      undefined,
+      undefined,
+      undefined,
+    ]);
+    // 只是多了一个标记：对象还在，画面不用重画，文档也没有变
+    expect(snapshot().pages[0]!.objects).toBe(before.pages[0]!.objects);
+    expect(snapshot().pages[0]!.revision).toBe(before.pages[0]!.revision);
+    expect(snapshot().pages[1]).toBe(before.pages[1]);
+    expect(snapshot()).toMatchObject({ version: 0, dirty: false });
+  });
+
+  it('知道了这一页只能叠加内容之后：修改不发给引擎，界面上也不先动', async () => {
+    const { engine, editor, object, objects, notices } = await attached();
+    engine.page(1, 20).overlayOnly = true;
+    engine.finishBackgroundCheck(1, 20);
+
+    editor.transformObjects([{ page: 0, ids: ['p0-2'], matrix: translationMatrix(10, 4) }]);
+    editor.deleteObjects(['p0-3']);
+    expect(object('p0-2').bbox).toEqual({ x: 20, y: 20, width: 100, height: 20 });
+    expect(objects(0).map((o) => o.id)).toEqual(['p0-1', 'p0-2', 'p0-3']);
+    await flush();
+    expect(engine.transport.sent(METHOD.EDIT_TRANSFORM)).toEqual([]);
+    expect(engine.transport.sent(METHOD.EDIT_DELETE)).toEqual([]);
+    expect(notices).toEqual([]);
+
+    // 一次动两页上的对象，其中一页不能改：整个不做，另一页的对象也不动
+    editor.transformObjects([
+      { page: 0, ids: ['p0-2'], matrix: translationMatrix(10, 0) },
+      { page: 1, ids: ['p1-4'], matrix: translationMatrix(10, 0) },
+    ]);
+    editor.deleteObjects(['p1-4', 'p0-2']);
+    await flush();
+    expect(object('p1-4').bbox).toEqual({ x: 120, y: 130, width: 70, height: 40 });
+    expect(engine.transport.sent(METHOD.EDIT_TRANSFORM)).toEqual([]);
+    expect(engine.transport.sent(METHOD.EDIT_DELETE)).toEqual([]);
+
+    // 别的页照常能改
+    editor.transformObjects([{ page: 1, ids: ['p1-4'], matrix: translationMatrix(10, 0) }]);
+    await flush();
+    expect(object('p1-4').bbox.x).toBe(130);
+  });
+
+  it.each([
+    ['结论先到', true],
+    ['应答先到', false],
+  ])(
+    '用户赶在校验做完之前动了手（%s）：引擎拒绝，界面恢复原状，不弹框',
+    async (_name, eventFirst) => {
+      const { engine, editor, object, objects, notices, snapshot } = await attached();
+      engine.eventFirst = eventFirst;
+      engine.page(1, 20).overlayOnly = true;
+      const revision = snapshot().pages[0]!.revision;
+
+      editor.transformObjects([{ page: 0, ids: ['p0-2'], matrix: translationMatrix(10, 4) }]);
+      // 界面还不知道这一页不能改，先按预期挪过去
+      expect(object('p0-2').bbox.x).toBe(30);
+      await flush();
+      expect(object('p0-2').bbox).toEqual({ x: 20, y: 20, width: 100, height: 20 });
+      // 引擎执行命令之前自己做了校验，结论随后到了
+      expect(snapshot().pages[0]!.overlayOnly).toEqual(overlayOnly);
+      expect(notices).toEqual([]);
+      // 文档没有变：版本号、修订号都不动
+      expect(snapshot()).toMatchObject({ version: 0, dirty: false });
+      expect(snapshot().pages[0]!.revision).toBe(revision);
+      // 结论先到的话界面不用再问；拒绝的应答先到，界面那一刻还不知道原因，就问一次
+      expect(engine.transport.sent(METHOD.FIDELITY_CHECK)).toEqual(
+        eventFirst ? [] : [{ docId: 1, pageIds: [20] }],
+      );
+
+      // 之后的修改不再发给引擎
+      editor.deleteObjects(['p0-3']);
+      await flush();
+      expect(objects(0).map((o) => o.id)).toEqual(['p0-1', 'p0-2', 'p0-3']);
+      expect(engine.transport.sent(METHOD.EDIT_DELETE)).toEqual([]);
+    },
+  );
+
+  it('引擎拒绝了，结论却一直没到：点名问一次', async () => {
+    const { engine, editor, object, notices, snapshot } = await attached();
+    // 引擎早就校验过这一页，结论不会再推送，而界面不知道
+    Object.assign(engine.page(1, 20), { overlayOnly: true, checked: true });
+
+    editor.deleteObjects(['p0-2']);
+    await flush();
+    expect(engine.transport.sent(METHOD.FIDELITY_CHECK)).toEqual([{ docId: 1, pageIds: [20] }]);
+    expect(snapshot().pages[0]!.overlayOnly).toEqual(overlayOnly);
+    expect(object('p0-2').bbox).toEqual({ x: 20, y: 20, width: 100, height: 20 });
+    expect(notices).toEqual([]);
+  });
+
+  it('界面重新加载后接回来的文档：引擎早先的结论跟着页面列表一起到', async () => {
+    const { engine, session, open, snapshot } = setup();
+    open.push(engine.open('提单.pdf', fourPages()));
+    engine.page(1, 22).overlayOnly = true;
+    engine.finishBackgroundCheck(1, 22);
+    engine.finishBackgroundCheck(1, 23);
+
+    await session.attach();
+    // 不用等这一页的对象：第 3 页还没有显示过，状态已经有了
+    expect(snapshot().pages.map((p) => p.overlayOnly)).toEqual([
+      undefined,
+      undefined,
+      overlayOnly,
+      undefined,
+    ]);
+  });
+
+  it('引擎重启之后重新校验：旧的结论不留着', async () => {
+    const { engine, snapshot } = await attached();
+    engine.page(1, 20).overlayOnly = true;
+    engine.finishBackgroundCheck(1, 20);
+    expect(snapshot().pages[0]!.overlayOnly).toEqual(overlayOnly);
+
+    engine.transport.emit(EVENT.ENGINE_RESTARTING, {});
+    const frozen = fourPages();
+    frozen[0]!.overlayOnly = true;
+    const restored = engine.restart([{ name: '提单.pdf', pages: frozen }]);
+    engine.transport.emit(EVENT.ENGINE_RESTORED, {
+      docIds: restored.map((d) => d.docId),
+      docs: restored,
+    });
+    await flush();
+    // 新引擎还没有校验
+    expect(snapshot().pages[0]!.overlayOnly).toBeUndefined();
+    // 旧引擎的结论晚到了：docId 对不上，不理
+    engine.transport.emit(EVENT.FIDELITY_RESULT, {
+      docId: 1,
+      pageId: 20,
+      status: 'overlayOnly',
+      reason: FAKE_OVERLAY_REASON,
+    });
+    expect(snapshot().pages[0]!.overlayOnly).toBeUndefined();
+    engine.finishBackgroundCheck(restored[0]!.docId, 20);
+    expect(snapshot().pages[0]!.overlayOnly).toEqual(overlayOnly);
   });
 });
 
