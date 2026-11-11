@@ -79,7 +79,8 @@ export class CanvasController {
   private readonly glCanvas: HTMLCanvasElement;
   private readonly overlayCanvas: HTMLCanvasElement;
   private readonly overlayCtx: CanvasRenderingContext2D | null;
-  private readonly message: HTMLDivElement;
+  /** “WebGL2 不可用”的提示层；WebGL2 可用时没有这一层 */
+  private readonly message: HTMLDivElement | null;
   private readonly renderer: GlTileRenderer | null;
   private readonly provider: TileProvider;
   private readonly ownsProvider: boolean;
@@ -114,14 +115,19 @@ export class CanvasController {
     this.overlayCanvas.className = 'mg-canvas-overlay';
     this.overlayCanvas.setAttribute('role', 'img');
     this.overlayCanvas.setAttribute('aria-label', t.canvas.label);
-    this.message = document.createElement('div');
-    this.message.className = 'mg-canvas-message';
-    this.message.textContent = t.canvas.webglUnavailable;
-    this.message.hidden = true;
-    this.container.append(this.glCanvas, this.overlayCanvas, this.message);
+    this.container.append(this.glCanvas, this.overlayCanvas);
 
     this.renderer = GlTileRenderer.create(this.glCanvas);
-    if (!this.renderer) this.message.hidden = false;
+    // 提示层盖在整个画布上面，所以只在 WebGL2 真的不可用时才放进去：
+    // 平时留着它（哪怕标了 hidden）会挡住叠加层，鼠标事件到不了画布。
+    if (this.renderer) {
+      this.message = null;
+    } else {
+      this.message = document.createElement('div');
+      this.message.className = 'mg-canvas-message';
+      this.message.textContent = t.canvas.webglUnavailable;
+      this.container.append(this.message);
+    }
     this.overlayCtx = this.overlayCanvas.getContext('2d');
 
     this.cache = new TileCache(options.cacheBytes ?? DEFAULT_CACHE_BYTES, (entry) =>
@@ -170,7 +176,7 @@ export class CanvasController {
     this.renderer?.dispose();
     this.glCanvas.remove();
     this.overlayCanvas.remove();
-    this.message.remove();
+    this.message?.remove();
   }
 
   // ---------- 对外 API（菜单、选项栏、基准脚本） ----------
