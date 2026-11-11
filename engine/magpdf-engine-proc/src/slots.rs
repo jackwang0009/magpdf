@@ -11,8 +11,10 @@ use std::collections::HashMap;
 pub struct TileKey {
     pub doc_id: u32,
     pub page_id: u32,
-    /// 缩放倍数 ×1000 取整，避免浮点相等比较的麻烦（1000 表示 1.0）。
-    pub scale_milli: u32,
+    /// 缩放倍数的二进制表示。界面同一个缩放档每次传来的是同一个数，按位比较就能当键用；
+    /// 渲染用的也是这个数本身。取整（比如只留三位小数）会让整页的像素尺寸和界面算的不一样，
+    /// 瓦片贴上去就差出零点几个像素。
+    scale_bits: u32,
     pub x: u32,
     pub y: u32,
 }
@@ -22,10 +24,15 @@ impl TileKey {
         Self {
             doc_id,
             page_id,
-            scale_milli: (scale * 1000.0).round().max(0.0) as u32,
+            scale_bits: scale.to_bits(),
             x,
             y,
         }
+    }
+
+    /// 请求里的缩放倍数，原样取回。
+    pub fn scale(&self) -> f32 {
+        f32::from_bits(self.scale_bits)
     }
 }
 
@@ -160,8 +167,18 @@ mod tests {
     }
 
     #[test]
-    fn scale_is_quantized() {
-        assert_eq!(TileKey::new(1, 0, 1.5, 0, 0).scale_milli, 1500);
+    fn scale_is_kept_exactly() {
+        // 界面的缩放档是 √2 的幂乘 96/72，三位小数留不住。
+        let scale = 1.885_618_f32;
+        assert_eq!(TileKey::new(1, 0, scale, 0, 0).scale(), scale);
+        assert_eq!(
+            TileKey::new(1, 0, scale, 0, 0),
+            TileKey::new(1, 0, scale, 0, 0)
+        );
+        assert_ne!(
+            TileKey::new(1, 0, scale, 0, 0),
+            TileKey::new(1, 0, 1.886, 0, 0)
+        );
         assert_ne!(TileKey::new(1, 0, 1.0, 0, 0), TileKey::new(1, 0, 2.0, 0, 0));
     }
 }

@@ -2,7 +2,8 @@
 //!
 //! [`Page::render_to_size`](crate::Page::render_to_size) 只能渲染整页；瓦片要求只渲染页面上的一个区域，
 //! 并且按设备像素对齐。PDFium 的 `FPDF_RenderPageBitmap` 用 (start_x, start_y, size_x, size_y, rotate) 指定
-//! 输出的设备像素矩形，绘制时把整页坐标系映射到整页像素尺寸上，正好满足需要。
+//! 整页在输出位图坐标系里占的矩形，位图只留下和它相交的部分：把整页往左上方挪到 (-x, -y)，
+//! 位图里剩下的正好是整页上从 (x, y) 开始的那一块。
 
 use std::ffi::c_int;
 
@@ -77,8 +78,10 @@ pub fn render_rect(
         (Ok(w), Ok(h)) if w > 0 && h > 0 => (w, h),
         _ => return Err(Error::InvalidSize { width, height }),
     };
+    // start_x/start_y 是"整页的左上角在输出位图里的位置"。瓦片从整页的 (x, y) 开始，
+    // 所以整页要往左上方挪 (x, y)，传进去的是负数。
     let (sx, sy) = match (c_int::try_from(x), c_int::try_from(y)) {
-        (Ok(x), Ok(y)) => (x, y),
+        (Ok(x), Ok(y)) => (-x, -y),
         _ => {
             return Err(Error::InvalidSize {
                 width: x,
@@ -104,8 +107,8 @@ pub fn render_rect(
     if bitmap.is_null() {
         return Err(Error::Bitmap { width, height });
     }
-    // SAFETY: bitmap 与 page 均有效；(sx, sy, w, h) 是输出位图内的矩形，整页尺寸 (sw, sh) 构成页面到像素的映射；
-    // flags 为 PDFium 定义的位组合。读取缓冲区后立即销毁位图，数据已复制出来。
+    // SAFETY: bitmap 与 page 均有效；整页画在输出位图坐标系的 (sx, sy)–(sx+sw, sy+sh) 上，落在位图之外的
+    // 部分由 PDFium 裁掉；flags 为 PDFium 定义的位组合。读取缓冲区后立即销毁位图，数据已复制出来。
     let data = unsafe {
         raw::FPDFBitmap_FillRect(bitmap, 0, 0, w, h, background);
         raw::FPDF_RenderPageBitmap(

@@ -297,6 +297,43 @@ async fn hello_open_render_and_read_the_tile_from_shared_memory() {
         )
         .await;
     assert_eq!(stale["code"], ErrorCode::TileGenerationStale.code());
+
+    // 不在左上角的瓦片也要取对地方：这块落在表格中间，一定有内容（平移方向反了的话整块是白的）。
+    // 缩放倍数原样用、原样带回：界面的缩放档是 √2 的幂乘 96/72，不是整的千分位。
+    let scale = 3.771_236_f32;
+    let (_, ready) = engine.render_tile(doc_id, f64::from(scale), 512, 512).await;
+    assert_eq!((&ready["x"], &ready["y"]), (&json!(512), &json!(512)));
+    assert_eq!(ready["scale"].as_f64().map(|s| s as f32), Some(scale));
+    let slot = u32::try_from(ready["slot"].as_u64().unwrap()).unwrap();
+    let generation = u32::try_from(ready["generation"].as_u64().unwrap()).unwrap();
+    let pixels = region.read_tile(slot, generation).unwrap();
+    let inked = pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .filter(|px| px[0] < 250 || px[1] < 250 || px[2] < 250)
+        .count();
+    assert!(
+        inked > 1000,
+        "(512, 512) 那块瓦片里应该有页面内容，非白像素只有 {inked} 个"
+    );
+
+    // 缩放倍数不是正数：直接拒绝，不排渲染。
+    for scale in [0.0, -1.0] {
+        let invalid = engine
+            .call_err(
+                method::RENDER_TILES,
+                json!({
+                    "docId": doc_id,
+                    "pageId": 0,
+                    "scale": scale,
+                    "tiles": [{ "x": 0, "y": 0 }],
+                    "priority": "visible",
+                }),
+            )
+            .await;
+        assert_eq!(invalid["code"], ErrorCode::InvalidArgument.code());
+    }
 }
 
 /// `doc.snapshot` 给出每一页的显示尺寸：旋转 90° 和 270° 的页宽高互换。

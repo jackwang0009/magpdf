@@ -518,6 +518,9 @@ async fn handle_request(
         }
         method::RENDER_TILES => {
             let p: RenderTilesParams = decode(params)?;
+            if !(p.scale.is_finite() && p.scale > 0.0) {
+                return Err(ErrorCode::InvalidArgument.error_with("scale 必须是正数"));
+            }
             let request_ids = schedule_tiles(engine, p, out.clone());
             Ok(Some(frame::response_ok(
                 id,
@@ -641,7 +644,7 @@ async fn render_and_publish(
     key: TileKey,
     out: &mpsc::UnboundedSender<Outgoing>,
 ) {
-    let scale = key.scale_milli as f32 / 1000.0;
+    let scale = key.scale();
     let (bitmap, version) = match engine
         .engine
         .render_tile(key.doc_id, key.page_id, scale, key.x, key.y)
