@@ -89,6 +89,8 @@ export function Workbench({ store, workspace, onLayoutChange, onReady }: Workben
   }));
   const workspaceRef = useRef(workspace);
   workspaceRef.current = workspace;
+  /** 正在重排布局。这期间文档面板被拿掉只是为了重建，不是用户关了文档。 */
+  const rebuilding = useRef(false);
 
   const syncDocuments = useCallback(
     (api: DockviewApi) => {
@@ -126,13 +128,20 @@ export function Workbench({ store, workspace, onLayoutChange, onReady }: Workben
       const group = api.getGroup(COMPONENTS_GROUP) as
         { api?: { boundingBox?: { width: number } } } | undefined;
       const previously = group?.api?.boundingBox?.width;
-      applyWorkspace(api, workspaceRef.current, width, height);
-      const componentsWidth = workspaceRef.current.sideWidths.components;
-      if (previously && Math.abs(previously - componentsWidth) > 1) {
-        api.getGroup(COMPONENTS_GROUP)?.api.setSize({ width: previously });
-      }
-      for (const panel of [...api.panels]) {
-        if (panel.id.startsWith(DOC_PANEL_PREFIX)) api.removePanel(panel);
+      // 重排时文档面板先全部拿掉，再按 store 里的文档重新建。拿掉面板会触发下面的 onDidRemovePanel，
+      // 那是给“用户关了标签页”用的；不拦住的话，切换一次工作区，打开的文档就全被关掉了。
+      rebuilding.current = true;
+      try {
+        applyWorkspace(api, workspaceRef.current, width, height);
+        const componentsWidth = workspaceRef.current.sideWidths.components;
+        if (previously && Math.abs(previously - componentsWidth) > 1) {
+          api.getGroup(COMPONENTS_GROUP)?.api.setSize({ width: previously });
+        }
+        for (const panel of [...api.panels]) {
+          if (panel.id.startsWith(DOC_PANEL_PREFIX)) api.removePanel(panel);
+        }
+      } finally {
+        rebuilding.current = false;
       }
       syncDocuments(api);
     },
@@ -153,7 +162,7 @@ export function Workbench({ store, workspace, onLayoutChange, onReady }: Workben
           store.getState().activateDocument(id.slice(DOC_PANEL_PREFIX.length));
       });
       api.onDidRemovePanel((panel) => {
-        if (!panel.id.startsWith(DOC_PANEL_PREFIX)) return;
+        if (rebuilding.current || !panel.id.startsWith(DOC_PANEL_PREFIX)) return;
         const documentId = panel.id.slice(DOC_PANEL_PREFIX.length);
         if (store.getState().documents[documentId]) store.getState().closeDocument(documentId);
       });

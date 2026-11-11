@@ -1,6 +1,7 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { editorStore } from '@magpdf/editor';
 import type { EditorHost } from '@magpdf/editor';
 
 import { App } from './App';
@@ -39,6 +40,9 @@ describe('App', () => {
 
   afterEach(() => {
     container.remove();
+    // 外壳用的是编辑器包里那个全局的 store。每条用例都从没有文档的状态开始，前一条留下的不影响后一条
+    const store = editorStore.getState();
+    for (const id of [...store.documentOrder]) store.closeDocument(id);
   });
 
   it('渲染出外壳：工具栏 7 个 v1.0 工具、菜单栏和状态栏', async () => {
@@ -61,6 +65,80 @@ describe('App', () => {
     expect(container.querySelectorAll('.mg-menu')).toHaveLength(8);
     expect(container.querySelector('.mg-options')).not.toBeNull();
     expect(container.querySelector('.mg-status')).not.toBeNull();
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it('焦点在文档标签页上时，Delete 和方向键归编辑器：标签页不会被关掉，焦点也不跑到别的标签上', async () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<App />);
+    });
+    // 没有宿主时外壳自己打开两份模拟文档；dockview 晚一拍才把标签页画出来
+    const titles = () =>
+      [...container.querySelectorAll('.mg-doc-tab-title')].map((title) => title.textContent);
+    for (let i = 0; i < 20 && titles().length < 2; i++) {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+    }
+    const opened = titles();
+    expect(opened).toHaveLength(2);
+
+    // 用户点过标签页之后，焦点就留在标签上；在画布上点选对象不会把焦点拿走
+    const tab = container.querySelector('.mg-doc-tab')?.closest<HTMLElement>('.dv-tab');
+    expect(tab).toBeTruthy();
+    tab!.focus();
+    expect(document.activeElement).toBe(tab);
+    // dockview 自己的规矩是：焦点在标签上时 Delete、Backspace 关掉它，方向键把焦点挪到旁边的标签
+    for (const key of ['Delete', 'Backspace', 'ArrowRight', 'ArrowLeft', 'End']) {
+      const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+      await act(async () => {
+        tab!.dispatchEvent(event);
+      });
+      expect(titles(), key).toEqual(opened);
+      expect(document.activeElement, key).toBe(tab);
+    }
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it('切换工作区只是重排面板，打开的文档还在', async () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<App />);
+    });
+    const titles = () =>
+      [...container.querySelectorAll('.mg-doc-tab-title')].map((title) => title.textContent);
+    const settle = async () => {
+      for (let i = 0; i < 20 && titles().length < 2; i++) {
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        });
+      }
+    };
+    await settle();
+    const opened = titles();
+    expect(opened).toHaveLength(2);
+
+    // 选项栏右端的工作区按钮：在“基础”和“货代单证”之间切换，每次都把整个布局重排一遍
+    const toggle = [...container.querySelectorAll<HTMLButtonElement>('button.mg-dd')].find(
+      (button) => button.textContent?.includes('货代单证'),
+    );
+    expect(toggle).toBeTruthy();
+    for (let i = 0; i < 2; i++) {
+      await act(async () => {
+        toggle!.click();
+      });
+      await settle();
+      expect(titles()).toEqual(opened);
+    }
     await act(async () => {
       root.unmount();
     });

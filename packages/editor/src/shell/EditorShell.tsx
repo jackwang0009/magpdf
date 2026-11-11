@@ -339,9 +339,22 @@ export function EditorShell({
     const onKeyUp = (event: KeyboardEvent) => {
       if (event.key === ' ') activeController()?.handleKeyUp(event);
     };
+    // dockview 给标签页配了自己的键盘操作：焦点在标签上时，方向键换标签，Delete、Backspace 关掉标签。
+    // 用户点过文档标签之后焦点就留在标签上（在画布上点选不会把焦点拿走），这时按 Delete 删对象，
+    // 整份文档也会跟着被关掉。这些键是编辑器的：赶在 dockview 之前拦下来，只交给编辑器。
+    const onTabKeyDown = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (!DOCKVIEW_TAB_KEYS.has(event.key) || !(target instanceof Element)) return;
+      if (!target.closest('.dv-tab')) return;
+      // 事件不再往下传，window 上冒泡阶段的监听也收不到，所以这里直接交给编辑器
+      event.stopPropagation();
+      onKeyDown(event);
+    };
+    window.addEventListener('keydown', onTabKeyDown, true);
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     return () => {
+      window.removeEventListener('keydown', onTabKeyDown, true);
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
     };
@@ -397,6 +410,20 @@ export function EditorShell({
     </EditorHostContext.Provider>
   );
 }
+
+/** dockview 在标签页上自己处理的键（见 dockview-core 的 Tabs._onKeyDown）。 */
+const DOCKVIEW_TAB_KEYS: ReadonlySet<string> = new Set([
+  'ArrowLeft',
+  'ArrowRight',
+  'ArrowUp',
+  'ArrowDown',
+  'Home',
+  'End',
+  'Enter',
+  ' ',
+  'Delete',
+  'Backspace',
+]);
 
 /**
  * Vite 在开发构建里把 import.meta.env.DEV 直接替换成 true；编辑器包不依赖 vite/client 类型，
