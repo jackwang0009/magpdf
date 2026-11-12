@@ -6,7 +6,7 @@ use std::fmt::Write as _;
 use serde::{Deserialize, Serialize};
 
 use super::model::{Check, CheckStatus, FileResult, FileStatus, PageRecord, Route, Timings};
-use super::run::REASON_REWRITE;
+use super::run::{REASON_REWRITE, REASON_SAVE};
 
 /// 一组像素比对的计数。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -58,7 +58,7 @@ pub struct SourceStats {
     pub pages_fallback: usize,
     /// 回退的页里有页面对象的（没有对象的页谈不上重写）。
     pub pages_fallback_with_objects: usize,
-    /// 回退的页里，对应本身没问题、只是改写层写不了这次修改的。
+    /// 回退的页里，对应本身没问题、只是改写层写不了这次修改（或者没法把这一页写回文件）的。
     pub pages_rewrite_unsupported: usize,
     /// 回退原因 → 页数（一页可以有不止一个原因）。
     pub fallback_reasons: BTreeMap<String, usize>,
@@ -138,7 +138,11 @@ impl SourceStats {
                 if page.objects > 0 {
                     self.pages_fallback_with_objects += 1;
                 }
-                if page.reasons.iter().all(|r| r == REASON_REWRITE) {
+                if page
+                    .reasons
+                    .iter()
+                    .all(|r| r == REASON_REWRITE || r == REASON_SAVE)
+                {
                     self.pages_rewrite_unsupported += 1;
                 }
                 for reason in &page.reasons {

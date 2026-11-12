@@ -1,20 +1,69 @@
-//! 对应层：按 PDFium `CPDF_StreamContentParser` 的规则，把内容流里的操作符与页面对象一一对应。
+//! 对应层：照 PDFium 解释内容流的规则，得出“哪个操作符产生哪个页面对象、对象由哪一段字节构成”。
 //!
-//! 规则逐条对照 `core/fpdfapi/page/cpdf_streamcontentparser.cpp`（BSD-3-Clause，见 `PDFIUM-NOTICE.md`），
-//! 关键行为在 [`collect`] 的注释里写明；完整规格见报告第 3 节。
+//! 第二轮起这一层是 `core/fpdfapi/page/cpdf_streamcontentparser.cpp` 里**决定建不建对象**的那部分的
+//! 移植（BSD-3-Clause，版权声明见本 crate 的 `PDFIUM-NOTICE.md`），见 [`interp`]。第一轮按规范自己
+//! 归纳规则，在 PDFium 和规范不一样的地方（操作数个数不对时忽略操作符、路径的快速解析、只有一个点的
+//! 路径、字体找不到时换备用字体、`TJ` 里全是空串、资源缺失的 `Do`/`sh`……）对不上。
 //!
-//! 这一层只做**字节层面的解释**：不解析字体度量，不计算包围盒（几何以 PDFium 为准），
-//! 只决定"哪个操作符产生哪个对象"，以及"对象由哪一段字节构成"（写回层的输入）。
+//! 这一层只做**字节层面的解释**：不解析字体度量，不计算包围盒（几何以 PDFium 为准）。
 
-mod clip;
-mod collect;
-mod ops;
+mod interp;
+pub mod resources;
 
-pub use clip::{ClipEvent, ClipKind, Track};
-pub use ops::PdfiumOp;
+use std::ops::Range;
 
-use crate::content::{Content, StreamData, Token, Tokenized};
-use crate::pdf::pages::Contents;
+use crate::content::Content;
+use crate::pdf::pages::PageInfo;
+use crate::pdf::reader::PdfDocument;
+
+pub use resources::{DocResources, NoResources, Resources};
+
+/// 变换矩阵 `[a b c d e f]`，行向量在左：`(x, y) → (a·x + c·y + e, b·x + d·y + f)`。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Matrix {
+    pub a: f64,
+    pub b: f64,
+    pub c: f64,
+    pub d: f64,
+    pub e: f64,
+    pub f: f64,
+}
+
+impl Matrix {
+    pub const IDENTITY: Self = Self {
+        a: 1.0,
+        b: 0.0,
+        c: 0.0,
+        d: 1.0,
+        e: 0.0,
+        f: 0.0,
+    };
+
+    /// 先做 `self`，再做 `next`。
+    pub fn then(self, next: Self) -> Self {
+        Self {
+            a: self.a * next.a + self.b * next.c,
+            b: self.a * next.b + self.b * next.d,
+            c: self.c * next.a + self.d * next.c,
+            d: self.c * next.b + self.d * next.d,
+            e: self.e * next.a + self.f * next.c + next.e,
+            f: self.e * next.b + self.f * next.d + next.f,
+        }
+    }
+
+    /// 把页面空间里的位移 `(dx, dy)` 换算到这个矩阵之前的空间：求 `(vx, vy)` 使
+    /// `(vx, vy)` 经过矩阵的线性部分之后等于 `(dx, dy)`。矩阵不可逆（或接近不可逆）时没有结果。
+    pub fn pull_back(self, dx: f64, dy: f64) -> Option<(f64, f64)> {
+        let det = self.a * self.d - self.b * self.c;
+        let scale = (self.a.abs() + self.b.abs() + self.c.abs() + self.d.abs()).max(1e-30);
+        if !det.is_finite() || det.abs() < 1e-9 * scale * scale {
+            return None;
+        }
+        let vx = (dx * self.d - dy * self.c) / det;
+        let vy = (dy * self.a - dx * self.b) / det;
+        (vx.is_finite() && vy.is_finite()).then_some((vx, vy))
+    }
+}
 
 /// 对象类别，与 `FPDF_PAGEOBJ_*` 一一对应。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -39,52 +88,117 @@ impl ObjKind {
     }
 }
 
-/// 一次文字显示（`Tj`/`TJ`/`'`/`"`）产生的对象；渲染模式 4–7 时 PDFium 不建对象。
+/// 填充规则。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FillRule {
+    None,
+    NonZero,
+    EvenOdd,
+}
+
+/// 文字显示操作符。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShowKind {
+    /// `Tj`
+    Show,
+    /// `TJ`
+    ShowArray,
+    /// `'`
+    NextLineShow,
+    /// `"`
+    NextLineShowSpaced,
+}
+
+/// 对象出现时的填充色是怎么设出来的：改色之后要把它设回去。
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct FillHistory {
+    /// 依次重放这些操作符（各自的操作数起点到操作符末尾）就回到当时的填充色。
+    pub ops: Vec<Range<usize>>,
+    /// 第一个操作符不是“一步到位”的设色（`g`/`rg`/`k`/有效的 `cs`）：重放之前先回到默认的黑色。
+    pub from_default: bool,
+    /// 记录的操作符太多，放弃了：这个对象不能改色。
+    pub overflow: bool,
+}
+
+/// 路径对象。
 #[derive(Debug, Clone, PartialEq)]
-pub struct TextRun {
-    /// 显示操作符在记号表里的下标。
-    pub op_token: usize,
+pub struct PathDetail {
+    /// 绘制之前挂着的 `W`/`W*`（这条路径同时是剪切路径）。
+    pub clip: Option<Range<usize>>,
+    /// 从第一个构造操作符到绘制操作符之间只有路径构造、至多一个 `W`/`W*` 和绘制操作符：
+    /// 这一段字节可以整体搬动、复制。
+    pub simple: bool,
+    /// 路径的点数（PDFium 的 `FPDFPath_CountSegments`）。
+    pub points: usize,
+    pub stroke: bool,
+    pub fill: FillRule,
+}
+
+/// 文字对象：一次 `Tj`/`TJ`/`'`/`"`。
+#[derive(Debug, Clone, PartialEq)]
+pub struct TextDetail {
+    pub show: ShowKind,
+    /// 操作数的写法规整（`Tj`/`'` 一个字符串，`TJ` 一个数组，`"` 两个数加一个字符串）时，
+    /// 各操作数的字节区间；不规整时为空，只能整体删除或改色。
+    pub operands: Vec<Range<usize>>,
+    /// 显示之前笔的位置就在行首（上一个定位操作符之后还没有显示过文字）。
+    pub at_line_start: bool,
+    /// 后面还有文字接着这一次显示的笔位置往下写（中间没有重新定位）。
+    pub continued: bool,
+    /// 在 `BT … ET` 之内。
+    pub in_text_block: bool,
+    /// 当时的文字矩阵（`Tm` 设的，不含 `Td` 的位移）。
+    pub tm: Matrix,
+    /// 当时的渲染模式（`Tr`）。Type3 字体不看它。
+    pub render_mode: i32,
+    pub type3: bool,
+    pub font_size: f32,
+}
+
+/// 图像对象。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImageDetail {
+    /// 内联图像 `BI … EI`；否则是 `Do`。
+    pub inline: bool,
+    /// 内联图像字典里写的宽高（`Do` 的图像这里是 0）。
+    pub width: i32,
+    pub height: i32,
+}
+
+/// 渐变对象所在的 `q … Q` 组：组里只有它一个对象、它的剪切全部是组里建立的。
+/// 移动时在组的开头插一个 `cm`，剪切和渐变一起动（PDFium 移动渐变对象时也是连剪切一起动）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShadingGroup {
+    /// `q` 操作符之后的位置。
+    pub after_q: usize,
+    /// `q` 时的变换矩阵。
+    pub ctm: Matrix,
+}
+
+/// 各类对象特有的信息。
+#[derive(Debug, Clone, PartialEq)]
+pub enum Detail {
+    Path(PathDetail),
+    Text(TextDetail),
+    Image(ImageDetail),
+    Shading(Option<ShadingGroup>),
+    Form,
 }
 
 /// 一个页面对象与它的字节来源。
 #[derive(Debug, Clone, PartialEq)]
 pub struct MappedObject {
     pub kind: ObjKind,
-    /// 起始记号（`Path` 为第一次路径构造/绘制，`Text` 为 `BT`，其余为各自的操作符）。
-    pub first_token: usize,
-    /// 结束记号（含）。`Path` 为绘制操作符，`Text` 为 `ET`（未闭合时为流尾），其余同 `first_token`。
-    pub last_token: usize,
-    /// 文字对象的一次或多次显示。同一个 `BT … ET` 里的连续显示合并成一个文字对象（与 PDFium 相同）。
-    pub text_runs: Vec<TextRun>,
-    /// `Path` 的绘制操作符下标。
-    pub paint_token: Option<usize>,
-    /// `Path` 的绘制方式是否是填充（`f`/`F`/`f*`/`B`/`B*`/`b`/`b*`），填充色有效；否则描边色有效。
-    pub fills: bool,
-    /// `Path` 的开始就在一个已有剪切路径之内（`W` 之后的 `n`，或绘制后保留的老剪切）。
-    pub starts_clipped: bool,
-    /// 图像的 `Do` 引用的资源名（`Image`/`Form`）。
-    pub resource: Option<Vec<u8>>,
-    /// 是否是内联图像（`BI … EI`）。
-    pub inline_image: bool,
-    /// 透明组（Form 的 `/Group`）或软蒙版：写回时状态隔离的取舍不同（只记录，PDFium 读不到）。
-    pub transactional: bool,
-}
-
-impl MappedObject {
-    fn new(kind: ObjKind, token: usize) -> Self {
-        Self {
-            kind,
-            first_token: token,
-            last_token: token,
-            text_runs: Vec::new(),
-            paint_token: None,
-            fills: true,
-            starts_clipped: false,
-            resource: None,
-            inline_image: false,
-            transactional: false,
-        }
-    }
+    /// 这个对象自己的字节：第一个操作数到操作符末尾；路径是第一个构造操作符的操作数到绘制操作符末尾。
+    pub span: Range<usize>,
+    /// 产生对象的操作符（绘制、显示、`Do`、`sh`；内联图像是整个 `BI … EI`）。
+    pub op: Range<usize>,
+    /// 这个操作符的操作数起点（没有操作数时等于 `op.start`）。
+    pub op_operands: usize,
+    /// 当时的变换矩阵。
+    pub ctm: Matrix,
+    pub fill: FillHistory,
+    pub detail: Detail,
 }
 
 /// 一页的对应结果。
@@ -92,121 +206,94 @@ impl MappedObject {
 pub struct PageMap {
     /// 页面的内容流（拼接后），写回层据此取字节。
     pub content: Content,
-    pub tokens: Vec<Token>,
     /// 按 PDFium 建立对象的顺序排列；下标即 PDFium 的页面对象索引。
     pub objects: Vec<MappedObject>,
-    /// 记号层发现的异常（内联图像未终止等）。
-    pub notes: Vec<crate::content::Note>,
-    /// 无法对应的原因（有内容时整页标为"不可对应"，退回 PDFium 生成器）。
-    pub unmatched: Vec<Unmatched>,
-    /// 解析器丢弃的字形（`Tj`/`'`/`"` 的空串、`TJ` 里的空串），不计入对象。
-    pub empty_shows: usize,
-    /// `W` 之后的 `n` 没有产出对象（剪切只改状态）。
-    pub clip_only: usize,
-    /// 没有任何绘制内容的路径（`m l m` 之类）被 PDFium 保留成空路径对象：这里不逐条判断几何，
-    /// 只在 `Path` 对象数为 0 且对象数对不上时提示。
-    pub diagnostics: Vec<String>,
+    /// 执行过的操作符个数。
+    pub operators: usize,
+    /// 解释不下去的原因。有它时后面的对象不可信，这一页归为“对不上”。
+    pub blocked: Option<Unmatched>,
 }
 
-impl PageMap {
-    pub fn is_matched(&self) -> bool {
-        self.unmatched.is_empty()
-    }
-}
-
-/// 不可对应的原因分类（报告第 4 节按它统计）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+/// 不可对应的原因分类（报告按它统计）。
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Unmatched {
-    /// 内容流取不到或解不开。
-    UnreadableContents,
-    /// 记号层发现流损坏（内联图像无法定界等）。
-    DamagedStream,
-    /// 其他读方（PDFium）不支持或这里来不及实现的操作符（如 `d0`/`d1` 出现在页面层）。
-    UnknownOperator,
-    /// 括号不配对（`q`/`Q`、`BT`/`ET`、`BMC`/`BDC`/`EMC`）。
-    Nesting,
-    /// 对象数与 PDFium 不一致（原因待查）。
+    /// 内联图像用了这里定不了界的过滤器（`DCTDecode`、`CCITTFaxDecode`）。
+    InlineImageFilter(String),
+    /// 对象数与 PDFium 不一致。
     ObjectCountMismatch,
+    /// 对象数一致，但某个对象的类别或特征（点数、字号、图像宽高）与 PDFium 不一致。
+    ObjectMismatch,
 }
 
 impl Unmatched {
-    pub fn label(self) -> &'static str {
+    pub fn label(&self) -> String {
         match self {
-            Self::UnreadableContents => "内容流不可读",
-            Self::DamagedStream => "流损坏",
-            Self::UnknownOperator => "未知或不支持的操作符",
-            Self::Nesting => "嵌套错误",
-            Self::ObjectCountMismatch => "对象数不一致（PDFium 丢弃或保留的方式不同）",
+            Self::InlineImageFilter(filter) => {
+                format!("内联图像用了定不了界的过滤器（{filter}）")
+            }
+            Self::ObjectCountMismatch => "对象数与 PDFium 不一致".to_owned(),
+            Self::ObjectMismatch => "对象的类别或特征与 PDFium 不一致".to_owned(),
         }
     }
 }
 
-/// 从页面的 `/Contents` 取流并拼接。直接给已经解好码的流时用 [`map_streams`]。
-pub fn map_page(
-    doc: &crate::pdf::PdfDocument,
-    page: &crate::pdf::pages::PageInfo,
-) -> Result<PageMap, Unmatched> {
-    let streams = read_streams(doc, page.contents.as_ref())?;
-    Ok(map_streams(&streams))
+/// 解释一页的内容流。
+pub fn map_page(doc: &PdfDocument, page: &PageInfo) -> PageMap {
+    let content = Content::read(doc, &page.contents);
+    let resources = DocResources::new(doc, page.resources.clone());
+    map_content(content, &resources)
 }
 
-/// 取一页的内容流（解码后）。返回空表表示页面没有内容流。
-pub fn read_streams(
-    doc: &crate::pdf::PdfDocument,
-    contents: Option<&Contents>,
-) -> Result<Vec<StreamData>, Unmatched> {
-    let numbers: Vec<u32> = match contents {
-        None => return Ok(Vec::new()),
-        Some(Contents::One(n)) => vec![*n],
-        Some(Contents::Many(v)) => v.clone(),
-    };
-    let mut out = Vec::with_capacity(numbers.len());
-    for (i, n) in numbers.iter().enumerate() {
-        // PDFium 跳过不是流的项（`CPDF_ContentParser::PrepareContent`）。
-        let Some(crate::pdf::PdfObject::Stream(s)) = doc.object(*n) else {
-            continue;
-        };
-        let data = s.decoded(doc).map_err(|_| Unmatched::UnreadableContents)?;
-        out.push(StreamData {
-            index: i,
-            object_number: *n,
-            data,
-        });
-    }
-    Ok(out)
-}
-
-/// 对已经解好码的流做分词与对应。
-pub fn map_streams(streams: &[StreamData]) -> PageMap {
-    let content = Content::concat(streams);
-    let Tokenized { tokens, notes, .. } = content.tokenize();
-    let damaged = notes.iter().any(|n| {
-        matches!(
-            n.note,
-            crate::content::NoteKind::InlineImageUnterminated
-                | crate::content::NoteKind::Unterminated
-        )
-    });
-    let mut st = collect::State::default();
-    for (i, tok) in tokens.iter().enumerate() {
-        collect::feed(&mut st, &tokens, i, tok);
-    }
-    let ctx = collect::FinishCtx { tokens: &tokens };
-    let fin = collect::finish(st, &ctx);
-    let mut unmatched = fin.unmatched;
-    if damaged {
-        unmatched.push(Unmatched::DamagedStream);
-    }
-    unmatched.sort_unstable();
-    unmatched.dedup();
+/// 解释已经取出来的内容流。
+pub fn map_content(content: Content, resources: &dyn Resources) -> PageMap {
+    let outcome = interp::interpret(&content.data, resources);
     PageMap {
         content,
-        tokens,
-        objects: fin.objects,
-        notes,
-        unmatched,
-        empty_shows: fin.empty_shows,
-        clip_only: fin.clip_only,
-        diagnostics: fin.diagnostics,
+        objects: outcome.objects,
+        operators: outcome.operators,
+        blocked: outcome.blocked,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn matrix_composition_and_pull_back() {
+        let scale = Matrix {
+            a: 2.0,
+            d: 4.0,
+            ..Matrix::IDENTITY
+        };
+        let shift = Matrix {
+            e: 10.0,
+            f: 20.0,
+            ..Matrix::IDENTITY
+        };
+        // 先缩放再平移。
+        let m = scale.then(shift);
+        assert_eq!((m.a, m.d, m.e, m.f), (2.0, 4.0, 10.0, 20.0));
+        // 先平移再缩放：平移量也被缩放。
+        let m = shift.then(scale);
+        assert_eq!((m.e, m.f), (20.0, 80.0));
+        assert_eq!(scale.pull_back(10.0, 10.0), Some((5.0, 2.5)));
+        let singular = Matrix {
+            a: 0.0,
+            d: 0.0,
+            ..Matrix::IDENTITY
+        };
+        assert_eq!(singular.pull_back(1.0, 1.0), None);
+        // 旋转 90°：(x, y) → (-y, x)。
+        let rot = Matrix {
+            a: 0.0,
+            b: 1.0,
+            c: -1.0,
+            d: 0.0,
+            e: 0.0,
+            f: 0.0,
+        };
+        let (vx, vy) = rot.pull_back(0.0, 1.0).unwrap();
+        assert!((vx - 1.0).abs() < 1e-12 && vy.abs() < 1e-12);
     }
 }

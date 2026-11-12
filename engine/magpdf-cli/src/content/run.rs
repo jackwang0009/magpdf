@@ -1,19 +1,19 @@
 //! 单个文件的处理：对应、随机修改、保存（含回退）、读回核对、像素比对、对照组。
 //!
-//! 保存结果是三段接起来的：原文件字节，自研改写层的增量更新（对得上的页），PDFium 的增量保存
-//! （对不上、退回生成器整条重写的页）。之后重新打开保存结果，逐页与预期画面比对。
+//! 保存结果是三段接起来的：原文件字节，自研改写层的增量更新（对得上、改写层也写得了的页），
+//! PDFium 的增量保存（对不上的页，以及改写层写不了这次修改的页，退回生成器整条重写）。
+//! 之后重新打开保存结果，逐页与预期画面比对。
 
-use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::time::Instant;
 
-use magpdf_content::content::{Content, StreamData, TokenKind};
-use magpdf_content::map::{self, PageMap, Unmatched};
+use magpdf_content::content::Content;
+use magpdf_content::map::{self, ObjKind, PageMap, Unmatched};
 use magpdf_content::pdf::PdfDocument;
-use magpdf_content::pdf::pages::{Contents, PageInfo, walk_pages};
+use magpdf_content::pdf::pages::{PageInfo, walk_pages};
 use magpdf_content::pdf::pairs::check_page;
 use magpdf_content::rewrite::{
-    EditSet, EditTarget, StreamReplacement, plan_page, save_full_rewrite, save_incremental,
+    EditSet, EditTarget, PageUpdate, plan_page, save_full_rewrite, save_incremental,
 };
 use magpdf_engine::compare;
 use magpdf_engine::roundtrip::{DiffImages, DiffMetrics, mark_all_and_regenerate};
@@ -30,13 +30,25 @@ use crate::image::{heatmap, write_png};
 
 /// 对应本身没问题、只是改写层写不了这次修改。汇总时这样的页不算“对不上”。
 pub(super) const REASON_REWRITE: &str = "改写层写不了这次修改";
+/// 对应本身没问题、只是文件的结构让改写层没法把这一页写回去（比如内容流多页共用、页字典又改不了）。
+/// 汇总时这样的页也不算“对不上”。
+pub(super) const REASON_SAVE: &str = "改写层没法把这一页写回文件";
 
 /// 退回生成器的原因（汇总时按它计数，所以只写类别，细节放进 [`PageWork::notes`]）。
 mod reason {
     pub const OBJECT_LAYER: &str = "自研对象层打不开文件";
     pub const ENCRYPTED: &str = "文件加密，自研对象层不解密";
     pub const PAGE_COUNT: &str = "页树里的页数与 PDFium 不一致";
+    pub const PAGE_OPEN: &str = "这一页自研对象层认为打不开";
     pub const GEOMETRY: &str = "页面尺寸或旋转与 PDFium 不一致";
+}
+
+/// 改写层要写回的内容。
+struct Planned {
+    /// `/Contents` 每一项的新字节；`None` 是这一项不写。
+    segments: Vec<Option<Vec<u8>>>,
+    /// 各项拼接之后的样子（读回核对时和它比）。
+    data: Vec<u8>,
 }
 
 /// 处理中的一页。
@@ -56,8 +68,8 @@ struct PageWork {
     streams_unchecked: usize,
     operators: usize,
     edits: Vec<(usize, EditKind)>,
-    /// 改写层要写回的内容（各条流拼接之后）。`None` 表示这一页不写。
-    planned: Option<Vec<u8>>,
+    /// 改写层要写回的内容。`None` 表示这一页不写。
+    planned: Option<Planned>,
     verify: Option<Check>,
     control: Option<Check>,
 }
@@ -144,8 +156,9 @@ pub fn run_file(
         Err(e) => (None, Some(e.to_string())),
     };
 
-    // 对应：自研这一侧取内容流、分词、按 PDFium 的规则数对象，再和 PDFium 的对象数核对。
+    // 对应：自研这一侧取内容流、照 PDFium 的规则解释，再和 PDFium 的对象逐个核对。
     let t = Instant::now();
+    let mut infos: Vec<Option<PageInfo>> = Vec::new();
     match &pdf {
         None => {
             for w in &mut work {
@@ -158,10 +171,10 @@ pub fn run_file(
             }
         }
         Some(pdf) => {
-            let infos = walk_pages(pdf, page_count.max(1).saturating_mul(2));
+            infos = walk_pages(pdf);
             if infos.len() == page_count {
                 for (w, info) in work.iter_mut().zip(&infos) {
-                    map_one(pdf, info, w);
+                    map_one(pdf, info.as_ref(), w);
                 }
             } else {
                 // 页数都对不上时，序号相同的页未必是同一页，整份文件都不走改写层。
@@ -183,20 +196,36 @@ pub fn run_file(
         }
     }
 
-    // 对得上的页由改写层写。
+    // 对得上的页由改写层写：只改被修改的对象的字节。
     let t = Instant::now();
     for w in &mut work {
         if w.error.is_some() || w.route() != Route::Matched {
             continue;
         }
-        if w.edits.is_empty() && !config.rewrite_all {
+        let Some(map) = &w.map else { continue };
+        if w.edits.is_empty() {
+            if config.rewrite_all {
+                // 不改动也写一遍：每条流把原来的字节写回去，再从保存结果读回来核对。
+                let content = &map.content;
+                w.planned = Some(Planned {
+                    segments: content
+                        .segments
+                        .iter()
+                        .enumerate()
+                        .map(|(i, s)| s.stream.map(|_| content.segment_data(i).to_vec()))
+                        .collect(),
+                    data: content.data.clone(),
+                });
+            }
             continue;
         }
-        let Some(map) = &w.map else { continue };
         match plan_page(map, &edit_set(&w.edits)) {
             Ok(rewrite) => {
-                if rewrite.changed || config.rewrite_all {
-                    w.planned = Some(rewrite.data);
+                if rewrite.changed {
+                    w.planned = Some(Planned {
+                        segments: rewrite.segments,
+                        data: rewrite.data,
+                    });
                 }
             }
             Err(e) => w.fail(REASON_REWRITE, e.to_string()),
@@ -204,48 +233,46 @@ pub fn run_file(
     }
 
     let mut deshared_streams = 0usize;
-    let mut full_rewrite_bytes = 0u64;
     let mut stage_a: Option<Vec<u8>> = None;
     if let Some(pdf) = &pdf {
-        let mut replacements: Vec<StreamReplacement> = Vec::new();
-        let mut page_streams: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
-        for w in &work {
-            let (Some(planned), Some(info)) = (&w.planned, &w.info) else {
-                continue;
-            };
-            let nums = content_nums(&info.contents);
-            let Some((first, rest)) = nums.split_first() else {
-                continue;
-            };
-            page_streams.insert(info.number, nums.clone());
-            replacements.push(StreamReplacement {
-                object_number: *first,
-                data: Some(planned.clone()),
-                compress: true,
-            });
-            // 改写层现在把整页写进第一条流，其余的流清空。
-            for n in rest {
-                replacements.push(StreamReplacement {
-                    object_number: *n,
-                    data: Some(Vec::new()),
-                    compress: false,
-                });
-            }
-        }
-        let deshare = shared_streams(&work);
-        deshared_streams = replacements
+        let updates: Vec<PageUpdate> = work
             .iter()
-            .filter(|r| deshare.contains(&r.object_number))
-            .count();
-        full_rewrite_bytes = save_full_rewrite(pdf, true).bytes.len() as u64;
-        if !replacements.is_empty() {
-            stage_a =
-                Some(save_incremental(pdf, &page_streams, &replacements, &deshare, true).bytes);
+            .filter_map(|w| {
+                w.planned.as_ref().map(|planned| PageUpdate {
+                    index: w.index,
+                    segments: planned.segments.clone(),
+                })
+            })
+            .collect();
+        if !updates.is_empty() {
+            match save_incremental(pdf, &infos, &updates, true) {
+                Ok(saved) => {
+                    deshared_streams = saved.deshared_streams;
+                    // 写不进去的页一个字节都没动，退回生成器。
+                    for (index, why) in saved.rejected {
+                        if let Some(w) = work.get_mut(index) {
+                            w.planned = None;
+                            w.fail(REASON_SAVE, why);
+                        }
+                    }
+                    stage_a = Some(saved.bytes);
+                }
+                Err(e) => {
+                    for w in work.iter_mut().filter(|w| w.planned.is_some()) {
+                        w.planned = None;
+                        w.fail(REASON_SAVE, e.to_string());
+                    }
+                }
+            }
         }
     }
     timings.save_us = micros(t);
     let stage_a = stage_a.unwrap_or_else(|| data.clone());
     let incremental_bytes = (stage_a.len() as u64).saturating_sub(original_len);
+    // 作为对比的完整重写体积（不计入保存耗时）。
+    let full_rewrite_bytes = pdf
+        .as_ref()
+        .map_or(0, |pdf| save_full_rewrite(pdf).len() as u64);
 
     // 对不上的页：退回 PDFium 的生成器整条重写，结果接在后面。
     let t = Instant::now();
@@ -283,7 +310,7 @@ pub fn run_file(
     let t = Instant::now();
     let mut verify_failures = file_notes;
     if pdf.is_some() {
-        verify_failures.extend(read_back(&saved, &work));
+        verify_failures.extend(read_back(&saved, &mut work));
     }
     timings.verify_us = micros(t);
 
@@ -413,10 +440,17 @@ fn probe_page(doc: &Document<'_>, index: usize) -> PageWork {
     w
 }
 
-/// 自研这一侧的对应，并与 PDFium 的对象数核对。
-fn map_one(pdf: &PdfDocument, info: &PageInfo, w: &mut PageWork) {
+/// 自研这一侧的对应，并与 PDFium 的对象逐个核对（个数、类别）。
+fn map_one(pdf: &PdfDocument, info: Option<&PageInfo>, w: &mut PageWork) {
+    let Some(info) = info else {
+        // 自研对象层照 PDFium 的规则判断这一页打不开；PDFium 真打不开时两边一致，不用再说什么。
+        if w.error.is_none() {
+            w.fail(reason::PAGE_OPEN, "");
+        }
+        return;
+    };
     w.info = Some(info.clone());
-    w.streams = content_nums(&info.contents).len();
+    w.streams = info.contents.stream_numbers().len();
     if w.error.is_some() {
         w.streams_unchecked = w.streams;
         return;
@@ -426,45 +460,64 @@ fn map_one(pdf: &PdfDocument, info: &PageInfo, w: &mut PageWork) {
     {
         w.fail(reason::GEOMETRY, why);
     }
-    let mut page_map = match map::map_page(pdf, info) {
-        Ok(m) => m,
-        Err(why) => {
-            w.fail(why.label(), "");
+    let mut page_map = map::map_page(pdf, info);
+    w.operators = page_map.operators;
+    if page_map.blocked.is_none() {
+        if page_map.objects.len() != w.objects {
+            page_map.blocked = Some(Unmatched::ObjectCountMismatch);
+            w.notes.push(format!(
+                "自研数出 {} 个对象，PDFium {} 个",
+                page_map.objects.len(),
+                w.objects
+            ));
+        } else if let Some(at) = page_map
+            .objects
+            .iter()
+            .zip(&w.kinds)
+            .position(|(ours, theirs)| !same_kind(ours.kind, *theirs))
+        {
+            page_map.blocked = Some(Unmatched::ObjectMismatch);
+            w.notes.push(format!(
+                "第 {} 个对象：自研认为是{}，PDFium 是{}",
+                at + 1,
+                page_map.objects[at].kind.label(),
+                kind_label(w.kinds[at])
+            ));
+        }
+    }
+    match &page_map.blocked {
+        Some(why) => {
+            w.fail(&why.label(), "");
             w.streams_unchecked = w.streams;
-            return;
         }
-    };
-    w.operators = page_map
-        .tokens
-        .iter()
-        .filter(|tok| tok.kind == TokenKind::Operator)
-        .count();
-    if page_map.objects.len() != w.objects {
-        page_map.unmatched.push(Unmatched::ObjectCountMismatch);
-        page_map.unmatched.sort_unstable();
-        page_map.unmatched.dedup();
-        w.notes.push(format!(
-            "自研数出 {} 个对象，PDFium {} 个",
-            page_map.objects.len(),
-            w.objects
-        ));
-    }
-    for why in &page_map.unmatched {
-        w.fail(why.label(), "");
-    }
-    // 不改任何对象：拆开再拼回去应当逐字节相同。
-    match plan_page(&page_map, &EditSet::default()) {
-        Ok(rewrite) if rewrite.data == page_map.content.data => {
-            w.streams_identical = w.streams;
+        None => {
+            // 不改任何对象：改写层的输出应当就是原文，一个字节不差。
+            // （`--rewrite-all` 时还会真的写进文件再读回来核对，见 `read_back`。）
+            match plan_page(&page_map, &EditSet::default()) {
+                Ok(rewrite) if !rewrite.changed && rewrite.data == page_map.content.data => {
+                    w.streams_identical = w.streams;
+                }
+                Ok(rewrite) => w.notes.push(format!(
+                    "不改动时改写层的输出与原文不同：原文 {} 字节，输出 {} 字节",
+                    page_map.content.data.len(),
+                    rewrite.data.len()
+                )),
+                Err(_) => w.streams_unchecked = w.streams,
+            }
         }
-        Ok(rewrite) => w.notes.push(format!(
-            "不改动时拼回去的内容与原文不同：原文 {} 字节，拼回 {} 字节",
-            page_map.content.data.len(),
-            rewrite.data.len()
-        )),
-        Err(_) => w.streams_unchecked = w.streams,
     }
     w.map = Some(page_map);
+}
+
+fn same_kind(ours: ObjKind, theirs: ObjectKind) -> bool {
+    matches!(
+        (ours, theirs),
+        (ObjKind::Text, ObjectKind::Text)
+            | (ObjKind::Path, ObjectKind::Path)
+            | (ObjKind::Image, ObjectKind::Image)
+            | (ObjKind::Shading, ObjectKind::Shading)
+            | (ObjKind::Form, ObjectKind::Form)
+    )
 }
 
 fn edit_set(edits: &[(usize, EditKind)]) -> EditSet {
@@ -485,30 +538,6 @@ fn edit_set(edits: &[(usize, EditKind)]) -> EditSet {
         set.edits.insert(*index, target);
     }
     set
-}
-
-fn content_nums(contents: &Option<Contents>) -> Vec<u32> {
-    match contents {
-        None => Vec::new(),
-        Some(Contents::One(n)) => vec![*n],
-        Some(Contents::Many(v)) => v.clone(),
-    }
-}
-
-/// 被不止一页用到的内容流对象号。
-fn shared_streams(work: &[PageWork]) -> BTreeSet<u32> {
-    let mut uses: BTreeMap<u32, usize> = BTreeMap::new();
-    for w in work {
-        if let Some(info) = &w.info {
-            for n in content_nums(&info.contents) {
-                *uses.entry(n).or_default() += 1;
-            }
-        }
-    }
-    uses.into_iter()
-        .filter(|(_, n)| *n > 1)
-        .map(|(k, _)| k)
-        .collect()
 }
 
 fn micros(t: Instant) -> u64 {
@@ -657,66 +686,67 @@ fn regenerate_fallback_pages(
         .map_err(|e| format!("回退：PDFium 增量保存失败：{e}"))
 }
 
-/// 从保存结果读回对得上的页的内容流，与写进去的（没写的页与原文）逐字节比较。
-fn read_back(saved: &[u8], work: &[PageWork]) -> Vec<String> {
+/// 从保存结果读回改写层负责的页的内容流，与写进去的（没写的页与原文）逐字节比较。
+///
+/// 没有修改的页读回来和原文不同时，它的内容流不再算“逐字节相同”。
+fn read_back(saved: &[u8], work: &mut [PageWork]) -> Vec<String> {
     let mut failures = Vec::new();
-    let matched: Vec<&PageWork> = work
+    if !work
         .iter()
-        .filter(|w| w.error.is_none() && w.route() == Route::Matched)
-        .collect();
-    if matched.is_empty() {
+        .any(|w| w.error.is_none() && w.route() == Route::Matched)
+    {
         return failures;
     }
     let back = match PdfDocument::load(saved.to_vec()) {
         Ok(doc) => doc,
         Err(e) => {
             failures.push(format!("保存结果自研对象层读不回：{e}"));
+            for w in work.iter_mut() {
+                w.streams_identical = 0;
+            }
             return failures;
         }
     };
-    let infos = walk_pages(&back, work.len().max(1).saturating_mul(2));
-    for w in matched {
+    let infos = walk_pages(&back);
+    for w in work.iter_mut() {
+        if w.error.is_some() || w.route() != Route::Matched {
+            continue;
+        }
         let Some(page_map) = &w.map else { continue };
-        let expected = match (&w.planned, &w.info) {
-            (Some(planned), Some(info)) => {
-                let nums = content_nums(&info.contents);
-                let streams: Vec<StreamData> = nums
-                    .iter()
-                    .enumerate()
-                    .map(|(i, n)| StreamData {
-                        index: i,
-                        object_number: *n,
-                        data: if i == 0 { planned.clone() } else { Vec::new() },
-                    })
-                    .collect();
-                Content::concat(&streams).data
-            }
-            _ => page_map.content.data.clone(),
-        };
+        let expected = w
+            .planned
+            .as_ref()
+            .map_or(&page_map.content.data, |planned| &planned.data);
         let got = infos
             .get(w.index)
-            .and_then(|info| map::read_streams(&back, info.contents.as_ref()).ok())
-            .map(|streams| Content::concat(&streams).data);
-        match got {
-            Some(got) if got == expected => {}
+            .and_then(Option::as_ref)
+            .map(|info| Content::read(&back, &info.contents).data);
+        let failure = match got {
+            Some(got) if &got == expected => None,
             Some(got) => {
                 let at = got
                     .iter()
-                    .zip(&expected)
+                    .zip(expected)
                     .position(|(a, b)| a != b)
                     .unwrap_or_else(|| got.len().min(expected.len()));
-                failures.push(format!(
+                Some(format!(
                     "第 {} 页：从保存结果读回的内容流与写进去的不一致（写入 {} 字节，读回 {} 字节，第一处不同在偏移 {}）",
                     w.index + 1,
                     expected.len(),
                     got.len(),
                     at
-                ));
+                ))
             }
-            None => failures.push(format!(
+            None => Some(format!(
                 "第 {} 页：保存结果里读不出这一页的内容流",
                 w.index + 1
             )),
+        };
+        if let Some(failure) = failure {
+            if w.edits.is_empty() {
+                w.streams_identical = 0;
+            }
+            failures.push(failure);
         }
     }
     failures
@@ -919,6 +949,7 @@ fn pixel_failure_line(w: &PageWork) -> Option<String> {
         (None, None) => "原因不明".to_owned(),
     };
     let route = match w.route() {
+        Route::Matched if w.planned.is_none() => "改写层（这一页没有要写的东西）".to_owned(),
         Route::Matched => "改写层".to_owned(),
         Route::Fallback => format!("回退生成器（{}）", w.reasons.join("、")),
     };
@@ -973,6 +1004,8 @@ fn page_record(w: &PageWork) -> PageRecord {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
 
     fn config(mix: EditMix, ratio: f64) -> Config {

@@ -1,27 +1,26 @@
 //! 最小 PDF 对象层（V17 任务书 2 的选项 (b)）。
 //!
 //! 只做内容流读写需要的那部分：交叉引用表与交叉引用流、对象流、常用过滤器、
-//! 间接引用解析、增量更新写出。不做加密、线性化、对象改写以外的结构编辑。
+//! 间接引用解析、页面树、增量更新写出。不做加密、线性化、对象改写以外的结构编辑。
 //!
-//! 设计取舍见 `docs/p0/V17-自研无损内容流读写层（第一轮）.md` 第 2 节：内容流的原始字节
-//! 必须按 PDFium 的容器规则取（`/Contents` 数组逐条拼接、**每条流之间插入一个空格**），
-//! 交给别的库取就必须复刻它的拼接方式，而两边解析结果一旦不一致，操作符与对象的对应全错。
-//! 自己写这一层可以保证"取出来的就是 PDFium 解释的那串字节"。
+//! 第二轮起这一层**照 PDFium 的读法移植**（`CPDF_Parser`、`CPDF_SyntaxParser`、`CPDF_Document`
+//! 的页树部分、`CPDF_Page` 的继承属性与尺寸；BSD-3-Clause，版权声明见本 crate 的
+//! `PDFIUM-NOTICE.md`）：同一份文件，这里认到的对象、页数、每页的内容流字节要和 PDFium 认到的一样，
+//! 包括文件损坏时 PDFium 的容错结果（交叉引用重建、长度写错的流、解到一半的压缩数据）。
+//! 第一轮按规范自己写的读法在损坏文件上和 PDFium 对不上，是当时“不可对应”的主要来源之一。
 
 mod filter;
 pub mod lexer;
 pub mod object;
 pub mod pages;
 pub mod pairs;
-pub mod provenance;
 pub mod reader;
 pub mod writer;
 
-pub use filter::{FilterError, apply_filter_chain, encode_flate};
-pub use object::{PdfDict, PdfObject, PdfStreamRef, decode_name, encode_name};
-pub use pairs::{PagePair, pair_pages};
-pub use reader::{PdfDocument, XrefError};
-pub use writer::{IncrementalWriter, StreamPatch};
+pub use filter::{FilterError, apply_filter_chain, decode_like_pdfium, encode_flate};
+pub use object::{PdfDict, PdfObject, PdfStreamRef, encode_name};
+pub use reader::{EntryLocation, PdfDocument, XrefError};
+pub use writer::{IncrementalWriter, WriteError, format_real, write_object};
 
 /// 本模块的错误类型。
 #[derive(Debug, thiserror::Error)]

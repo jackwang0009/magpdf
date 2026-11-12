@@ -1,6 +1,7 @@
 //! 流过滤器：只实现内容流和常见结构里会遇到的几种。
 //!
-//! 解码失败的流一律报错，由上层当作"流损坏"处理；不在这里做任何容错猜测。
+//! 两套入口：[`apply_filter_chain`] 严格，解不开就报错；[`decode_like_pdfium`] 照 PDFium 的容错规则，
+//! 从不报错。取内容流、交叉引用流、对象流一律用后者，这样拿到的字节才和 PDFium 解释的那一串相同。
 
 use std::io::{Read, Write};
 
@@ -103,6 +104,433 @@ pub fn encode_flate(data: &[u8]) -> Vec<u8> {
     enc.finish().unwrap_or_default()
 }
 
+/// 照 PDFium 的 `CPDF_StreamAcc::LoadAllDataFiltered` 解码一条流，从不报错
+/// （`GetDecoderArray`、`PDF_DataDecode`，BSD-3-Clause，见 `PDFIUM-NOTICE.md`）。
+///
+/// 内容流的字节必须和 PDFium 解释的那一串完全相同，所以解不开时怎么办也得照它的来：
+///
+/// - `/Filter` 既不是名字也不是数组、数组里有不是名字的项、除最后一个以外有不属于文本类的过滤器：
+///   整条流按原始字节用；
+/// - Flate 解到哪儿算哪儿，数据损坏时保留已经解出来的部分；
+/// - LZW 解码失败、预测器的参数无效：整条流按原始字节用；
+/// - 遇到不认识的过滤器（图像类的，或者这一版 PDFium 没编进去的，比如 Brotli）就停下，
+///   用到此为止解出来的数据；
+/// - 最后一个字节都没解出来时，用原始字节。
+///
+/// `filter`、`parms` 是已经解过一层引用的 `/Filter` 和 `/DecodeParms`；`resolve` 用来解数组里的引用。
+pub fn decode_like_pdfium(
+    data: &[u8],
+    filter: Option<&PdfObject>,
+    parms: Option<&PdfObject>,
+    resolve: &dyn Fn(&PdfObject) -> Option<PdfObject>,
+) -> Vec<u8> {
+    if data.is_empty() {
+        return Vec::new();
+    }
+    let mut decoders: Vec<(Vec<u8>, Option<PdfObject>)> = Vec::new();
+    match filter {
+        None | Some(PdfObject::Null) => return data.to_vec(),
+        Some(PdfObject::Array(items)) => {
+            let mut names = Vec::with_capacity(items.len());
+            for item in items {
+                match resolve(item) {
+                    Some(PdfObject::Name(name)) => names.push(name),
+                    _ => return data.to_vec(),
+                }
+            }
+            let text_only = names.len().saturating_sub(1);
+            if names[..text_only].iter().any(|n| !is_text_decoder(n)) {
+                return data.to_vec();
+            }
+            let parm_items = match parms {
+                Some(PdfObject::Array(a)) => Some(a),
+                _ => None,
+            };
+            for (i, name) in names.into_iter().enumerate() {
+                let parm = parm_items
+                    .and_then(|a| a.get(i))
+                    .and_then(resolve)
+                    .filter(|p| p.as_dict().is_some());
+                decoders.push((name, parm));
+            }
+        }
+        Some(PdfObject::Name(name)) => {
+            decoders.push((
+                name.clone(),
+                parms.filter(|p| p.as_dict().is_some()).cloned(),
+            ));
+        }
+        Some(_) => return data.to_vec(),
+    }
+
+    let mut decoded: Option<Vec<u8>> = None;
+    for (name, parm) in &decoders {
+        let src: &[u8] = decoded.as_deref().unwrap_or(data);
+        let out = match name.as_slice() {
+            b"Crypt" => continue,
+            b"FlateDecode" | b"Fl" => flate_or_lzw(false, src, parm.as_ref()),
+            b"LZWDecode" | b"LZW" => flate_or_lzw(true, src, parm.as_ref()),
+            b"ASCII85Decode" | b"A85" => Some(a85_decode_pdfium(src).0),
+            b"ASCIIHexDecode" | b"AHx" => Some(hex_decode_pdfium(src).0),
+            b"RunLengthDecode" | b"RL" => run_length_decode_pdfium(src).map(|r| r.0),
+            // 当作图像解码器：到此为止。
+            _ => break,
+        };
+        match out {
+            Some(out) => decoded = Some(out),
+            None => return data.to_vec(),
+        }
+    }
+    match decoded {
+        Some(out) if !out.is_empty() => out,
+        _ => data.to_vec(),
+    }
+}
+
+fn is_text_decoder(name: &[u8]) -> bool {
+    matches!(
+        name,
+        b"FlateDecode"
+            | b"Fl"
+            | b"LZWDecode"
+            | b"LZW"
+            | b"ASCII85Decode"
+            | b"A85"
+            | b"ASCIIHexDecode"
+            | b"AHx"
+            | b"RunLengthDecode"
+            | b"RL"
+    )
+}
+
+/// `FlateOrLZWDecode`：参数无效、LZW 失败、预测器失败时返回 `None`。
+fn flate_or_lzw(lzw: bool, src: &[u8], parms: Option<&PdfObject>) -> Option<Vec<u8>> {
+    let int = |key: &[u8], default: i64| parm_int(parms, key, default);
+    let predictor = int(b"Predictor", 0);
+    let colors = int(b"Colors", 1);
+    let bpc = int(b"BitsPerComponent", 8);
+    let columns = int(b"Columns", 1);
+    if colors < 0 || bpc < 0 || columns < 0 {
+        return None;
+    }
+    let bits = columns.checked_mul(colors)?.checked_mul(bpc)?;
+    if bits > i64::from(i32::MAX) - 7 {
+        return None;
+    }
+    let raw = if lzw {
+        lzw_decode_pdfium(src, int(b"EarlyChange", 1) != 0)?.0
+    } else {
+        inflate_lenient(src).0
+    };
+    if predictor >= 10 || predictor == 2 {
+        let row_bytes = (bits + 7) / 8;
+        if row_bytes <= 0 {
+            return None;
+        }
+        return Some(unpredict(&raw, predictor, parms));
+    }
+    Some(raw)
+}
+
+/// zlib 解压，解到流结束、出错或者输入用完为止；出错时保留已经解出来的部分。
+/// 返回（解出来的数据，用掉的输入字节数）。
+pub(crate) fn inflate_lenient(src: &[u8]) -> (Vec<u8>, usize) {
+    let mut inflater = flate2::Decompress::new(true);
+    let mut out: Vec<u8> = Vec::with_capacity(src.len().saturating_mul(3).clamp(256, 1 << 22));
+    loop {
+        if out.len() == out.capacity() {
+            out.reserve(out.capacity().max(4096));
+        }
+        let before_in = inflater.total_in();
+        let before_out = inflater.total_out();
+        let offset = usize::try_from(before_in)
+            .unwrap_or(src.len())
+            .min(src.len());
+        let status =
+            inflater.decompress_vec(&src[offset..], &mut out, flate2::FlushDecompress::Sync);
+        match status {
+            Ok(flate2::Status::StreamEnd) | Err(_) => break,
+            Ok(_) => {
+                // 既没读也没写，而且输出还有空位：输入用完了。
+                if inflater.total_in() == before_in
+                    && inflater.total_out() == before_out
+                    && out.len() < out.capacity()
+                {
+                    break;
+                }
+            }
+        }
+    }
+    let consumed = usize::try_from(inflater.total_in())
+        .unwrap_or(src.len())
+        .min(src.len());
+    (out, consumed)
+}
+
+/// `CLZWDecoder::Decode`。返回（解出来的数据，用掉的输入字节数）；一个字节都没解出来、
+/// 或者码表引用无效时返回 `None`。
+pub(crate) fn lzw_decode_pdfium(src: &[u8], early_change: bool) -> Option<(Vec<u8>, usize)> {
+    const NO_CODE: u32 = 0xFFFF_FFFF;
+    const STACK: usize = 4000;
+    let early = u32::from(early_change);
+    let mut codes = vec![0u32; 5021];
+    let mut current_code = 0u32;
+    let mut code_len = 9u32;
+    let mut bit_pos = 0usize;
+    let mut old_code = NO_CODE;
+    let mut last_char = 0u8;
+    let mut out: Vec<u8> = Vec::new();
+    let mut stack: Vec<u8> = Vec::with_capacity(STACK);
+
+    // `DecodeString`：把一个码展开成字节，倒着压栈。
+    fn decode_string(mut code: u32, codes: &[u32], current: u32, stack: &mut Vec<u8>) {
+        while let Some(index) = code.checked_sub(258).filter(|i| *i < current) {
+            let data = codes[index as usize];
+            if stack.len() >= STACK {
+                return;
+            }
+            stack.push(data as u8);
+            code = data >> 16;
+        }
+        if stack.len() >= STACK {
+            return;
+        }
+        stack.push(code as u8);
+    }
+
+    // `AddCode`：码表加一项，项数到了临界值时码长加一位。
+    fn add_code(
+        codes: &mut [u32],
+        current: &mut u32,
+        len: &mut u32,
+        early: u32,
+        prefix: u32,
+        append: u8,
+    ) {
+        if *current + early == 4094 {
+            return;
+        }
+        codes[*current as usize] = (prefix << 16) | u32::from(append);
+        *current += 1;
+        match *current + early {
+            254 => *len = 10,
+            766 => *len = 11,
+            1790 => *len = 12,
+            _ => {}
+        }
+    }
+
+    loop {
+        if bit_pos + code_len as usize > src.len() * 8 {
+            break;
+        }
+        let mut byte = bit_pos / 8;
+        let shift = (bit_pos % 8) as u32;
+        let mut left = code_len;
+        let mut code = 0u32;
+        if shift != 0 {
+            left -= 8 - shift;
+            code = (u32::from(src[byte]) & ((1 << (8 - shift)) - 1)) << left;
+            byte += 1;
+        }
+        if left < 8 {
+            code |= u32::from(src[byte]) >> (8 - left);
+        } else {
+            left -= 8;
+            code |= u32::from(src[byte]) << left;
+            byte += 1;
+            if left != 0 {
+                code |= u32::from(src[byte]) >> (8 - left);
+            }
+        }
+        bit_pos += code_len as usize;
+
+        if code < 256 {
+            out.push(code as u8);
+            last_char = code as u8;
+            if old_code != NO_CODE {
+                add_code(
+                    &mut codes,
+                    &mut current_code,
+                    &mut code_len,
+                    early,
+                    old_code,
+                    last_char,
+                );
+            }
+            old_code = code;
+            continue;
+        }
+        if code == 256 {
+            code_len = 9;
+            current_code = 0;
+            old_code = NO_CODE;
+            continue;
+        }
+        if code == 257 {
+            break;
+        }
+        if old_code == NO_CODE {
+            return None;
+        }
+        stack.clear();
+        if code - 258 >= current_code {
+            // 码表里还没有这个码：是“上一串加上它自己的第一个字节”。
+            stack.push(last_char);
+            decode_string(old_code, &codes, current_code, &mut stack);
+        } else {
+            decode_string(code, &codes, current_code, &mut stack);
+        }
+        if out.len() + stack.len() > u32::MAX as usize {
+            return None;
+        }
+        out.extend(stack.iter().rev());
+        last_char = stack.last().copied().unwrap_or(last_char);
+        if old_code >= 258 && old_code - 258 >= current_code {
+            break;
+        }
+        add_code(
+            &mut codes,
+            &mut current_code,
+            &mut code_len,
+            early,
+            old_code,
+            last_char,
+        );
+        old_code = code;
+    }
+    if out.is_empty() {
+        return None;
+    }
+    Some((out, bit_pos.div_ceil(8)))
+}
+
+fn is_a85_space(ch: u8) -> bool {
+    matches!(ch, b'\r' | b'\n' | b' ' | b'\t')
+}
+
+/// PDFium 的 `A85Decode`：返回（数据，用掉的字节数）。遇到不合法的字符就停，之前的照常解。
+pub(crate) fn a85_decode_pdfium(src: &[u8]) -> (Vec<u8>, usize) {
+    // 开头就不是合法字符时，什么都不解。
+    match src.first() {
+        None => return (Vec::new(), 0),
+        Some(&ch) if ch != b'z' && !(b'!'..=b'u').contains(&ch) && !is_a85_space(ch) => {
+            return (Vec::new(), 0);
+        }
+        Some(_) => {}
+    }
+    let mut out = Vec::with_capacity(src.len() / 5 * 4 + 4);
+    let mut state = 0usize;
+    let mut res = 0u32;
+    let mut pos = 0usize;
+    while pos < src.len() {
+        let ch = src[pos];
+        pos += 1;
+        if is_a85_space(ch) {
+            continue;
+        }
+        if ch == b'z' {
+            out.extend_from_slice(&[0, 0, 0, 0]);
+            state = 0;
+            res = 0;
+            continue;
+        }
+        if !(b'!'..=b'u').contains(&ch) {
+            break;
+        }
+        res = res.wrapping_mul(85).wrapping_add(u32::from(ch - 33));
+        if state < 4 {
+            state += 1;
+            continue;
+        }
+        out.extend_from_slice(&res.to_be_bytes());
+        state = 0;
+        res = 0;
+    }
+    if state > 0 {
+        for _ in state..5 {
+            res = res.wrapping_mul(85).wrapping_add(84);
+        }
+        out.extend_from_slice(&res.to_be_bytes()[..state - 1]);
+    }
+    if pos < src.len() && src[pos] == b'>' {
+        pos += 1;
+    }
+    (out, pos)
+}
+
+/// PDFium 的 `HexDecode`：返回（数据，用掉的字节数）。
+pub(crate) fn hex_decode_pdfium(src: &[u8]) -> (Vec<u8>, usize) {
+    let mut out = Vec::with_capacity(src.len() / 2 + 1);
+    let mut hi: Option<u8> = None;
+    let mut i = 0usize;
+    while i < src.len() {
+        let ch = src[i];
+        if ch == b'>' {
+            i += 1;
+            break;
+        }
+        if let Some(v) = hex_value(ch) {
+            match hi {
+                None => hi = Some(v * 16),
+                Some(h) => {
+                    out.push(h + v);
+                    hi = None;
+                }
+            }
+        }
+        i += 1;
+    }
+    if let Some(h) = hi {
+        out.push(h);
+    }
+    (out, i)
+}
+
+/// PDFium 的 `RunLengthDecode`：返回（数据，用掉的字节数）；解出来的长度溢出或超过上限时返回 `None`。
+pub(crate) fn run_length_decode_pdfium(src: &[u8]) -> Option<(Vec<u8>, usize)> {
+    const MAX_STREAM_SIZE: u32 = 20 * 1024 * 1024;
+    let mut dest_size = 0u32;
+    let mut i = 0usize;
+    while i < src.len() {
+        let b = src[i];
+        if b == 128 {
+            break;
+        }
+        if b < 128 {
+            dest_size = dest_size.checked_add(u32::from(b) + 1)?;
+            i += usize::from(b) + 2;
+        } else {
+            dest_size = dest_size.checked_add(257 - u32::from(b))?;
+            i += 2;
+        }
+    }
+    if dest_size >= MAX_STREAM_SIZE {
+        return None;
+    }
+    let mut out = Vec::with_capacity(dest_size as usize);
+    i = 0;
+    while i < src.len() {
+        let b = src[i];
+        if b == 128 {
+            break;
+        }
+        if b < 128 {
+            let want = usize::from(b) + 1;
+            let have = (src.len() - i - 1).min(want);
+            out.extend_from_slice(&src[i + 1..i + 1 + have]);
+            // 数据不够时补 0。
+            out.extend(std::iter::repeat_n(0u8, want - have));
+            i += want + 1;
+        } else {
+            let fill = src.get(i + 1).copied().unwrap_or(0);
+            out.extend(std::iter::repeat_n(fill, 257 - usize::from(b)));
+            i += 2;
+        }
+    }
+    Some((out, (i + 1).min(src.len())))
+}
+
 /// PNG / TIFF 预测器反解（预测器 10–15）。预览器 2 只在图像流里出现，这里也一并处理。
 fn unpredict(data: &[u8], predictor: i64, parms: Option<&PdfObject>) -> Vec<u8> {
     if predictor <= 1 {
@@ -135,9 +563,7 @@ fn unpredict(data: &[u8], predictor: i64, parms: Option<&PdfObject>) -> Vec<u8> 
     let mut out = Vec::with_capacity(data.len());
     let mut prev = vec![0u8; row_bytes];
     for chunk in data.chunks(row_len) {
-        if chunk.len() < row_len {
-            break;
-        }
+        // 最后一行不完整时照样处理已有的部分（PDFium 的 `PNG_Predictor` 也是这样）。
         let ft = chunk[0];
         let mut row = chunk[1..].to_vec();
         for i in 0..row.len() {
