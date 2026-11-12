@@ -1,0 +1,481 @@
+From b29afa5e97ba6a8369afe9074566404b175f5923 Mon Sep 17 00:00:00 2001
+From: jackwang0009 <93422958+jackwang0009@users.noreply.github.com>
+Date: Thu, 12 Nov 2026 13:23:09 +0800
+Subject: [PATCH] [upstream-candidate] Do not leak graphics state inside a text
+ clip group
+
+Every object is written between a `q` and a `Q` of its own, and only
+the parameters that differ from the initial graphics state are written.
+The texts of a text clip group are the exception: they share one `q`,
+and that `q` stays open while the objects they clip are written. What a
+text of the group set was still set for the texts after it and for the
+clipped objects, and nothing was written for those when their value was
+the initial one. A text with `2 Tc` followed by one with `0 Tc` came out
+as two texts with `2 Tc`; the same went for Tw, the line width, cap,
+join, miter limit, dash pattern, flatness and rendering intent, and for
+alpha and blend mode when they were changed through the API.
+
+Keep track of the parameters that were written inside the `q`s that are
+still open (WrittenState), and write those whatever their value. When
+alpha or blend mode were set with a dictionary of the generator's own,
+the default graphics dictionary goes first for the objects that follow.
+Nothing changes for content without text clip groups, nor for a group
+whose texts do not set any of these parameters.
+
+Tests: CPDFPageContentGeneratorTest.GraphicsStateInTextClipGroup.
+pdfium_unittests and pdfium_embeddertests: no new failures.
+
+Verification (ops_diff.py): no change, the samples do not have such
+content. No-diff pages 65/69 -> 65/69 synthetic, 384/388 -> 384/388
+public.
+
+Co-authored-by: Cursor <cursoragent@cursor.com>
+---
+ .../edit/cpdf_pagecontentgenerator.cpp        | 91 +++++++++++++-----
+ core/fpdfapi/edit/cpdf_pagecontentgenerator.h | 45 +++++++--
+ .../cpdf_pagecontentgenerator_unittest.cpp    | 96 ++++++++++++++++++-
+ 3 files changed, 201 insertions(+), 31 deletions(-)
+
+diff --git a/core/fpdfapi/edit/cpdf_pagecontentgenerator.cpp b/core/fpdfapi/edit/cpdf_pagecontentgenerator.cpp
+index ca3e26b71f..ab680d2bec 100644
+--- a/core/fpdfapi/edit/cpdf_pagecontentgenerator.cpp
++++ b/core/fpdfapi/edit/cpdf_pagecontentgenerator.cpp
+@@ -733,17 +733,25 @@ CPDF_PageContentGenerator::GenerateModifiedStreams() {
+   struct OpenClipGroup {
+     // The BT...ET groups of the clip, in order.
+     std::vector<std::vector<TextClipSignature>> groups;
++    // What the texts of this group set, and the groups around it before it.
++    WrittenState written;
+   };
+   std::vector<OpenClipGroup> open_groups;
+   int32_t current_stream = CPDF_PageObject::kNoContentStream;
++  // The `Q` of a group takes back what the group set.
++  auto close_innermost_group = [&](fxcrt::ostringstream* buf) {
++    *buf << " Q\n";
++    open_groups.pop_back();
++    written_in_open_clip_groups_ =
++        open_groups.empty() ? WrittenState() : open_groups.back().written;
++  };
+   auto close_groups_not_in = [&](fxcrt::ostringstream* buf,
+                                  const CPDF_PageObject* obj) {
+     std::vector<std::vector<TextClipSignature>> groups =
+         GetClipTextGroups(obj->clip_path());
+     while (!open_groups.empty() &&
+            !ClipGroupsContain(groups, open_groups.back().groups)) {
+-      *buf << " Q\n";
+-      open_groups.pop_back();
++      close_innermost_group(buf);
+     }
+   };
+   auto close_all_groups = [&](int32_t stream_index) {
+@@ -752,8 +760,7 @@ CPDF_PageContentGenerator::GenerateModifiedStreams() {
+       return;
+     }
+     while (!open_groups.empty()) {
+-      stream_it->second << " Q\n";
+-      open_groups.pop_back();
++      close_innermost_group(&stream_it->second);
+     }
+   };
+ 
+@@ -889,10 +896,12 @@ CPDF_PageContentGenerator::GenerateModifiedStreams() {
+         close_groups_not_in(buf, grouped_texts.front());
+         current_content_marks[stream_index] = ProcessContentMarks(
+             buf, grouped_texts.front(), current_content_marks[stream_index]);
+-        WriteTextClipGroup(buf, grouped_texts, group_sizes);
++        WriteTextClipGroup(buf, grouped_texts, group_sizes,
++                           &written_in_open_clip_groups_);
+         std::vector<std::vector<TextClipSignature>> groups(
+             matched.begin() + used_drop, matched.end());
+-        open_groups.push_back(OpenClipGroup{std::move(groups)});
++        open_groups.push_back(
++            OpenClipGroup{std::move(groups), written_in_open_clip_groups_});
+         obj_index = run_end - 1;
+         continue;
+       }
+@@ -1808,7 +1817,9 @@ ByteString CPDF_PageContentGenerator::GetPatternResourceName(
+ void CPDF_PageContentGenerator::ProcessGraphics(fxcrt::ostringstream* buf,
+                                                 CPDF_PageObject* pPageObj) {
+   *buf << "q ";
+-  WriteGraphicsState(buf, pPageObj, /*include_clip_path=*/true);
++  // What the object sets is gone with its `Q`.
++  WrittenState written = written_in_open_clip_groups_;
++  WriteGraphicsState(buf, pPageObj, /*include_clip_path=*/true, &written);
+ }
+ 
+ void CPDF_PageContentGenerator::WriteClipPath(fxcrt::ostringstream* buf,
+@@ -1838,12 +1849,26 @@ void CPDF_PageContentGenerator::WriteClipPath(fxcrt::ostringstream* buf,
+ 
+ void CPDF_PageContentGenerator::WriteGraphicsState(fxcrt::ostringstream* buf,
+                                                    CPDF_PageObject* pPageObj,
+-                                                   bool include_clip_path) {
++                                                   bool include_clip_path,
++                                                   WrittenState* written) {
++  // Alpha and blend mode that a dictionary of the generator's own set for
++  // an earlier object go back to their initial values first: the parsed
++  // dictionaries are written the way they were applied, on top of the state
++  // the stream starts with.
++  ByteString reset_name;
++  if (written->alpha_or_blend_mode) {
++    reset_name = GetOrCreateDefaultGraphics();
++    *buf << "/" << PDF_NameEncode(reset_name) << " gs ";
++  }
++
+   // The graphics state parameter dictionaries the object was parsed with go
+   // first. They are the only way to set the soft mask, the overprint
+   // parameters and the like, and they may set the line parameters as well,
+   // for which the operators below must have the last word.
+   ParsedExtGStates parsed = WriteParsedExtGStates(buf, pPageObj);
++  if (!reset_name.IsEmpty()) {
++    parsed.names.push_back(std::move(reset_name));
++  }
+ 
+   const CPDF_ColorState& color_state = pPageObj->color_state();
+   WriteColorToStream(*buf, color_state.GetFillColor(),
+@@ -1854,21 +1879,27 @@ void CPDF_PageContentGenerator::WriteGraphicsState(fxcrt::ostringstream* buf,
+                      color_state.GetStrokePatternName(), /*is_fill=*/false);
+   const CFX_GraphState& graph_state = pPageObj->graph_state();
+   float line_width = graph_state.GetLineWidth();
+-  if (line_width != 1.0f || parsed.sets_line_width) {
++  if (line_width != 1.0f || parsed.sets_line_width || written->line_width) {
+     WriteFloat(*buf, line_width) << " w ";
++    written->line_width = true;
+   }
+   CFX_GraphStateData::LineCap lineCap = graph_state.GetLineCap();
+-  if (lineCap != CFX_GraphStateData::LineCap::kButt || parsed.sets_line_cap) {
++  if (lineCap != CFX_GraphStateData::LineCap::kButt || parsed.sets_line_cap ||
++      written->line_cap) {
+     *buf << static_cast<int>(lineCap) << " J ";
++    written->line_cap = true;
+   }
+   CFX_GraphStateData::LineJoin lineJoin = graph_state.GetLineJoin();
+   if (lineJoin != CFX_GraphStateData::LineJoin::kMiter ||
+-      parsed.sets_line_join) {
++      parsed.sets_line_join || written->line_join) {
+     *buf << static_cast<int>(lineJoin) << " j ";
++    written->line_join = true;
+   }
+   float miter_limit = graph_state.GetMiterLimit();
+-  if (miter_limit != kDefaultMiterLimit || parsed.sets_miter_limit) {
++  if (miter_limit != kDefaultMiterLimit || parsed.sets_miter_limit ||
++      written->miter_limit) {
+     WriteFloat(*buf, miter_limit) << " M ";
++    written->miter_limit = true;
+   }
+   std::vector<float> dash_array = graph_state.GetLineDashArray();
+   if (dash_array.size()) {
+@@ -1881,17 +1912,22 @@ void CPDF_PageContentGenerator::WriteGraphicsState(fxcrt::ostringstream* buf,
+     }
+     *buf << "] ";
+     WriteFloat(*buf, graph_state.GetLineDashPhase()) << " d ";
+-  } else if (parsed.sets_dash) {
++    written->dash = true;
++  } else if (parsed.sets_dash || written->dash) {
+     *buf << "[] 0 d ";
++    written->dash = true;
+   }
+   const CPDF_GeneralState& general_state = pPageObj->general_state();
+   float flatness = general_state.GetFlatness();
+-  if (flatness != kDefaultFlatness || parsed.sets_flatness) {
++  if (flatness != kDefaultFlatness || parsed.sets_flatness ||
++      written->flatness) {
+     WriteFloat(*buf, flatness) << " i ";
++    written->flatness = true;
+   }
+   ByteString render_intent = general_state.GetRenderIntent();
+-  if (render_intent != parsed.render_intent) {
++  if (render_intent != parsed.render_intent || written->render_intent) {
+     *buf << "/" << PDF_NameEncode(render_intent) << " ri ";
++    written->render_intent = true;
+   }
+ 
+   if (include_clip_path) {
+@@ -1910,6 +1946,7 @@ void CPDF_PageContentGenerator::WriteGraphicsState(fxcrt::ostringstream* buf,
+   if (graphD.fillAlpha != parsed.fill_alpha ||
+       graphD.strokeAlpha != parsed.stroke_alpha ||
+       graphD.blendType != parsed.blend_type) {
++    written->alpha_or_blend_mode = true;
+     if (parsed.fill_alpha != 1.0f || parsed.stroke_alpha != 1.0f ||
+         parsed.blend_type != BlendMode::kNormal) {
+       ByteString default_name = GetOrCreateDefaultGraphics();
+@@ -2082,7 +2119,8 @@ void CPDF_PageContentGenerator::ProcessText(fxcrt::ostringstream* buf,
+ 
+   ProcessGraphics(buf, pTextObj);
+   *buf << "BT ";
+-  WriteTextContent(buf, pTextObj, /*force_text_matrix=*/false);
++  WrittenState written = written_in_open_clip_groups_;
++  WriteTextContent(buf, pTextObj, /*force_text_matrix=*/false, &written);
+   *buf << " ET";
+   EndProcessGraphics(*buf);
+ }
+@@ -2098,7 +2136,8 @@ bool CPDF_PageContentGenerator::CanWriteText(const CPDF_TextObject* pTextObj) {
+ 
+ bool CPDF_PageContentGenerator::WriteTextContent(fxcrt::ostringstream* buf,
+                                                  CPDF_TextObject* pTextObj,
+-                                                 bool force_text_matrix) {
++                                                 bool force_text_matrix,
++                                                 WrittenState* written) {
+   RetainPtr<CPDF_Font> font(pTextObj->GetFont());
+   if (!font) {
+     font = CPDF_Font::GetStockFont(document_, "Helvetica");
+@@ -2152,14 +2191,17 @@ bool CPDF_PageContentGenerator::WriteTextContent(fxcrt::ostringstream* buf,
+   WriteFloat(*buf, pTextObj->GetFontSize()) << " Tf ";
+ 
+   // Tc and Tw are part of the graphics state, so the enclosing q/Q pair
+-  // restores them. Only write non-default values to avoid bloating the stream.
++  // restores them. Only write non-default values to avoid bloating the
++  // stream, unless a text before this one set them inside the same `q`.
+   float char_space = pTextObj->text_state().GetCharSpace();
+-  if (char_space != 0.0f) {
++  if (char_space != 0.0f || written->char_space) {
+     WriteFloat(*buf, char_space) << " Tc ";
++    written->char_space = true;
+   }
+   float word_space = pTextObj->text_state().GetWordSpace();
+-  if (word_space != 0.0f) {
++  if (word_space != 0.0f || written->word_space) {
+     WriteFloat(*buf, word_space) << " Tw ";
++    written->word_space = true;
+   }
+ 
+   *buf << static_cast<int>(pTextObj->GetTextRenderMode()) << " Tr ";
+@@ -2185,7 +2227,8 @@ bool CPDF_PageContentGenerator::WriteTextContent(fxcrt::ostringstream* buf,
+ void CPDF_PageContentGenerator::WriteTextClipGroup(
+     fxcrt::ostringstream* buf,
+     const std::vector<CPDF_TextObject*>& texts,
+-    const std::vector<size_t>& group_sizes) {
++    const std::vector<size_t>& group_sizes,
++    WrittenState* written) {
+   // One `q` for the whole clip, the path clip of the first text, then one
+   // BT...ET per original BT...ET group. The `q` is left open: the caller
+   // closes it once no later object needs the clip anymore.
+@@ -2204,8 +2247,10 @@ void CPDF_PageContentGenerator::WriteTextClipGroup(
+       // The graphics state of each text (color, line, ExtGState) goes
+       // inside the BT...ET, as the original file does; the path clip is
+       // already written above and is the same for all texts in the group.
+-      WriteGraphicsState(buf, text, /*include_clip_path=*/false);
+-      WriteTextContent(buf, text, /*force_text_matrix=*/index > 0);
++      // No `Q` takes back what a text sets here, so each text is told what
++      // the texts before it set.
++      WriteGraphicsState(buf, text, /*include_clip_path=*/false, written);
++      WriteTextContent(buf, text, /*force_text_matrix=*/index > 0, written);
+       ++index;
+     }
+     // The newline separates this ET from the next BT...ET, the next object,
+diff --git a/core/fpdfapi/edit/cpdf_pagecontentgenerator.h b/core/fpdfapi/edit/cpdf_pagecontentgenerator.h
+index 7d9b685ca8..05f8e2b4c6 100644
+--- a/core/fpdfapi/edit/cpdf_pagecontentgenerator.h
++++ b/core/fpdfapi/edit/cpdf_pagecontentgenerator.h
+@@ -128,13 +128,37 @@ class CPDF_PageContentGenerator {
+   // terminated by the no-op `n` painting operator.
+   void WriteClipPath(fxcrt::ostringstream* buf,
+                      const CPDF_ClipPath& clip_path);
++  // The graphics state parameters whose operator is only written for a
++  // value other than the initial one, and which have been set inside a `q`
++  // that is still open. Every object is written between a `q` and a `Q` of
++  // its own and starts from the initial values, with one exception: the `q`
++  // of a text clip group stays open while the objects it clips are written,
++  // so whatever the texts of the group set is still set for those objects,
++  // and for the later texts of the group. A parameter that is marked here
++  // is therefore written whatever its value.
++  struct WrittenState {
++    bool line_width = false;
++    bool line_cap = false;
++    bool line_join = false;
++    bool miter_limit = false;
++    bool dash = false;
++    bool flatness = false;
++    bool render_intent = false;
++    bool char_space = false;
++    bool word_space = false;
++    // Alpha or blend mode, by way of a graphics state parameter dictionary
++    // that was not parsed.
++    bool alpha_or_blend_mode = false;
++  };
+   // Writes the graphics state of `pPageObj` (ExtGState, color, line width/
+   // cap/join/miter limit/dash, flatness, rendering intent, clip path)
+   // without the enclosing `q`. ProcessGraphics() is `q` +
+-  // WriteGraphicsState().
++  // WriteGraphicsState(). `written` says what the `q`s that are open have
++  // set already, and is updated with what this call sets.
+   void WriteGraphicsState(fxcrt::ostringstream* buf,
+                           CPDF_PageObject* pPageObj,
+-                          bool include_clip_path);
++                          bool include_clip_path,
++                          WrittenState* written);
+   // What WriteParsedExtGStates() wrote.
+   struct ParsedExtGStates {
+     // The resource names of the dictionaries, in the order of the
+@@ -164,11 +188,13 @@ class CPDF_PageContentGenerator {
+   // the TJ) without the enclosing `BT...ET` or `q...Q`. `force_text_matrix`
+   // writes the Tm even when it is the identity matrix: a text that follows
+   // another text in the same BT...ET must reset the text position, it cannot
+-  // rely on where the previous text ended. Returns false when the font
+-  // cannot be written back (Type3); callers check CanWriteText() first.
++  // rely on where the previous text ended. `written` is the same as for
++  // WriteGraphicsState(). Returns false when the font cannot be written back
++  // (Type3); callers check CanWriteText() first.
+   bool WriteTextContent(fxcrt::ostringstream* buf,
+                         CPDF_TextObject* pTextObj,
+-                        bool force_text_matrix);
++                        bool force_text_matrix,
++                        WrittenState* written);
+   // Whether the font of `pTextObj` can be written back. Type3 fonts cannot:
+   // their glyphs are arbitrary content streams. A missing font falls back
+   // to Helvetica, which can be written.
+@@ -178,10 +204,12 @@ class CPDF_PageContentGenerator {
+   // of `group_sizes` (each group is the texts of one original BT...ET, so
+   // their glyphs are unioned within a group and the groups intersect, as
+   // the renderer does). The `q` is left open: the caller closes it once no
+-  // later object needs the clip anymore.
++  // later object needs the clip anymore. Until then, `written` holds what
++  // the texts set.
+   void WriteTextClipGroup(fxcrt::ostringstream* buf,
+                           const std::vector<CPDF_TextObject*>& texts,
+-                          const std::vector<size_t>& group_sizes);
++                          const std::vector<size_t>& group_sizes,
++                          WrittenState* written);
+   const CPDF_ContentMarks* ProcessContentMarks(fxcrt::ostringstream* buf,
+                                                const CPDF_PageObject* pPageObj,
+                                                const CPDF_ContentMarks* pPrev);
+@@ -210,6 +238,9 @@ class CPDF_PageContentGenerator {
+   UnownedPtr<CPDF_Document> const document_;
+   std::vector<UnownedPtr<CPDF_PageObject>> page_objects_;
+   ByteString default_graphics_name_;
++  // What the text clip groups that are open have set. Nothing, outside of
++  // GenerateModifiedStreams().
++  WrittenState written_in_open_clip_groups_;
+ };
+ 
+ #endif  // CORE_FPDFAPI_EDIT_CPDF_PAGECONTENTGENERATOR_H_
+diff --git a/core/fpdfapi/edit/cpdf_pagecontentgenerator_unittest.cpp b/core/fpdfapi/edit/cpdf_pagecontentgenerator_unittest.cpp
+index cf685ce3c8..36a75cbf7a 100644
+--- a/core/fpdfapi/edit/cpdf_pagecontentgenerator_unittest.cpp
++++ b/core/fpdfapi/edit/cpdf_pagecontentgenerator_unittest.cpp
+@@ -31,6 +31,7 @@
+ #include "core/fpdfapi/parser/cpdf_parser.h"
+ #include "core/fpdfapi/parser/cpdf_reference.h"
+ #include "core/fpdfapi/parser/cpdf_stream.h"
++#include "core/fpdfapi/parser/cpdf_stream_acc.h"
+ #include "core/fpdfapi/parser/cpdf_string.h"
+ #include "core/fpdfapi/parser/cpdf_test_document.h"
+ #include "core/fxcrt/data_vector.h"
+@@ -66,7 +67,8 @@ class CPDFPageContentGeneratorTest : public TestWithPageModule {
+                               fxcrt::ostringstream* buf,
+                               const std::vector<CPDF_TextObject*>& texts,
+                               const std::vector<size_t>& group_sizes) {
+-    pGen->WriteTextClipGroup(buf, texts, group_sizes);
++    CPDF_PageContentGenerator::WrittenState written;
++    pGen->WriteTextClipGroup(buf, texts, group_sizes, &written);
+   }
+ 
+   void TestProcessPageObject(CPDF_PageContentGenerator* pGen,
+@@ -94,6 +96,21 @@ class CPDFPageContentGeneratorTest : public TestWithPageModule {
+     page->ParseContent();
+     return page;
+   }
++
++  // Regenerates the content of `page`, which CreateParsedPage() made, and
++  // returns the data of its content stream.
++  ByteString RegenerateContents(CPDF_Page* page) {
++    CPDF_PageContentGenerator generator(page);
++    generator.GenerateContent();
++    RetainPtr<const CPDF_Stream> stream =
++        page->GetDict()->GetStreamFor("Contents");
++    if (!stream) {
++      return ByteString();
++    }
++    auto stream_acc = pdfium::MakeRetain<CPDF_StreamAcc>(std::move(stream));
++    stream_acc->LoadAllDataFiltered();
++    return ByteString(ByteStringView(stream_acc->GetSpan()));
++  }
+ };
+ 
+ TEST_F(CPDFPageContentGeneratorTest, ProcessRect) {
+@@ -1499,6 +1516,83 @@ TEST_F(CPDFPageContentGeneratorTest, ProcessRenderingIntent) {
+   EXPECT_EQ("q 0 g 0 G 0 0 10 10 re f Q\n", generate(4));
+ }
+ 
++TEST_F(CPDFPageContentGeneratorTest, GraphicsStateInTextClipGroup) {
++  auto doc = std::make_unique<CPDF_TestDocument>();
++  doc->CreateNewDoc();
++  auto resources = doc->New<CPDF_Dictionary>();
++  auto font_dict = doc->NewIndirect<CPDF_Dictionary>();
++  font_dict->SetNewFor<CPDF_Name>("Type", "Font");
++  font_dict->SetNewFor<CPDF_Name>("Subtype", "Type1");
++  font_dict->SetNewFor<CPDF_Name>("BaseFont", "Helvetica");
++  resources->SetNewFor<CPDF_Dictionary>("Font")->SetNewFor<CPDF_Reference>(
++      "F1", doc.get(), font_dict->GetObjNum());
++
++  // Two texts that clip a path. The first text sets every parameter that is
++  // only written when it does not have its initial value, the second text
++  // sets them back.
++  RetainPtr<CPDF_Page> page = CreateParsedPage(
++      doc.get(), resources,
++      "q\n"
++      "BT /F1 12 Tf 7 Tr 3 w 1 J 1 j 2 M [2 1] 0 d 0.5 i /Saturation ri "
++      "2 Tc 1 Tw 1 0 0 1 10 20 Tm (A) Tj\n"
++      "1 w 0 J 0 j 10 M [] 0 d 1 i /RelativeColorimetric ri "
++      "0 Tc 0 Tw 1 0 0 1 50 20 Tm (B) Tj ET\n"
++      "0 0 100 100 re f\n"
++      "Q\n"
++      "q 0 0 10 10 re f Q\n");
++  ASSERT_EQ(4u, page->GetPageObjectCount());
++  CPDF_PageObject* first_text = page->GetPageObjectByIndex(0);
++  CPDF_PageObject* second_text = page->GetPageObjectByIndex(1);
++  CPDF_PageObject* clipped_path = page->GetPageObjectByIndex(2);
++  CPDF_PageObject* other_path = page->GetPageObjectByIndex(3);
++  ASSERT_TRUE(first_text->IsText());
++  ASSERT_TRUE(second_text->IsText());
++  ASSERT_TRUE(clipped_path->IsPath());
++
++  // The texts are written inside one `q`, which stays open for the path
++  // they clip. What the first text sets is not taken back by a `Q`, so the
++  // second text and the path write the initial values. The path after the
++  // group starts from the initial values again.
++  first_text->SetDirty(true);
++  EXPECT_EQ(
++      "q\n"
++      "0 0 0 RG 0 0 0 rg 1 w 0 J 0 j\n"
++      "/FXE1 gs q BT 0 g 0 G 3 w 1 J 1 j 2 M [2 1] 0 d .5 i /Saturation ri "
++      "1 0 0 1 10 20 Tm /FXF1 12 Tf 2 Tc 1 Tw 7 Tr [<41>] TJ "
++      "0 g 0 G 1 w 0 J 0 j 10 M [] 0 d 1 i /RelativeColorimetric ri "
++      "1 0 0 1 50 20 Tm /FXF1 12 Tf 0 Tc 0 Tw 7 Tr [<42>] TJ ET\n"
++      "q 0 g 0 G 1 w 0 J 0 j 10 M [] 0 d 1 i /RelativeColorimetric ri "
++      "0 0 100 100 re f Q\n"
++      " Q\n"
++      "q 0 g 0 G 0 0 10 10 re f Q\n"
++      "Q\n",
++      RegenerateContents(page.Get()));
++
++  // The same goes for alpha and blend mode that are set with a dictionary
++  // the generator makes: the default graphics dictionary takes them back.
++  first_text->mutable_general_state().SetFillAlpha(0.5f);
++  first_text->SetDirty(true);
++  EXPECT_EQ(
++      "q\n"
++      "0 0 0 RG 0 0 0 rg 1 w 0 J 0 j\n"
++      "/FXE1 gs q BT 0 g 0 G 3 w 1 J 1 j 2 M [2 1] 0 d .5 i /Saturation ri "
++      "/FXE2 gs 1 0 0 1 10 20 Tm /FXF1 12 Tf 2 Tc 1 Tw 7 Tr [<41>] TJ "
++      "/FXE1 gs 0 g 0 G 1 w 0 J 0 j 10 M [] 0 d 1 i /RelativeColorimetric ri "
++      "1 0 0 1 50 20 Tm /FXF1 12 Tf 0 Tc 0 Tw 7 Tr [<42>] TJ ET\n"
++      "q /FXE1 gs 0 g 0 G 1 w 0 J 0 j 10 M [] 0 d 1 i "
++      "/RelativeColorimetric ri 0 0 100 100 re f Q\n"
++      " Q\n"
++      "q 0 g 0 G 0 0 10 10 re f Q\n"
++      "Q\n",
++      RegenerateContents(page.Get()));
++  using testing::ElementsAre;
++  using testing::IsEmpty;
++  EXPECT_THAT(GraphicsResourceNames(first_text), ElementsAre("FXE2"));
++  EXPECT_THAT(GraphicsResourceNames(second_text), ElementsAre("FXE1"));
++  EXPECT_THAT(GraphicsResourceNames(clipped_path), ElementsAre("FXE1"));
++  EXPECT_THAT(GraphicsResourceNames(other_path), IsEmpty());
++}
++
+ TEST_F(CPDFPageContentGeneratorTest, ProcessEmptyForm) {
+   auto doc = std::make_unique<CPDF_TestDocument>();
+   doc->CreateNewDoc();
+-- 
+2.51.2.windows.1
+
