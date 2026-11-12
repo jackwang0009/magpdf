@@ -271,7 +271,8 @@ pub fn evaluate_page(
         }
     }
 
-    // 页级口径：各自按阅读顺序拼接、去掉空白。
+    // 页级口径：各自按阅读顺序拼接、去掉空白。落在印章、手写、忽略区域里的识别行不算进去，
+    // 但已经和标注行配上的要算：被印章压住的字是标注了的文字行，它的识别结果不能丢。
     let gt_text: Vec<char> = reading_order_text(
         text_gt
             .iter()
@@ -282,7 +283,7 @@ pub fn evaluate_page(
             .iter()
             .zip(&pred_polys)
             .enumerate()
-            .filter(|(pi, _)| !in_special[*pi])
+            .filter(|(pi, _)| pred_used[*pi] || !in_special[*pi])
             .map(|(_, (p, poly))| (p.text.as_str(), poly.as_slice())),
     );
     metrics.page_gt_chars = gt_text.iter().filter(|&&c| c != UNREADABLE).count();
@@ -450,6 +451,28 @@ mod tests {
         );
         assert_eq!(m.page_edit_distance, 0);
         assert_eq!(m.page_char_accuracy(), Some(1.0));
+    }
+
+    #[test]
+    fn page_level_text_keeps_matched_lines_under_a_seal() {
+        // 落款那一行被印章压住：它是标注了的文字行，识别结果要算进页级口径；
+        // 印章里的字（没有对应的标注行）不算。
+        let gts = vec![
+            ann("第一行", rect(0.0, 0.0, 100.0, 10.0), RegionKind::Text),
+            ann("日期：2024", rect(0.0, 40.0, 100.0, 50.0), RegionKind::Text),
+            ann("", rect(20.0, 20.0, 90.0, 90.0), RegionKind::Seal),
+        ];
+        let preds = vec![
+            pred("第一行", rect(0.0, 0.0, 100.0, 10.0)),
+            pred("日期：2024", rect(0.0, 40.0, 100.0, 50.0)),
+            pred("合同专用章", rect(30.0, 60.0, 80.0, 70.0)),
+        ];
+        let m = evaluate_page(&preds, &gts, &EvalOptions::default());
+        assert_eq!(m.matched_lines, 2);
+        assert_eq!(m.in_seal, 1);
+        assert_eq!(m.false_positives, 0);
+        assert_eq!(m.page_gt_chars, "第一行日期：2024".chars().count());
+        assert_eq!(m.page_edit_distance, 0);
     }
 
     #[test]
