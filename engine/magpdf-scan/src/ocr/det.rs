@@ -2,7 +2,8 @@
 //!
 //! 后处理按 PaddleOCR `DBPostProcess`（`box_type=quad`、`score_mode=fast`）实现：
 //! 概率图二值化 → 8 连通区域 → 边界点凸包的最小外接矩形 → 框内平均概率打分 → unclip 扩展 → 映射回原图。
-//! 用纯 Rust 实现，不引入 OpenCV 绑定；与 OpenCV 实现的差异见 V09 报告。
+//! 用纯 Rust 实现，不引入 OpenCV 绑定；与 OpenCV 实现的差异见 V09 报告 1.2
+//! （`docs/p0/V09-OCR集成与实测.md`）。
 
 use std::time::Instant;
 

@@ -1,7 +1,8 @@
-//! 结果文件与标注文件的格式（`docs/p0/V09-标注格式.md`）。
+//! 结果文件与标注文件的格式。
 //!
 //! - 预测结果：`magpdf-ocr-result/1`，一页一个 JSON，由 `magpdf-cli ocr --json` 写出；
 //! - 标注：PPOCRLabel 的 `Label.txt`（`图像路径<TAB>JSON 数组`），元素 `{"transcription", "points", "key_cls"?}`。
+//!   标什么、不标什么按《测试样本收集与脱敏规范》7.1。
 
 use std::path::Path;
 
