@@ -29,15 +29,29 @@
  * 测试窗口不抢焦点，不动真实的鼠标键盘。
  */
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer } from 'node:net';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright-core';
-
-const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
+import {
+  cleanUp,
+  connect,
+  documentState,
+  editSettled,
+  enginePid,
+  installEditTimer,
+  isRunning,
+  launchApp,
+  pageRectOnScreen,
+  parkMouse,
+  parseDuration,
+  parseWindowSize,
+  pickTarget,
+  repo,
+  resizeWindow,
+  sleep,
+  summarize,
+  tilesSettled,
+  waitFor,
+} from './harness.mjs';
 const appBin = resolve(
   process.env.MAGPDF_DESKTOP_BIN ?? join(repo, 'target/release/magpdf-desktop.exe'),
 );
@@ -60,143 +74,6 @@ const windowSize = parseWindowSize(process.env.MAGPDF_E2E_WINDOW);
 /** 《交互设计》9.3 的文案。 */
 const OVERLAY_ONLY_BANNER =
   '第 1 页无法安全修改原有内容：页面使用了软件尚不能完整保留的效果。可以在这一页上添加内容。';
-
-/**
- * 向系统要一个空闲的端口。系统的套接字缓冲区一时用光（ENOBUFS，机器上别的程序占着大量端口时会碰到）
- * 就等一会儿再要，不让它算成测试失败。
- */
-async function freePort() {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      return await new Promise((done, fail) => {
-        const server = createServer();
-        server.once('error', fail);
-        server.listen(0, '127.0.0.1', () => {
-          const { port } = server.address();
-          server.close(() => done(port));
-        });
-      });
-    } catch (error) {
-      if (error.code !== 'ENOBUFS' || attempt >= 5) throw error;
-      await sleep(500);
-    }
-  }
-}
-
-function sleep(ms) {
-  return new Promise((done) => setTimeout(done, ms));
-}
-
-/** 毫秒数；没有给时用 `fallback`，写错了直接报错。 */
-function parseDuration(text, fallback) {
-  if (text === undefined || text === '') return fallback;
-  assert.match(text, /^[1-9]\d*$/, `时长要写成毫秒数，现在是 ${text}`);
-  return Number(text);
-}
-
-/** “宽x高” → `{ width, height }`；没有给时返回 null，写错了直接报错，不悄悄用默认值。 */
-function parseWindowSize(text) {
-  if (text === undefined || text === '') return null;
-  const match = /^(\d+)x(\d+)$/.exec(text);
-  assert.ok(match, `MAGPDF_E2E_WINDOW 要写成 宽x高（比如 1920x1040），现在是 ${text}`);
-  return { width: Number(match[1]), height: Number(match[2]) };
-}
-
-function isRunning(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function waitFor(what, check, timeoutMs, intervalMs = 50) {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    const value = await check();
-    if (value) return value;
-    if (Date.now() > deadline) throw new Error(`等了 ${timeoutMs} ms：${what}`);
-    await sleep(intervalMs);
-  }
-}
-
-/** 主进程名下的引擎进程。 */
-function enginePid(appPid) {
-  const out = execFileSync(
-    'powershell.exe',
-    [
-      '-NoProfile',
-      '-Command',
-      `(Get-CimInstance Win32_Process -Filter "ParentProcessId=${appPid} AND Name='magpdf-engine.exe'").ProcessId`,
-    ],
-    { encoding: 'utf8' },
-  ).trim();
-  const pid = Number.parseInt(out, 10);
-  return Number.isInteger(pid) ? pid : null;
-}
-
-/** 把主进程的窗口挪到屏幕左上角、改成指定的大小（屏幕像素）。不激活窗口，不改它和别的窗口的前后次序。 */
-function resizeWindow(appPid, { width, height }) {
-  const SWP_NOZORDER_NOACTIVATE = 0x0014;
-  execFileSync('powershell.exe', [
-    '-NoProfile',
-    '-Command',
-    `$api = Add-Type -PassThru -Namespace MagpdfE2e -Name Window -MemberDefinition '[DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);';` +
-      ` $window = (Get-Process -Id ${appPid}).MainWindowHandle;` +
-      ` if ($window -eq [IntPtr]::Zero) { exit 2 };` +
-      ` if (-not $api::SetWindowPos($window, [IntPtr]::Zero, 0, 0, ${width}, ${height}, ${SWP_NOZORDER_NOACTIVATE})) { exit 3 }`,
-  ]);
-}
-
-async function connect(port) {
-  const browser = await waitFor(
-    '连上 WebView2 的调试端口',
-    () => chromium.connectOverCDP(`http://127.0.0.1:${port}`).catch(() => null),
-    30_000,
-    250,
-  );
-  const page = await waitFor(
-    '找到界面的页面',
-    () =>
-      browser
-        .contexts()
-        .flatMap((context) => context.pages())
-        .find((candidate) => /^https?:\/\//.test(candidate.url())),
-    10_000,
-  );
-  return { browser, page };
-}
-
-/** 等画布要的瓦片都到齐：完成数至少 `min`，没有在途和排队的，画面是最新的。返回完成数。 */
-async function tilesSettled(page, min) {
-  const handle = await page.waitForFunction(
-    (atLeast) => {
-      const controller = window.__magpdf?.controller();
-      if (!controller) return false;
-      const { stats, inFlight, queued } = controller.scheduler;
-      const settled = stats.completed >= atLeast && inFlight === 0 && queued === 0;
-      return settled && controller.upToDate ? stats.completed : false;
-    },
-    min,
-    { timeout: 20_000, polling: 10 },
-  );
-  return handle.jsonValue();
-}
-
-/** 活动文档现在的样子：版本号、选区、第 1 页的对象数。 */
-function documentState(page) {
-  return page.evaluate(() => {
-    const state = window.__magpdf.store.getState();
-    const doc = state.documents[state.activeDocumentId];
-    return {
-      name: doc.snapshot.name,
-      version: doc.snapshot.version,
-      selection: doc.selection,
-      objects: doc.snapshot.pages[0].objects.length,
-    };
-  });
-}
 
 /** 切到某份文档的标签页，等它的画面到齐。 */
 async function activate(page, pdf) {
@@ -230,32 +107,6 @@ async function fidelityOfFirstPage(page, pdf) {
     { timeout: 20_000, polling: 50 },
   );
   return handle.jsonValue();
-}
-
-/** 第 1 页在屏幕上的矩形（CSS 像素，裁到画布之内）。 */
-function pageRectOnScreen(page) {
-  return page.evaluate(() => {
-    const controller = window.__magpdf.controller();
-    const view = controller.view;
-    const rect = controller.pageLayout.pageRect(0);
-    const scale = (view.zoom * 96) / 72;
-    // 画页面的那块画布让开了标尺，它的左上角就是视口的原点
-    const canvas = controller.container.querySelector('.mg-canvas-gl').getBoundingClientRect();
-    const left = Math.max(canvas.left, canvas.left + (rect.x - view.x) * scale);
-    const top = Math.max(canvas.top, canvas.top + (rect.y - view.y) * scale);
-    const right = Math.min(canvas.right, canvas.left + (rect.x + rect.width - view.x) * scale);
-    const bottom = Math.min(canvas.bottom, canvas.top + (rect.y + rect.height - view.y) * scale);
-    return { x: left, y: top, width: right - left, height: bottom - top, zoom: view.zoom };
-  });
-}
-
-/** 把鼠标挪到画布左上角的标尺交汇处：那里底下没有对象，不会留下悬停的高亮。 */
-async function parkMouse(page) {
-  const corner = await page.evaluate(() => {
-    const rect = window.__magpdf.controller().container.getBoundingClientRect();
-    return { x: rect.left + 6, y: rect.top + 6 };
-  });
-  await page.mouse.move(corner.x, corner.y);
 }
 
 /**
@@ -377,40 +228,6 @@ function pageDifference(page, before, after, region = before.area, exclude = nul
     },
     { a: before.base64, b: after.base64, area: region, skip: exclude },
   );
-}
-
-/**
- * 在活动文档的第 1 页上挑一个对象来操作：从上往下找第一个够大、而且点它的中心点中的就是它自己的。
- * 返回对象的编号、包围盒（页面坐标，pt）、中心在屏幕上的位置、每 pt 多少 CSS 像素。
- */
-async function pickTarget(page) {
-  const target = await page.evaluate(() => {
-    const state = window.__magpdf.store.getState();
-    const doc = state.documents[state.activeDocumentId];
-    const controller = window.__magpdf.controller();
-    const scale = (controller.view.zoom * 96) / 72;
-    const objects = doc.snapshot.pages[0].objects.filter((object) => object.pickable !== false);
-    const contains = (box, x, y) =>
-      x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height;
-    for (let i = objects.length - 1; i >= 0; i--) {
-      const { id, bbox } = objects[i];
-      if (bbox.width * scale < 5 || bbox.height * scale < 5) continue;
-      const [cx, cy] = [bbox.x + bbox.width / 2, bbox.y + bbox.height / 2];
-      if (objects.slice(i + 1).some((above) => contains(above.bbox, cx, cy))) continue;
-      const pageRect = controller.pageLayout.pageRect(0);
-      const canvas = controller.container.querySelector('.mg-canvas-gl').getBoundingClientRect();
-      return {
-        id,
-        bbox,
-        scale,
-        x: canvas.left + (pageRect.x + cx - controller.view.x) * scale,
-        y: canvas.top + (pageRect.y + cy - controller.view.y) * scale,
-      };
-    }
-    return null;
-  });
-  assert.ok(target, '第 1 页上没有找到可以拿来操作的对象');
-  return target;
 }
 
 function boxOf(page, id) {
@@ -564,96 +381,6 @@ async function measureDrag(page) {
       max: round(measured.script.max),
     },
   };
-}
-
-/** 等修改生效：文档到了这一版，受影响的瓦片重画完了。等不到时把当时的状态写进错误里。 */
-async function editSettled(page, version, what) {
-  try {
-    await page.waitForFunction(
-      (expected) => {
-        const state = window.__magpdf.store.getState();
-        const doc = state.documents[state.activeDocumentId];
-        const controller = window.__magpdf.controller();
-        const { inFlight, queued } = controller.scheduler;
-        return (
-          doc.snapshot.version === expected && controller.upToDate && inFlight === 0 && queued === 0
-        );
-      },
-      version,
-      { timeout: 10_000, polling: 10 },
-    );
-  } catch (error) {
-    const seen = await page.evaluate(() => {
-      const controller = window.__magpdf.controller();
-      const { inFlight, queued } = controller.scheduler;
-      return {
-        upToDate: controller.upToDate,
-        inFlight,
-        queued,
-        notice: document.querySelector('.mg-notice-message')?.textContent ?? null,
-      };
-    });
-    throw new Error(
-      `${what}之后等不到文档的第 ${version} 版：${JSON.stringify({ ...(await documentState(page)), ...seen })}`,
-      { cause: error },
-    );
-  }
-}
-
-/**
- * 在页面里装一个计时器：方向键按下的那一刻开始，记下“文档版本号变了”（收到 doc.changed）和
- * “画面重画完了”各用了多久。画面在每一帧画完之后看一眼，所以第二个数含等下一帧的时间，和用户看到的一致。
- */
-function installEditTimer(page) {
-  return page.evaluate(() => {
-    const { store } = window.__magpdf;
-    const timer = { samples: [], current: null };
-    const version = () => {
-      const state = store.getState();
-      return state.documents[state.activeDocumentId]?.snapshot.version ?? -1;
-    };
-    window.addEventListener(
-      'keydown',
-      (event) => {
-        if (event.key.startsWith('Arrow')) {
-          timer.current = { started: performance.now(), version: version() };
-        }
-      },
-      true,
-    );
-    store.subscribe(() => {
-      const current = timer.current;
-      if (current && current.changed === undefined && version() > current.version) {
-        current.changed = performance.now() - current.started;
-      }
-    });
-    const channel = new MessageChannel();
-    channel.port1.onmessage = () => {
-      const current = timer.current;
-      if (current?.changed !== undefined && window.__magpdf.controller()?.upToDate) {
-        timer.samples.push({
-          changed: current.changed,
-          repainted: performance.now() - current.started,
-        });
-        timer.current = null;
-      }
-    };
-    // 每一帧的回调都跑完之后再看，这时画布控制器已经画完这一帧
-    const tick = () => {
-      channel.port2.postMessage(0);
-      requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
-    window.__editTimer = timer;
-  });
-}
-
-/** 一组耗时的中位数、P95（最近秩）和最大值，保留一位小数。 */
-function summarize(values) {
-  const sorted = [...values].sort((a, b) => a - b);
-  const at = (q) => sorted[Math.min(sorted.length, Math.max(1, Math.ceil(q * sorted.length))) - 1];
-  const round = (value) => Math.round(value * 10) / 10;
-  return { median: round(at(0.5)), p95: round(at(0.95)), max: round(sorted[sorted.length - 1]) };
 }
 
 /** 只能叠加内容的页（方案 2.3）：提示条在，原有对象能选中但拖不动、删不掉，画面不变。 */
@@ -851,23 +578,12 @@ async function main() {
     assert.ok(existsSync(path), `找不到${what}：${path}（构建步骤见本文件开头）`);
   }
   mkdirSync(outDir, { recursive: true });
-  const scratch = mkdtempSync(join(tmpdir(), 'magpdf-e2e-'));
-  const port = await freePort();
   const names = [basename(editPdf), basename(samplePdf)];
   const result = { app: basename(appBin), pdf: names[1], editPdf: names[0] };
 
   const launched = performance.now();
   // 后给的那一份是活动文档：先在样本上看渲染、缩放和恢复，再切到另一份做修改
-  const app = spawn(appBin, [editPdf, samplePdf], {
-    env: {
-      ...process.env,
-      MAGPDF_WEBVIEW_DEBUG_PORT: String(port),
-      MAGPDF_DATA_DIR: join(scratch, 'data'),
-      WEBVIEW2_USER_DATA_FOLDER: join(scratch, 'webview'),
-      MAGPDF_LOG: 'warn',
-    },
-    stdio: ['ignore', 'ignore', 'inherit'],
-  });
+  const { app, port, scratch } = await launchApp(appBin, [editPdf, samplePdf]);
   let browser;
   let page;
   let engine = null;
@@ -1009,19 +725,7 @@ async function main() {
     result.engineExitMs = Math.round(performance.now() - gone);
   }
   console.log(JSON.stringify(result));
-  // WebView2 的子进程在主进程结束后还要过一会儿才退出，在那之前数据目录删不掉。删不掉不算测试失败。
-  for (let attempt = 0; ; attempt++) {
-    try {
-      rmSync(scratch, { recursive: true, force: true });
-      break;
-    } catch (error) {
-      if (attempt >= 40) {
-        console.warn(`临时目录没删掉，留在 ${scratch}：${error.code ?? error}`);
-        break;
-      }
-      await sleep(250);
-    }
-  }
+  await cleanUp(scratch);
 }
 
 main().catch((error) => {

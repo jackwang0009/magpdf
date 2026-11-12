@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json",
     "tauri": "tauri",
-    "e2e": "node e2e/smoke.mjs"
+    "e2e": "node e2e/smoke.mjs",
+    "perf": "node e2e/perf.mjs"
   },
   "dependencies": {
     "@magpdf/editor": "workspace:*",

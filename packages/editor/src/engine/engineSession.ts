@@ -183,9 +183,11 @@ export class EngineSession implements EditorHost {
   }
 
   private async load(info: DocInfo): Promise<void> {
+    const id = `engine-${++this.sequence}`;
+    // 量“打开到首屏”用的起点；终点是画布第一次把视口里的瓦片画齐（`magpdf:first-screen:`）
+    performance.mark(`magpdf:open:${id}`);
     const snapshot = await this.snapshotOf(info.docId);
     if (this.disposed) return;
-    const id = `engine-${++this.sequence}`;
     const document: EngineDocument = {
       id,
       path: info.path,

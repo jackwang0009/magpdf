@@ -145,6 +145,8 @@ export class CanvasController {
   /** 上一次从 store 同步过来的选区，用来判断是否要丢掉工具内部的选区覆盖值 */
   private knownSelection: readonly string[] | null = null;
   private pendingVisibleTiles = 0;
+  /** 已经打过“首屏画齐”的性能标记的文档 */
+  private readonly firstScreens = new Set<string>();
   /** 拖动预览的两层瓦片。没有在拖，或者这一次拖动用不了分层预览时是 null */
   private dragLayers: DragLayers | null = null;
   /** 对象层渲染时被拖对象的外框（文档坐标），和现在该把它画到哪里 */
@@ -586,6 +588,15 @@ export class CanvasController {
 
     this.scheduler.setWanted([...plan.missing, ...plan.prefetch], doc.snapshot.version);
     this.pendingVisibleTiles = plan.missing.length;
+    // 一份文档第一次把视口里的瓦片画齐：打一个性能标记（V05 量“打开到首屏”，见 apps/desktop/e2e/perf.mjs）
+    if (
+      plan.missing.length === 0 &&
+      plan.tiles.length > 0 &&
+      !this.firstScreens.has(doc.snapshot.id)
+    ) {
+      this.firstScreens.add(doc.snapshot.id);
+      performance.mark(`magpdf:first-screen:${doc.snapshot.id}`);
+    }
     // 松手之后预览还留着：每一帧都要看新瓦片到齐了没有
     if (this.dragHeld) this.invalidate();
 
