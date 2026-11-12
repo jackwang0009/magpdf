@@ -1,0 +1,788 @@
+From d4f688cbf885551da208193cb7c46ba80c09f24e Mon Sep 17 00:00:00 2001
+From: jackwang0009 <93422958+jackwang0009@users.noreply.github.com>
+Date: Thu, 12 Nov 2026 10:47:35 +0800
+Subject: [PATCH] [upstream-candidate] Write inline images back as inline
+ images
+
+CPDF_PageContentGenerator::ProcessImage() returned early for inline
+images, so every BI ... ID ... EI object disappeared as soon as its
+content stream was regenerated.
+
+Write them back in place: `q <graphics state> <matrix> cm BI <dict> ID
+<data> EI Q`. The dictionary is written from the image stream's
+dictionary with the abbreviated keys, color space names and filter names
+of ISO 32000-1 tables 93 and 94 (the parser expands them), minus the
+/Length, /Subtype and /Type entries the parser adds. The data is the raw
+stream data, still encoded with whatever filters the dictionary names,
+so nothing is decoded or re-encoded. The dictionary is serialized before
+anything is emitted; a value that cannot be expressed inline (a stream
+or an indirect reference) drops the object without leaving an open `q`.
+
+A color space that an inline image selects by resource name is replaced
+by the resource object when the image is parsed. CPDF_Image now keeps
+that name and object for inline images, and the generator writes the
+name again when the holder's /ColorSpace resources still map it to the
+same object, or realizes the object as a new FXC resource otherwise
+(for instance when the object was moved to another page). Device color
+spaces and Indexed spaces over a device base with a string lookup stay
+inline.
+
+CPDF_Image::SetImage()/SetJpegImage()/SetJpegImageInline() replace the
+stream, so the image stops being an inline image and is written as an
+XObject, as before.
+
+Tests: CPDFPageContentGeneratorTest.ProcessInlineImage (ASCIIHex gray,
+raw RGB whose data contains "EI ", image mask, named Indexed resource,
+filter chain with /DecodeParms, inline Indexed; generate -> parse ->
+generate is stable), ProcessInlineImageOnAnotherPage and
+ProcessInlineImageWithNewBitmap. pdfium_unittests and
+pdfium_embeddertests: no new failures.
+
+Verification (ops_diff.py): missing inline-image events 6 -> 0 on the
+synthetic corpus (struct-inline-image.pdf); no-diff pages 54/67 -> 55/67
+synthetic, 384/388 -> 384/388 public.
+
+Co-authored-by: Cursor <cursoragent@cursor.com>
+---
+ .../edit/cpdf_pagecontentgenerator.cpp        | 267 ++++++++++++++++++
+ core/fpdfapi/edit/cpdf_pagecontentgenerator.h |  12 +
+ .../cpdf_pagecontentgenerator_unittest.cpp    | 218 ++++++++++++++
+ core/fpdfapi/page/cpdf_image.cpp              |  26 +-
+ core/fpdfapi/page/cpdf_image.h                |  18 ++
+ .../fpdfapi/page/cpdf_streamcontentparser.cpp |  10 +
+ 6 files changed, 547 insertions(+), 4 deletions(-)
+
+diff --git a/core/fpdfapi/edit/cpdf_pagecontentgenerator.cpp b/core/fpdfapi/edit/cpdf_pagecontentgenerator.cpp
+index 7608bdfd45..1c005331f6 100644
+--- a/core/fpdfapi/edit/cpdf_pagecontentgenerator.cpp
++++ b/core/fpdfapi/edit/cpdf_pagecontentgenerator.cpp
+@@ -43,6 +43,8 @@
+ #include "core/fpdfapi/parser/cpdf_number.h"
+ #include "core/fpdfapi/parser/cpdf_reference.h"
+ #include "core/fpdfapi/parser/cpdf_stream.h"
++#include "core/fpdfapi/parser/cpdf_stream_acc.h"
++#include "core/fpdfapi/parser/cpdf_string.h"
+ #include "core/fpdfapi/parser/fpdf_parser_decode.h"
+ #include "core/fpdfapi/parser/fpdf_parser_utility.h"
+ #include "core/fpdfapi/parser/object_tree_traversal_util.h"
+@@ -306,6 +308,146 @@ void CloneResourcesDictEntries(CPDF_Document* doc,
+   }
+ }
+ 
++// The abbreviations an inline image uses for the keys of its dictionary and
++// for the names of color spaces and filters. See ISO 32000-1:2008, tables 93
++// and 94. The parser expands them all, so they are abbreviated again when
++// the inline image is written back.
++struct InlineImageAbbreviation {
++  const char* full_name;
++  const char* abbreviation;
++};
++
++constexpr InlineImageAbbreviation kInlineImageKeyAbbreviations[] = {
++    {"BitsPerComponent", "BPC"}, {"ColorSpace", "CS"}, {"Decode", "D"},
++    {"DecodeParms", "DP"},       {"Filter", "F"},      {"Height", "H"},
++    {"ImageMask", "IM"},         {"Interpolate", "I"}, {"Width", "W"},
++};
++
++constexpr InlineImageAbbreviation kInlineImageColorSpaceAbbreviations[] = {
++    {"DeviceGray", "G"},
++    {"DeviceRGB", "RGB"},
++    {"DeviceCMYK", "CMYK"},
++    {"Indexed", "I"},
++};
++
++constexpr InlineImageAbbreviation kInlineImageFilterAbbreviations[] = {
++    {"ASCIIHexDecode", "AHx"}, {"ASCII85Decode", "A85"},
++    {"LZWDecode", "LZW"},      {"FlateDecode", "Fl"},
++    {"RunLengthDecode", "RL"}, {"CCITTFaxDecode", "CCF"},
++    {"DCTDecode", "DCT"},
++};
++
++ByteString AbbreviateInlineImageName(
++    pdfium::span<const InlineImageAbbreviation> abbreviations,
++    const ByteString& name) {
++  for (const auto& entry : abbreviations) {
++    if (name == entry.full_name) {
++      return ByteString(entry.abbreviation);
++    }
++  }
++  return name;
++}
++
++bool IsDeviceColorSpaceName(const ByteString& name) {
++  return name == "DeviceGray" || name == "DeviceRGB" || name == "DeviceCMYK";
++}
++
++// Whether `object` is a color space an inline image can spell out in its
++// dictionary: a device color space, or an Indexed color space based on one
++// with its lookup table in a string. Every other color space has to be the
++// name of a color space resource.
++bool IsInlineImageColorSpace(const CPDF_Object* object) {
++  if (const CPDF_Name* name = object->AsName()) {
++    return IsDeviceColorSpaceName(name->GetString());
++  }
++  const CPDF_Array* array = object->AsArray();
++  if (!array) {
++    return false;
++  }
++  if (array->size() == 1) {
++    RetainPtr<const CPDF_Object> family = array->GetObjectAt(0);
++    return family->IsName() && IsDeviceColorSpaceName(family->GetString());
++  }
++  if (array->size() != 4) {
++    return false;
++  }
++  // GetObjectAt() does not resolve references, which cannot be written to a
++  // content stream.
++  RetainPtr<const CPDF_Object> family = array->GetObjectAt(0);
++  RetainPtr<const CPDF_Object> base = array->GetObjectAt(1);
++  RetainPtr<const CPDF_Object> hival = array->GetObjectAt(2);
++  RetainPtr<const CPDF_Object> lookup = array->GetObjectAt(3);
++  return family->IsName() && family->GetString() == "Indexed" &&
++         base->IsName() && IsDeviceColorSpaceName(base->GetString()) &&
++         hival->IsNumber() && lookup->IsString();
++}
++
++// Writes `object` as an operand in the dictionary of an inline image, with
++// the names in `abbreviations` abbreviated. Returns false for an object that
++// cannot be written to a content stream: an indirect reference, a stream, or
++// something nested too deeply to be a sane operand.
++bool WriteInlineImageOperand(
++    fxcrt::ostringstream& buf,
++    const CPDF_Object* object,
++    pdfium::span<const InlineImageAbbreviation> abbreviations,
++    int depth) {
++  static constexpr int kMaxDepth = 8;
++  if (depth > kMaxDepth) {
++    return false;
++  }
++  switch (object->GetType()) {
++    case CPDF_Object::kBoolean:
++    case CPDF_Object::kNumber:
++      buf << object->GetString();
++      return true;
++    case CPDF_Object::kString:
++      buf << object->AsString()->EncodeString();
++      return true;
++    case CPDF_Object::kName:
++      buf << "/"
++          << PDF_NameEncode(
++                 AbbreviateInlineImageName(abbreviations, object->GetString()));
++      return true;
++    case CPDF_Object::kNullobj:
++      buf << "null";
++      return true;
++    case CPDF_Object::kArray: {
++      const CPDF_Array* array = object->AsArray();
++      buf << "[";
++      for (size_t i = 0; i < array->size(); ++i) {
++        if (i > 0) {
++          buf << " ";
++        }
++        if (!WriteInlineImageOperand(buf, array->GetObjectAt(i).Get(),
++                                     abbreviations, depth + 1)) {
++          return false;
++        }
++      }
++      buf << "]";
++      return true;
++    }
++    case CPDF_Object::kDictionary: {
++      // The keys of a nested dictionary (/DecodeParms) are never abbreviated.
++      CPDF_DictionaryLocker locker(object->AsDictionary());
++      buf << "<<";
++      for (const auto& it : locker) {
++        buf << "/" << PDF_NameEncode(it.first) << " ";
++        if (!WriteInlineImageOperand(buf, it.second.Get(), abbreviations,
++                                     depth + 1)) {
++          return false;
++        }
++        buf << " ";
++      }
++      buf << ">>";
++      return true;
++    }
++    case CPDF_Object::kStream:
++    case CPDF_Object::kReference:
++      return false;
++  }
++  return false;
++}
++
+ // A text object reduced to everything that determines the glyph outlines
+ // it contributes to a clip path. Two texts with equal signatures contribute
+ // identical outlines, so a text found in a later object's clip path can be
+@@ -997,6 +1139,7 @@ void CPDF_PageContentGenerator::ProcessImage(fxcrt::ostringstream* buf,
+ 
+   RetainPtr<CPDF_Image> pImage = pImageObj->GetImage();
+   if (pImage->IsInline()) {
++    ProcessInlineImage(buf, pImageObj);
+     return;
+   }
+ 
+@@ -1028,6 +1171,130 @@ void CPDF_PageContentGenerator::ProcessImage(fxcrt::ostringstream* buf,
+   EndProcessGraphics(*buf);
+ }
+ 
++// Writes an image that was parsed from an inline image back as an inline
++// image: "BI" begins the image, followed by the entries of its dictionary;
++// "ID" begins the image data, which is written exactly as it was read; "EI"
++// ends the image.
++void CPDF_PageContentGenerator::ProcessInlineImage(
++    fxcrt::ostringstream* buf,
++    CPDF_ImageObject* pImageObj) {
++  RetainPtr<CPDF_Image> image = pImageObj->GetImage();
++  RetainPtr<const CPDF_Stream> stream = image->GetStream();
++  if (!stream) {
++    return;
++  }
++
++  // Build the dictionary first: nothing is written when it holds something
++  // that an inline image cannot express.
++  fxcrt::ostringstream dict_buf;
++  {
++    CPDF_DictionaryLocker locker(stream->GetDict());
++    for (const auto& it : locker) {
++      const ByteString& key = it.first;
++      // The parser adds /Length and /Subtype to make the dictionary look like
++      // the one of an image XObject. They are not inline image entries.
++      if (key == "Length" || key == "Subtype" || key == "Type") {
++        continue;
++      }
++      dict_buf << " /"
++               << PDF_NameEncode(AbbreviateInlineImageName(
++                      kInlineImageKeyAbbreviations, key))
++               << " ";
++      const CPDF_Object* value = it.second.Get();
++      bool written;
++      if (key == "ColorSpace") {
++        written = WriteInlineImageColorSpace(dict_buf, image.Get(), value);
++      } else if (key == "Filter") {
++        written = WriteInlineImageOperand(dict_buf, value,
++                                          kInlineImageFilterAbbreviations, 0);
++      } else {
++        written = WriteInlineImageOperand(dict_buf, value, {}, 0);
++      }
++      if (!written) {
++        return;
++      }
++    }
++  }
++
++  auto stream_acc = pdfium::MakeRetain<CPDF_StreamAcc>(std::move(stream));
++  stream_acc->LoadAllDataRaw();
++  pdfium::span<const char> data = pdfium::as_chars(stream_acc->GetSpan());
++
++  ProcessGraphics(buf, pImageObj);
++  const CFX_Matrix& matrix = pImageObj->matrix();
++  if (!matrix.IsIdentity()) {
++    WriteMatrix(*buf, matrix) << " cm ";
++  }
++  // Exactly one whitespace character separates "ID" from the image data.
++  *buf << "BI" << dict_buf.str() << " ID\n";
++  buf->write(data.data(), data.size());
++  *buf << "\nEI";
++  EndProcessGraphics(*buf);
++}
++
++bool CPDF_PageContentGenerator::WriteInlineImageColorSpace(
++    fxcrt::ostringstream& buf,
++    CPDF_Image* image,
++    const CPDF_Object* color_space) const {
++  // The color space is a resource: name it. The image named it as well when
++  // the parser recorded the name; the dictionary itself may hold a copy of
++  // the resource rather than the name.
++  ByteString stored_name = image->GetInlineColorSpaceName();
++  RetainPtr<const CPDF_Object> resource = image->GetInlineColorSpaceObject();
++  if (stored_name.IsEmpty() || !resource) {
++    if (color_space->IsName() || IsInlineImageColorSpace(color_space)) {
++      // A device color space, an Indexed color space based on one, or the
++      // name of a resource that did not exist when the image was parsed.
++      return WriteInlineImageOperand(buf, color_space,
++                                     kInlineImageColorSpaceAbbreviations, 0);
++    }
++    stored_name.clear();
++    resource = color_space->GetDirect();
++    if (!resource) {
++      return false;
++    }
++  }
++
++  RetainPtr<const CPDF_Dictionary> resources = obj_holder_->GetResources();
++  RetainPtr<const CPDF_Dictionary> color_spaces =
++      resources ? resources->GetDictFor("ColorSpace") : nullptr;
++  ByteString name;
++  if (color_spaces) {
++    if (!stored_name.IsEmpty() && color_spaces->GetDirectObjectFor(
++                                      stored_name.AsStringView()) == resource) {
++      name = stored_name;
++    } else {
++      for (const ByteString& key : color_spaces->GetKeys()) {
++        if (color_spaces->GetDirectObjectFor(key.AsStringView()) == resource) {
++          name = key;
++          break;
++        }
++      }
++    }
++  }
++  if (name.IsEmpty()) {
++    // The resource is not in the resources of this page (anymore), which
++    // happens when the image moved here from another page. Add it.
++    if (!document_) {
++      return false;
++    }
++    if (!resource->GetObjNum()) {
++      // Inline objects cannot be referenced from the resources dictionary.
++      // Give the color space its own indirect object first.
++      RetainPtr<CPDF_Object> copy = resource->Clone();
++      document_->AddIndirectObject(copy);
++      resource = std::move(copy);
++    }
++    name = RealizeResource(resource.Get(), "ColorSpace");
++  }
++  if (name != stored_name) {
++    // Remember the name, so the next regeneration finds the resource.
++    image->SetInlineColorSpaceResource(name, std::move(resource));
++  }
++  buf << "/" << PDF_NameEncode(name);
++  return true;
++}
++
+ void CPDF_PageContentGenerator::ProcessForm(fxcrt::ostringstream* buf,
+                                             CPDF_FormObject* pFormObj) {
+   CPDF_Form* form_xobject = pFormObj->form();
+diff --git a/core/fpdfapi/edit/cpdf_pagecontentgenerator.h b/core/fpdfapi/edit/cpdf_pagecontentgenerator.h
+index 5c39293bee..751d1d880b 100644
+--- a/core/fpdfapi/edit/cpdf_pagecontentgenerator.h
++++ b/core/fpdfapi/edit/cpdf_pagecontentgenerator.h
+@@ -24,6 +24,7 @@ class CPDF_ColorSpace;
+ class CPDF_ContentMarks;
+ class CPDF_Document;
+ class CPDF_FormObject;
++class CPDF_Image;
+ class CPDF_ImageObject;
+ class CPDF_Object;
+ class CPDF_PageObject;
+@@ -49,6 +50,17 @@ class CPDF_PageContentGenerator {
+   void ProcessPath(fxcrt::ostringstream* buf, CPDF_PathObject* pPathObj);
+   void ProcessForm(fxcrt::ostringstream* buf, CPDF_FormObject* pFormObj);
+   void ProcessImage(fxcrt::ostringstream* buf, CPDF_ImageObject* pImageObj);
++  // Writes an image that was parsed from an inline image as an inline image
++  // again (BI ... ID ... EI), with its data untouched.
++  void ProcessInlineImage(fxcrt::ostringstream* buf,
++                          CPDF_ImageObject* pImageObj);
++  // Writes the /ColorSpace operand of the inline image `image`, whose
++  // dictionary holds `color_space`: the color space itself when an inline
++  // image may spell it out, the name of a color space resource otherwise.
++  // Returns false if there is no way to write the color space.
++  bool WriteInlineImageColorSpace(fxcrt::ostringstream& buf,
++                                  CPDF_Image* image,
++                                  const CPDF_Object* color_space) const;
+   void ProcessGraphics(fxcrt::ostringstream* buf, CPDF_PageObject* pPageObj);
+   void ProcessDefaultGraphics(fxcrt::ostringstream* buf);
+   void ProcessText(fxcrt::ostringstream* buf, CPDF_TextObject* pTextObj);
+diff --git a/core/fpdfapi/edit/cpdf_pagecontentgenerator_unittest.cpp b/core/fpdfapi/edit/cpdf_pagecontentgenerator_unittest.cpp
+index 053daf382f..1914d71a76 100644
+--- a/core/fpdfapi/edit/cpdf_pagecontentgenerator_unittest.cpp
++++ b/core/fpdfapi/edit/cpdf_pagecontentgenerator_unittest.cpp
+@@ -13,6 +13,8 @@
+ #include "core/fpdfapi/page/cpdf_colorspace.h"
+ #include "core/fpdfapi/page/cpdf_docpagedata.h"
+ #include "core/fpdfapi/page/cpdf_form.h"
++#include "core/fpdfapi/page/cpdf_image.h"
++#include "core/fpdfapi/page/cpdf_imageobject.h"
+ #include "core/fpdfapi/page/cpdf_page.h"
+ #include "core/fpdfapi/page/cpdf_pathobject.h"
+ #include "core/fpdfapi/page/cpdf_textobject.h"
+@@ -26,9 +28,11 @@
+ #include "core/fpdfapi/parser/cpdf_parser.h"
+ #include "core/fpdfapi/parser/cpdf_reference.h"
+ #include "core/fpdfapi/parser/cpdf_stream.h"
++#include "core/fpdfapi/parser/cpdf_string.h"
+ #include "core/fpdfapi/parser/cpdf_test_document.h"
+ #include "core/fxcrt/data_vector.h"
+ #include "core/fxge/cfx_fillrenderoptions.h"
++#include "core/fxge/dib/cfx_dibitmap.h"
+ #include "testing/gtest/include/gtest/gtest.h"
+ 
+ class CPDFPageContentGeneratorTest : public TestWithPageModule {
+@@ -60,6 +64,32 @@ class CPDFPageContentGeneratorTest : public TestWithPageModule {
+                               const std::vector<size_t>& group_sizes) {
+     pGen->WriteTextClipGroup(buf, texts, group_sizes);
+   }
++
++  void TestProcessPageObject(CPDF_PageContentGenerator* pGen,
++                             fxcrt::ostringstream* buf,
++                             CPDF_PageObject* pPageObj) {
++    pGen->ProcessPageObject(buf, pPageObj);
++  }
++
++  // Adds a page to `doc` with `contents` as its content stream and
++  // `resources` (may be null) as its resources, and parses it.
++  RetainPtr<CPDF_Page> CreateParsedPage(CPDF_TestDocument* doc,
++                                        RetainPtr<CPDF_Dictionary> resources,
++                                        ByteStringView contents) {
++    RetainPtr<CPDF_Dictionary> page_dict(
++        doc->CreateNewPage(doc->GetPageCount()));
++    if (resources) {
++      page_dict->SetFor("Resources", std::move(resources));
++    }
++    auto stream = doc->NewIndirect<CPDF_Stream>(
++        DataVector<uint8_t>(contents.unsigned_span().begin(),
++                            contents.unsigned_span().end()),
++        doc->New<CPDF_Dictionary>());
++    page_dict->SetNewFor<CPDF_Reference>("Contents", doc, stream->GetObjNum());
++    auto page = pdfium::MakeRetain<CPDF_Page>(doc, std::move(page_dict));
++    page->ParseContent();
++    return page;
++  }
+ };
+ 
+ TEST_F(CPDFPageContentGeneratorTest, ProcessRect) {
+@@ -684,6 +714,194 @@ TEST_F(CPDFPageContentGeneratorTest, ProcessTextClipGroup) {
+   EXPECT_TRUE(text_string.Contains(" ET\nBT "));
+ }
+ 
++TEST_F(CPDFPageContentGeneratorTest, ProcessInlineImage) {
++  auto doc = std::make_unique<CPDF_TestDocument>();
++  doc->CreateNewDoc();
++
++  // An Indexed color space that is a direct object in the resources: the
++  // parser copies it into the dictionary of the inline image that names it.
++  auto resources = doc->New<CPDF_Dictionary>();
++  auto color_spaces = resources->SetNewFor<CPDF_Dictionary>("ColorSpace");
++  auto indexed = color_spaces->SetNewFor<CPDF_Array>("CSidx");
++  indexed->AppendNew<CPDF_Name>("Indexed");
++  indexed->AppendNew<CPDF_Name>("DeviceRGB");
++  indexed->AppendNew<CPDF_Number>(1);
++  static constexpr uint8_t kPalette[] = {0xff, 0x8b, 0x00, 0x00, 0x44, 0xaa};
++  indexed->AppendNew<CPDF_String>(kPalette, CPDF_String::DataType::kIsHex);
++
++  // In order: ASCIIHex data, unfiltered data that contains "EI ", an image
++  // mask, the Indexed color space resource, a filter chain with decode
++  // parameters, and an Indexed color space spelled out in the image.
++  static constexpr char kContents[] =
++      "q 60 0 0 40 20 140 cm BI /W 4 /H 4 /CS /G /BPC 8 /F /AHx ID\n"
++      "004080FF4080FF0080FF0040FF004080 >\nEI Q\n"
++      "q 60 0 0 40 100 140 cm BI /W 2 /H 2 /CS /RGB /BPC 8 ID\n"
++      "\xff\x01\x01\x01\xff\x01"
++      "EI \x01\x01\xff\nEI Q\n"
++      "q 0 0.4 0 rg 60 0 0 40 180 140 cm BI /W 8 /H 8 /IM true /BPC 1 "
++      "/D [0 1] /I true /F /AHx ID\nFF81BDA5A5BD81FF >\nEI Q\n"
++      "q 60 0 0 40 20 60 cm BI /W 4 /H 4 /CS /CSidx /BPC 1 /F /AHx ID\n"
++      "A050A050 >\nEI Q\n"
++      "q 60 0 0 40 100 60 cm BI /W 2 /H 1 /CS /G /BPC 8 /F [/AHx /RL] "
++      "/DP [null << /K 1 >>] ID\n01FFFF80 >\nEI Q\n"
++      "q 60 0 0 40 180 60 cm BI /W 4 /H 4 /CS [/I /RGB 1 <FF8B000044AA>] "
++      "/BPC 1 /F /AHx ID\nA050A050 >\nEI Q\n";
++  RetainPtr<CPDF_Page> page = CreateParsedPage(doc.get(), resources, kContents);
++  ASSERT_EQ(6u, page->GetPageObjectCount());
++
++  CPDF_PageContentGenerator generator(page.Get());
++  auto generate = [&](size_t index) {
++    fxcrt::ostringstream buf;
++    TestProcessPageObject(&generator, &buf, page->GetPageObjectByIndex(index));
++    return ByteString(buf);
++  };
++
++  // The dictionary entries come out in the order of their full names, with
++  // the abbreviations the parser expanded, and without the /Length and
++  // /Subtype the parser added. The image data is untouched.
++  EXPECT_EQ(
++      "q 60 0 0 40 20 140 cm BI /BPC 8 /CS /G /F /AHx /H 4 /W 4 ID\n"
++      "004080FF4080FF0080FF0040FF004080 >\nEI Q\n",
++      generate(0));
++  EXPECT_EQ(
++      "q 60 0 0 40 100 140 cm BI /BPC 8 /CS /RGB /H 2 /W 2 ID\n"
++      "\xff\x01\x01\x01\xff\x01"
++      "EI \x01\x01\xff\nEI Q\n",
++      generate(1));
++  // An image mask is painted with the fill color.
++  EXPECT_EQ(
++      "q 0 .4 0 rg 0 G 60 0 0 40 180 140 cm BI /BPC 1 /D [0 1] /F /AHx /H 8 "
++      "/IM true /I true /W 8 ID\nFF81BDA5A5BD81FF >\nEI Q\n",
++      generate(2));
++  // The color space resource is named again, not spelled out.
++  EXPECT_EQ(
++      "q 60 0 0 40 20 60 cm BI /BPC 1 /CS /CSidx /F /AHx /H 4 /W 4 ID\n"
++      "A050A050 >\nEI Q\n",
++      generate(3));
++  EXPECT_EQ(
++      "q 60 0 0 40 100 60 cm BI /BPC 8 /CS /G /DP [null <</K 1 >>] "
++      "/F [/AHx /RL] /H 1 /W 2 ID\n01FFFF80 >\nEI Q\n",
++      generate(4));
++  EXPECT_EQ(
++      "q 60 0 0 40 180 60 cm BI /BPC 1 /CS [/I /RGB 1 <FF8B000044AA>] "
++      "/F /AHx /H 4 /W 4 ID\nA050A050 >\nEI Q\n",
++      generate(5));
++
++  // No resource was added for any of them.
++  EXPECT_EQ(1u, color_spaces->size());
++
++  // Parsing the generated inline images gives the same images again.
++  ByteString regenerated;
++  for (size_t i = 0; i < 6; ++i) {
++    regenerated += generate(i);
++  }
++  RetainPtr<CPDF_Page> page2 =
++      CreateParsedPage(doc.get(), resources, regenerated.AsStringView());
++  ASSERT_EQ(6u, page2->GetPageObjectCount());
++  CPDF_PageContentGenerator generator2(page2.Get());
++  ByteString regenerated2;
++  for (size_t i = 0; i < 6; ++i) {
++    fxcrt::ostringstream buf;
++    TestProcessPageObject(&generator2, &buf, page2->GetPageObjectByIndex(i));
++    regenerated2 += ByteString(buf);
++  }
++  EXPECT_EQ(regenerated, regenerated2);
++}
++
++TEST_F(CPDFPageContentGeneratorTest, ProcessInlineImageOnAnotherPage) {
++  auto doc = std::make_unique<CPDF_TestDocument>();
++  doc->CreateNewDoc();
++
++  // A Lab color space cannot be spelled out in an inline image, only named.
++  auto resources = doc->New<CPDF_Dictionary>();
++  auto color_spaces = resources->SetNewFor<CPDF_Dictionary>("ColorSpace");
++  auto lab = color_spaces->SetNewFor<CPDF_Array>("CSlab");
++  lab->AppendNew<CPDF_Name>("Lab");
++  auto lab_dict = lab->AppendNew<CPDF_Dictionary>();
++  auto white_point = lab_dict->SetNewFor<CPDF_Array>("WhitePoint");
++  white_point->AppendNew<CPDF_Number>(0.9505f);
++  white_point->AppendNew<CPDF_Number>(1.0f);
++  white_point->AppendNew<CPDF_Number>(1.089f);
++
++  static constexpr char kContents[] =
++      "q 60 0 0 40 20 60 cm BI /W 1 /H 1 /CS /CSlab /BPC 8 /F /AHx ID\n"
++      "80FF00 >\nEI Q\n";
++  RetainPtr<CPDF_Page> page = CreateParsedPage(doc.get(), resources, kContents);
++  ASSERT_EQ(1u, page->GetPageObjectCount());
++  CPDF_PageObject* image = page->GetPageObjectByIndex(0);
++
++  // On its own page, the image names the color space as it did.
++  {
++    CPDF_PageContentGenerator generator(page.Get());
++    fxcrt::ostringstream buf;
++    TestProcessPageObject(&generator, &buf, image);
++    EXPECT_EQ(
++        "q 60 0 0 40 20 60 cm BI /BPC 8 /CS /CSlab /F /AHx /H 1 /W 1 ID\n"
++        "80FF00 >\nEI Q\n",
++        ByteString(buf));
++  }
++
++  // On a page without that resource, the color space becomes a resource of
++  // that page under a new name.
++  RetainPtr<CPDF_Page> other_page = CreateParsedPage(doc.get(), nullptr, "");
++  CPDF_PageContentGenerator generator(other_page.Get());
++  const char kExpected[] =
++      "q 60 0 0 40 20 60 cm BI /BPC 8 /CS /FXC1 /F /AHx /H 1 /W 1 ID\n"
++      "80FF00 >\nEI Q\n";
++  {
++    fxcrt::ostringstream buf;
++    TestProcessPageObject(&generator, &buf, image);
++    EXPECT_EQ(kExpected, ByteString(buf));
++  }
++  RetainPtr<const CPDF_Dictionary> other_color_spaces =
++      other_page->GetResources()->GetDictFor("ColorSpace");
++  ASSERT_TRUE(other_color_spaces);
++  RetainPtr<const CPDF_Array> other_lab =
++      other_color_spaces->GetArrayFor("FXC1");
++  ASSERT_TRUE(other_lab);
++  EXPECT_EQ("Lab", other_lab->GetByteStringAt(0));
++
++  // Generating again reuses the new resource.
++  {
++    fxcrt::ostringstream buf;
++    TestProcessPageObject(&generator, &buf, image);
++    EXPECT_EQ(kExpected, ByteString(buf));
++  }
++  EXPECT_EQ(1u, other_color_spaces->size());
++}
++
++TEST_F(CPDFPageContentGeneratorTest, ProcessInlineImageWithNewBitmap) {
++  auto doc = std::make_unique<CPDF_TestDocument>();
++  doc->CreateNewDoc();
++
++  static constexpr char kContents[] =
++      "q 60 0 0 40 20 60 cm BI /W 1 /H 1 /CS /RGB /BPC 8 /F /AHx ID\n"
++      "80FF00 >\nEI Q\n";
++  RetainPtr<CPDF_Page> page = CreateParsedPage(doc.get(), nullptr, kContents);
++  ASSERT_EQ(1u, page->GetPageObjectCount());
++  CPDF_ImageObject* image_obj = page->GetPageObjectByIndex(0)->AsImage();
++  ASSERT_TRUE(image_obj);
++  ASSERT_TRUE(image_obj->GetImage()->IsInline());
++
++  // Replacing the bitmap gives the image the dictionary of an image XObject,
++  // possibly with a soft mask. It can only be written as an XObject.
++  auto bitmap = pdfium::MakeRetain<CFX_DIBitmap>();
++  ASSERT_TRUE(bitmap->Create(2, 2, FXDIB_Format::kBgra));
++  image_obj->GetImage()->SetImage(bitmap);
++  EXPECT_FALSE(image_obj->GetImage()->IsInline());
++
++  CPDF_PageContentGenerator generator(page.Get());
++  fxcrt::ostringstream buf;
++  TestProcessPageObject(&generator, &buf, image_obj);
++  EXPECT_EQ("q 60 0 0 40 20 60 cm /FXX1 Do Q\n", ByteString(buf));
++  RetainPtr<const CPDF_Dictionary> xobjects =
++      page->GetResources()->GetDictFor("XObject");
++  ASSERT_TRUE(xobjects);
++  RetainPtr<const CPDF_Stream> xobject = xobjects->GetStreamFor("FXX1");
++  ASSERT_TRUE(xobject);
++  EXPECT_EQ(2, xobject->GetDict()->GetIntegerFor("Width"));
++}
++
+ TEST_F(CPDFPageContentGeneratorTest, ProcessEmptyForm) {
+   auto doc = std::make_unique<CPDF_TestDocument>();
+   doc->CreateNewDoc();
+diff --git a/core/fpdfapi/page/cpdf_image.cpp b/core/fpdfapi/page/cpdf_image.cpp
+index 534284b794..07e014815a 100644
+--- a/core/fpdfapi/page/cpdf_image.cpp
++++ b/core/fpdfapi/page/cpdf_image.cpp
+@@ -96,6 +96,22 @@ RetainPtr<const CPDF_Dictionary> CPDF_Image::GetOC() const {
+   return oc_;
+ }
+ 
++void CPDF_Image::SetInlineColorSpaceResource(
++    ByteString name,
++    RetainPtr<const CPDF_Object> object) {
++  inline_color_space_name_ = std::move(name);
++  inline_color_space_object_ = std::move(object);
++}
++
++void CPDF_Image::ReplaceStream(RetainPtr<CPDF_Stream> stream) {
++  stream_ = std::move(stream);
++  // The image data no longer comes from an inline image, even if it did
++  // before: the new stream is written as an image XObject.
++  is_inline_ = false;
++  inline_color_space_name_.clear();
++  inline_color_space_object_.Reset();
++}
++
+ RetainPtr<CPDF_Dictionary> CPDF_Image::InitJPEG(
+     pdfium::span<uint8_t> src_span) {
+   std::optional<JpegModule::ImageInfo> info_opt =
+@@ -162,7 +178,8 @@ void CPDF_Image::SetJpegImage(RetainPtr<IFX_SeekableReadStream> pFile) {
+     return;
+   }
+ 
+-  stream_ = pdfium::MakeRetain<CPDF_Stream>(std::move(pFile), std::move(dict));
++  ReplaceStream(
++      pdfium::MakeRetain<CPDF_Stream>(std::move(pFile), std::move(dict)));
+ }
+ 
+ void CPDF_Image::SetJpegImageInline(RetainPtr<IFX_SeekableReadStream> pFile) {
+@@ -181,7 +198,8 @@ void CPDF_Image::SetJpegImageInline(RetainPtr<IFX_SeekableReadStream> pFile) {
+     return;
+   }
+ 
+-  stream_ = pdfium::MakeRetain<CPDF_Stream>(std::move(data), std::move(dict));
++  ReplaceStream(
++      pdfium::MakeRetain<CPDF_Stream>(std::move(data), std::move(dict)));
+ }
+ 
+ void CPDF_Image::SetImage(const RetainPtr<CFX_DIBitmap>& pBitmap) {
+@@ -314,8 +332,8 @@ void CPDF_Image::SetImage(const RetainPtr<CFX_DIBitmap>& pBitmap) {
+     }
+   }
+ 
+-  stream_ =
+-      pdfium::MakeRetain<CPDF_Stream>(std::move(dest_buf), std::move(dict));
++  ReplaceStream(
++      pdfium::MakeRetain<CPDF_Stream>(std::move(dest_buf), std::move(dict)));
+   is_mask_ = pBitmap->IsMaskFormat();
+   width_ = BitmapWidth;
+   height_ = BitmapHeight;
+diff --git a/core/fpdfapi/page/cpdf_image.h b/core/fpdfapi/page/cpdf_image.h
+index 175cfc162a..efc33a6aef 100644
+--- a/core/fpdfapi/page/cpdf_image.h
++++ b/core/fpdfapi/page/cpdf_image.h
+@@ -10,6 +10,7 @@
+ #include <stdint.h>
+ 
+ #include "core/fpdfapi/page/cpdf_colorspace.h"
++#include "core/fxcrt/bytestring.h"
+ #include "core/fxcrt/retain_ptr.h"
+ #include "core/fxcrt/span.h"
+ #include "core/fxcrt/unowned_ptr.h"
+@@ -19,6 +20,7 @@ class CFX_DIBitmap;
+ class CPDF_DIB;
+ class CPDF_Dictionary;
+ class CPDF_Document;
++class CPDF_Object;
+ class CPDF_Page;
+ class CPDF_Stream;
+ class PauseIndicatorIface;
+@@ -45,6 +47,18 @@ class CPDF_Image final : public Retainable {
+   int32_t GetPixelWidth() const { return width_; }
+   uint32_t GetMatteColor() const { return matte_color_; }
+   bool IsInline() const { return is_inline_; }
++  // For an inline image whose /ColorSpace entry named a color space resource:
++  // the resource name and the object it referred to. An inline image can only
++  // use most color spaces by name, so a content stream generator needs the
++  // name to write the image back.
++  void SetInlineColorSpaceResource(ByteString name,
++                                   RetainPtr<const CPDF_Object> object);
++  const ByteString& GetInlineColorSpaceName() const {
++    return inline_color_space_name_;
++  }
++  RetainPtr<const CPDF_Object> GetInlineColorSpaceObject() const {
++    return inline_color_space_object_;
++  }
+   bool IsMask() const { return is_mask_; }
+   bool IsInterpol() const { return interpolate_; }
+ 
+@@ -81,6 +95,8 @@ class CPDF_Image final : public Retainable {
+   ~CPDF_Image() override;
+ 
+   void FinishInitialization();
++  // Replaces the image data with `stream`, which holds new image XObject data.
++  void ReplaceStream(RetainPtr<CPDF_Stream> stream);
+   RetainPtr<CPDF_Dictionary> InitJPEG(pdfium::span<uint8_t> src_span);
+   RetainPtr<CPDF_Dictionary> CreateXObjectImageDict(int width, int height);
+ 
+@@ -96,6 +112,8 @@ class CPDF_Image final : public Retainable {
+   RetainPtr<CFX_DIBBase> mask_;
+   RetainPtr<CPDF_Stream> stream_;
+   RetainPtr<const CPDF_Dictionary> oc_;
++  ByteString inline_color_space_name_;
++  RetainPtr<const CPDF_Object> inline_color_space_object_;
+ };
+ 
+ #endif  // CORE_FPDFAPI_PAGE_CPDF_IMAGE_H_
+diff --git a/core/fpdfapi/page/cpdf_streamcontentparser.cpp b/core/fpdfapi/page/cpdf_streamcontentparser.cpp
+index a77b2d3798..53a5e534eb 100644
+--- a/core/fpdfapi/page/cpdf_streamcontentparser.cpp
++++ b/core/fpdfapi/page/cpdf_streamcontentparser.cpp
+@@ -674,12 +674,18 @@ void CPDF_StreamContentParser::Handle_BeginImage() {
+   }
+   ReplaceAbbr(dict);
+   RetainPtr<const CPDF_Object> pCSObj;
++  // The name of the color space resource the image refers to, if any. The
++  // dictionary may end up holding a copy of the resource instead of the name.
++  ByteString color_space_resource_name;
+   if (dict->KeyExist("ColorSpace")) {
+     pCSObj = dict->GetDirectObjectFor("ColorSpace");
+     if (pCSObj->IsName()) {
+       ByteString name = pCSObj->GetString();
+       if (name != "DeviceRGB" && name != "DeviceGray" && name != "DeviceCMYK") {
+         pCSObj = FindResourceObj("ColorSpace", name);
++        if (pCSObj) {
++          color_space_resource_name = std::move(name);
++        }
+         if (pCSObj && pCSObj->IsInline()) {
+           dict->SetFor("ColorSpace", pCSObj->Clone());
+         }
+@@ -701,6 +707,10 @@ void CPDF_StreamContentParser::Handle_BeginImage() {
+     }
+   }
+   CPDF_ImageObject* pObj = AddImageFromStream(std::move(pStream), /*name=*/"");
++  if (pObj && !color_space_resource_name.IsEmpty()) {
++    pObj->GetImage()->SetInlineColorSpaceResource(
++        std::move(color_space_resource_name), std::move(pCSObj));
++  }
+   // Record the bounding box of this image, so rendering code can draw it
+   // properly.
+   if (pObj && pObj->GetImage()->IsMask()) {
+-- 
+2.51.2.windows.1
+
