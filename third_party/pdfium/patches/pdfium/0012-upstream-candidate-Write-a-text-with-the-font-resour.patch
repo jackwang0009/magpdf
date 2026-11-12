@@ -1,0 +1,346 @@
+From 6537e3b998d6654e9bf8d229d7c0f2f84ce38eb9 Mon Sep 17 00:00:00 2001
+From: jackwang0009 <93422958+jackwang0009@users.noreply.github.com>
+Date: Thu, 12 Nov 2026 13:56:29 +0800
+Subject: [PATCH] [upstream-candidate] Write a text with the font resource it
+ was parsed with
+
+The generator looked up the resource name of a font by base font name
+and font type (CPDF_PageObjectHolder::FontsMapSearch()). The first font
+of a kind got a new resource, FXF<n>, and every later font with the
+same base font name and type was written with that name as well. Fonts
+that share a base font name are not the same font: they differ in
+encoding, widths, CMap or font program. The texts of all but the first
+one came out with the wrong glyphs:
+
+- two Helvetica fonts, one of them with /Differences in its encoding;
+- two Type0 fonts over one CIDFont name, with different CMaps
+  (Identity-H and UniGB-UCS2-H);
+- three Type0 fonts, each with a font program of its own, whose
+  descendant fonts carry the same /BaseFont (that is where PDFium takes
+  the base font name of a Type0 font from).
+
+A font dictionary that was a direct object of the resources was taken
+for a standard font and replaced by a dictionary with nothing but
+/Type, /Subtype, /BaseFont and /Encoding.
+
+Look the font dictionary up in the /Font resources of the holder
+instead, preferring the name the text was parsed with, the same way
+shadings and graphics state parameter dictionaries are looked up. A
+font dictionary that is an indirect object and not a resource of the
+holder yet is added under a new name. Only a font whose dictionary is
+neither (a stock font, as before; a direct object of the resources of
+another page, as before) still goes by base font name and type.
+
+Fonts keep their resource names this way, so two expectations of
+FPDFEditEmbedderTest change: after a text is removed, the font of the
+text that is left is still called /F2 instead of /FXF1.
+
+Tests: CPDFPageContentGeneratorTest.ProcessFontsWithSameBaseFont.
+pdfium_unittests and pdfium_embeddertests: no new failures.
+
+Verification (ops_diff.py): differences in fonts 4 -> 0 on the public
+test files (bug_781804.pdf, hello_world_2_pages_split_streams.pdf).
+No-diff pages 65/69 -> 67/69 synthetic (text-standard14,
+text-cid-cjk-nonembedded), 384/388 -> 385/388 public
+(hello_world_2_pages_split_streams.pdf page 2: its content streams are
+shared with page 1 and still rewritten along with page 1, which no
+longer shows because the names in them stay valid for page 2).
+
+Co-authored-by: Cursor <cursoragent@cursor.com>
+---
+ .../edit/cpdf_pagecontentgenerator.cpp        | 87 +++++++++++-------
+ core/fpdfapi/edit/cpdf_pagecontentgenerator.h |  5 +
+ .../cpdf_pagecontentgenerator_unittest.cpp    | 91 ++++++++++++++++++-
+ fpdfsdk/fpdf_edit_embeddertest.cpp            | 12 ++-
+ 4 files changed, 151 insertions(+), 44 deletions(-)
+
+diff --git a/core/fpdfapi/edit/cpdf_pagecontentgenerator.cpp b/core/fpdfapi/edit/cpdf_pagecontentgenerator.cpp
+index ab680d2bec..8197a0fb46 100644
+--- a/core/fpdfapi/edit/cpdf_pagecontentgenerator.cpp
++++ b/core/fpdfapi/edit/cpdf_pagecontentgenerator.cpp
+@@ -2134,57 +2134,74 @@ bool CPDF_PageContentGenerator::CanWriteText(const CPDF_TextObject* pTextObj) {
+   return font->IsType1Font() || font->IsTrueTypeFont() || font->IsCIDFont();
+ }
+ 
+-bool CPDF_PageContentGenerator::WriteTextContent(fxcrt::ostringstream* buf,
+-                                                 CPDF_TextObject* pTextObj,
+-                                                 bool force_text_matrix,
+-                                                 WrittenState* written) {
+-  RetainPtr<CPDF_Font> font(pTextObj->GetFont());
+-  if (!font) {
+-    font = CPDF_Font::GetStockFont(document_, "Helvetica");
++ByteString CPDF_PageContentGenerator::GetFontResourceName(
++    const CPDF_TextObject* pTextObj,
++    CPDF_Font* font) const {
++  // A font that is a resource of the holder is written with the name it has
++  // there. Fonts with the same base font and type are not the same font:
++  // they may differ in their encoding, their widths or their font program.
++  RetainPtr<CPDF_Dictionary> font_dict = font->GetMutableFontDict();
++  ByteString name =
++      FindResourceName("Font", font_dict.Get(), pTextObj->GetResourceName());
++  if (!name.IsEmpty()) {
++    return name;
++  }
++  if (!font_dict->IsInline()) {
++    return RealizeResource(font_dict.Get(), "Font");
+   }
+ 
++  // A font dictionary that is not an indirect object, and not a resource of
++  // the holder either. Assume it is a standard font, like the ones
++  // CPDF_Font::GetStockFont() makes, and write one dictionary for all the
++  // texts of the holder that use it.
+   FontData data;
+-  const CPDF_FontEncoding* pEncoding = nullptr;
++  const CPDF_FontEncoding* encoding = nullptr;
+   if (font->IsType1Font()) {
+     data.type = "Type1";
+-    pEncoding = font->AsType1Font()->GetEncoding();
++    encoding = font->AsType1Font()->GetEncoding();
+   } else if (font->IsTrueTypeFont()) {
+     data.type = "TrueType";
+-    pEncoding = font->AsTrueTypeFont()->GetEncoding();
+-  } else if (font->IsCIDFont()) {
+-    data.type = "Type0";
++    encoding = font->AsTrueTypeFont()->GetEncoding();
+   } else {
+-    return false;
++    data.type = "Type0";
+   }
+   data.baseFont = font->GetBaseFontName();
++  std::optional<ByteString> maybe_name = obj_holder_->FontsMapSearch(data);
++  if (maybe_name.has_value()) {
++    return maybe_name.value();
++  }
++  auto standard_font_dict = document_->New<CPDF_Dictionary>();
++  standard_font_dict->SetNewFor<CPDF_Name>("Type", "Font");
++  standard_font_dict->SetNewFor<CPDF_Name>("Subtype", data.type);
++  standard_font_dict->SetNewFor<CPDF_Name>("BaseFont", data.baseFont);
++  if (encoding) {
++    standard_font_dict->SetFor(
++        "Encoding", encoding->Realize(document_->GetByteStringPool()));
++  }
++  document_->AddIndirectObject(standard_font_dict);
++  name = RealizeResource(standard_font_dict.Get(), "Font");
++  obj_holder_->FontsMapInsert(data, name);
++  return name;
++}
++
++bool CPDF_PageContentGenerator::WriteTextContent(fxcrt::ostringstream* buf,
++                                                 CPDF_TextObject* pTextObj,
++                                                 bool force_text_matrix,
++                                                 WrittenState* written) {
++  RetainPtr<CPDF_Font> font(pTextObj->GetFont());
++  if (!font) {
++    font = CPDF_Font::GetStockFont(document_, "Helvetica");
++  }
++  if (!font->IsType1Font() && !font->IsTrueTypeFont() && !font->IsCIDFont()) {
++    return false;
++  }
+ 
+   const CFX_Matrix& matrix = pTextObj->GetTextMatrix();
+   if (force_text_matrix || !matrix.IsIdentity()) {
+     WriteMatrix(*buf, matrix) << " Tm ";
+   }
+ 
+-  ByteString dict_name;
+-  std::optional<ByteString> maybe_name = obj_holder_->FontsMapSearch(data);
+-  if (maybe_name.has_value()) {
+-    dict_name = std::move(maybe_name.value());
+-  } else {
+-    RetainPtr<const CPDF_Object> pIndirectFont = font->GetFontDict();
+-    if (pIndirectFont->IsInline()) {
+-      // In this case we assume it must be a standard font
+-      auto font_dict = document_->New<CPDF_Dictionary>();
+-      font_dict->SetNewFor<CPDF_Name>("Type", "Font");
+-      font_dict->SetNewFor<CPDF_Name>("Subtype", data.type);
+-      font_dict->SetNewFor<CPDF_Name>("BaseFont", data.baseFont);
+-      if (pEncoding) {
+-        font_dict->SetFor("Encoding",
+-                          pEncoding->Realize(document_->GetByteStringPool()));
+-      }
+-      document_->AddIndirectObject(font_dict);
+-      pIndirectFont = std::move(font_dict);
+-    }
+-    dict_name = RealizeResource(std::move(pIndirectFont), "Font");
+-    obj_holder_->FontsMapInsert(data, dict_name);
+-  }
++  ByteString dict_name = GetFontResourceName(pTextObj, font.Get());
+   pTextObj->SetResourceName(dict_name);
+ 
+   *buf << "/" << PDF_NameEncode(dict_name) << " ";
+diff --git a/core/fpdfapi/edit/cpdf_pagecontentgenerator.h b/core/fpdfapi/edit/cpdf_pagecontentgenerator.h
+index 05f8e2b4c6..a5c339b1a4 100644
+--- a/core/fpdfapi/edit/cpdf_pagecontentgenerator.h
++++ b/core/fpdfapi/edit/cpdf_pagecontentgenerator.h
+@@ -24,6 +24,7 @@ class CPDF_Color;
+ class CPDF_ColorSpace;
+ class CPDF_ContentMarks;
+ class CPDF_Document;
++class CPDF_Font;
+ class CPDF_FormObject;
+ class CPDF_Image;
+ class CPDF_ImageObject;
+@@ -195,6 +196,10 @@ class CPDF_PageContentGenerator {
+                         CPDF_TextObject* pTextObj,
+                         bool force_text_matrix,
+                         WrittenState* written);
++  // Returns the name of the /Font resource that is `font`, the font of
++  // `pTextObj`, adding the font to the resources when it is not there.
++  ByteString GetFontResourceName(const CPDF_TextObject* pTextObj,
++                                 CPDF_Font* font) const;
+   // Whether the font of `pTextObj` can be written back. Type3 fonts cannot:
+   // their glyphs are arbitrary content streams. A missing font falls back
+   // to Helvetica, which can be written.
+diff --git a/core/fpdfapi/edit/cpdf_pagecontentgenerator_unittest.cpp b/core/fpdfapi/edit/cpdf_pagecontentgenerator_unittest.cpp
+index 36a75cbf7a..2a8dbead44 100644
+--- a/core/fpdfapi/edit/cpdf_pagecontentgenerator_unittest.cpp
++++ b/core/fpdfapi/edit/cpdf_pagecontentgenerator_unittest.cpp
+@@ -1558,9 +1558,9 @@ TEST_F(CPDFPageContentGeneratorTest, GraphicsStateInTextClipGroup) {
+       "q\n"
+       "0 0 0 RG 0 0 0 rg 1 w 0 J 0 j\n"
+       "/FXE1 gs q BT 0 g 0 G 3 w 1 J 1 j 2 M [2 1] 0 d .5 i /Saturation ri "
+-      "1 0 0 1 10 20 Tm /FXF1 12 Tf 2 Tc 1 Tw 7 Tr [<41>] TJ "
++      "1 0 0 1 10 20 Tm /F1 12 Tf 2 Tc 1 Tw 7 Tr [<41>] TJ "
+       "0 g 0 G 1 w 0 J 0 j 10 M [] 0 d 1 i /RelativeColorimetric ri "
+-      "1 0 0 1 50 20 Tm /FXF1 12 Tf 0 Tc 0 Tw 7 Tr [<42>] TJ ET\n"
++      "1 0 0 1 50 20 Tm /F1 12 Tf 0 Tc 0 Tw 7 Tr [<42>] TJ ET\n"
+       "q 0 g 0 G 1 w 0 J 0 j 10 M [] 0 d 1 i /RelativeColorimetric ri "
+       "0 0 100 100 re f Q\n"
+       " Q\n"
+@@ -1576,9 +1576,9 @@ TEST_F(CPDFPageContentGeneratorTest, GraphicsStateInTextClipGroup) {
+       "q\n"
+       "0 0 0 RG 0 0 0 rg 1 w 0 J 0 j\n"
+       "/FXE1 gs q BT 0 g 0 G 3 w 1 J 1 j 2 M [2 1] 0 d .5 i /Saturation ri "
+-      "/FXE2 gs 1 0 0 1 10 20 Tm /FXF1 12 Tf 2 Tc 1 Tw 7 Tr [<41>] TJ "
++      "/FXE2 gs 1 0 0 1 10 20 Tm /F1 12 Tf 2 Tc 1 Tw 7 Tr [<41>] TJ "
+       "/FXE1 gs 0 g 0 G 1 w 0 J 0 j 10 M [] 0 d 1 i /RelativeColorimetric ri "
+-      "1 0 0 1 50 20 Tm /FXF1 12 Tf 0 Tc 0 Tw 7 Tr [<42>] TJ ET\n"
++      "1 0 0 1 50 20 Tm /F1 12 Tf 0 Tc 0 Tw 7 Tr [<42>] TJ ET\n"
+       "q /FXE1 gs 0 g 0 G 1 w 0 J 0 j 10 M [] 0 d 1 i "
+       "/RelativeColorimetric ri 0 0 100 100 re f Q\n"
+       " Q\n"
+@@ -1593,6 +1593,89 @@ TEST_F(CPDFPageContentGeneratorTest, GraphicsStateInTextClipGroup) {
+   EXPECT_THAT(GraphicsResourceNames(other_path), IsEmpty());
+ }
+ 
++TEST_F(CPDFPageContentGeneratorTest, ProcessFontsWithSameBaseFont) {
++  auto doc = std::make_unique<CPDF_TestDocument>();
++  doc->CreateNewDoc();
++  auto resources = doc->New<CPDF_Dictionary>();
++  auto fonts = resources->SetNewFor<CPDF_Dictionary>("Font");
++
++  // Three fonts that are Helvetica, each with an encoding of its own. The
++  // last one is a direct object of the resources.
++  auto plain_font = doc->NewIndirect<CPDF_Dictionary>();
++  plain_font->SetNewFor<CPDF_Name>("Type", "Font");
++  plain_font->SetNewFor<CPDF_Name>("Subtype", "Type1");
++  plain_font->SetNewFor<CPDF_Name>("BaseFont", "Helvetica");
++  plain_font->SetNewFor<CPDF_Name>("Encoding", "WinAnsiEncoding");
++  fonts->SetNewFor<CPDF_Reference>("F1", doc.get(), plain_font->GetObjNum());
++
++  auto bullet_font = doc->NewIndirect<CPDF_Dictionary>();
++  bullet_font->SetNewFor<CPDF_Name>("Type", "Font");
++  bullet_font->SetNewFor<CPDF_Name>("Subtype", "Type1");
++  bullet_font->SetNewFor<CPDF_Name>("BaseFont", "Helvetica");
++  auto encoding = bullet_font->SetNewFor<CPDF_Dictionary>("Encoding");
++  encoding->SetNewFor<CPDF_Name>("BaseEncoding", "WinAnsiEncoding");
++  auto differences = encoding->SetNewFor<CPDF_Array>("Differences");
++  differences->AppendNew<CPDF_Number>(97);
++  differences->AppendNew<CPDF_Name>("bullet");
++  fonts->SetNewFor<CPDF_Reference>("F2", doc.get(), bullet_font->GetObjNum());
++
++  auto direct_font = fonts->SetNewFor<CPDF_Dictionary>("F3");
++  direct_font->SetNewFor<CPDF_Name>("Type", "Font");
++  direct_font->SetNewFor<CPDF_Name>("Subtype", "Type1");
++  direct_font->SetNewFor<CPDF_Name>("BaseFont", "Helvetica");
++  direct_font->SetNewFor<CPDF_Name>("Encoding", "MacRomanEncoding");
++
++  RetainPtr<CPDF_Page> page =
++      CreateParsedPage(doc.get(), resources,
++                       "BT /F1 12 Tf 1 0 0 1 10 20 Tm (a) Tj "
++                       "/F2 12 Tf 1 0 0 1 10 40 Tm (a) Tj "
++                       "/F3 12 Tf 1 0 0 1 10 60 Tm (a) Tj ET\n");
++  ASSERT_EQ(3u, page->GetPageObjectCount());
++
++  // Each text is written with the font it has, under the name the font has.
++  {
++    CPDF_PageContentGenerator generator(page.Get());
++    fxcrt::ostringstream buf;
++    for (size_t i = 0; i < 3; ++i) {
++      TestProcessPageObject(&generator, &buf, page->GetPageObjectByIndex(i));
++    }
++    EXPECT_EQ(
++        "q 0 g 0 G BT 1 0 0 1 10 20 Tm /F1 12 Tf 0 Tr [<61>] TJ ET Q\n"
++        "q 0 g 0 G BT 1 0 0 1 10 40 Tm /F2 12 Tf 0 Tr [<61>] TJ ET Q\n"
++        "q 0 g 0 G BT 1 0 0 1 10 60 Tm /F3 12 Tf 0 Tr [<61>] TJ ET Q\n",
++        ByteString(buf));
++  }
++  using testing::ElementsAre;
++  EXPECT_THAT(fonts->GetKeys(), ElementsAre("F1", "F2", "F3"));
++
++  // On a page without those resources, the fonts that are indirect objects
++  // become resources of that page, one each. The font that is a direct
++  // object of other resources is taken for a standard font, as before.
++  RetainPtr<CPDF_Page> other_page = CreateParsedPage(doc.get(), nullptr, "");
++  {
++    CPDF_PageContentGenerator generator(other_page.Get());
++    fxcrt::ostringstream buf;
++    for (size_t i = 0; i < 3; ++i) {
++      TestProcessPageObject(&generator, &buf, page->GetPageObjectByIndex(i));
++    }
++    EXPECT_EQ(
++        "q 0 g 0 G BT 1 0 0 1 10 20 Tm /FXF1 12 Tf 0 Tr [<61>] TJ ET Q\n"
++        "q 0 g 0 G BT 1 0 0 1 10 40 Tm /FXF2 12 Tf 0 Tr [<61>] TJ ET Q\n"
++        "q 0 g 0 G BT 1 0 0 1 10 60 Tm /FXF3 12 Tf 0 Tr [<61>] TJ ET Q\n",
++        ByteString(buf));
++  }
++  RetainPtr<const CPDF_Dictionary> other_fonts =
++      other_page->GetResources()->GetDictFor("Font");
++  ASSERT_TRUE(other_fonts);
++  EXPECT_EQ(plain_font, other_fonts->GetDictFor("FXF1"));
++  EXPECT_EQ(bullet_font, other_fonts->GetDictFor("FXF2"));
++  RetainPtr<const CPDF_Dictionary> standard_font =
++      other_fonts->GetDictFor("FXF3");
++  ASSERT_TRUE(standard_font);
++  EXPECT_NE(direct_font, standard_font);
++  EXPECT_EQ("Helvetica", standard_font->GetNameFor("BaseFont"));
++}
++
+ TEST_F(CPDFPageContentGeneratorTest, ProcessEmptyForm) {
+   auto doc = std::make_unique<CPDF_TestDocument>();
+   doc->CreateNewDoc();
+diff --git a/fpdfsdk/fpdf_edit_embeddertest.cpp b/fpdfsdk/fpdf_edit_embeddertest.cpp
+index 43beafcd48..ebd2eeac4c 100644
+--- a/fpdfsdk/fpdf_edit_embeddertest.cpp
++++ b/fpdfsdk/fpdf_edit_embeddertest.cpp
+@@ -1260,9 +1260,10 @@ TEST_F(FPDFEditEmbedderTest, RemoveTextObject) {
+   ASSERT_TRUE(FPDF_SaveAsCopy(document(), this, 0));
+   VerifySavedDocumentWithDisplayList("hello_world_removed_hello_world");
+ 
+-  // Verify removed/renamed resources are no longer there.
++  // Verify the font of the removed text is no longer there, and the font of
++  // the remaining text still has its name.
+   EXPECT_THAT(GetString(), Not(HasSubstr("/F1")));
+-  EXPECT_THAT(GetString(), Not(HasSubstr("/F2")));
++  EXPECT_THAT(GetString(), HasSubstr("/F2"));
+   EXPECT_THAT(GetString(), Not(HasSubstr("/Times-Roman")));
+ }
+ 
+@@ -1312,10 +1313,11 @@ TEST_F(FPDFEditEmbedderTest,
+   ASSERT_TRUE(saved_page2);
+   VerifySavedRenderingWithDisplayList(saved_page2.get(), "hello_world");
+   std::vector<std::string> split_saved_data = StringSplit(GetString(), '\n');
+-  // Verify removed/renamed resources are in the save PDF the correct number of
+-  // times.
++  // Verify the resources are in the saved PDF the correct number of times:
++  // the font of the removed text is left on page 2 only, the font of the
++  // remaining text is on both pages, under its name.
+   EXPECT_THAT(split_saved_data, Contains(HasSubstr("/F1")).Times(1));
+-  EXPECT_THAT(split_saved_data, Contains(HasSubstr("/F2")).Times(1));
++  EXPECT_THAT(split_saved_data, Contains(HasSubstr("/F2")).Times(2));
+   EXPECT_THAT(split_saved_data, Contains(HasSubstr("/Times-Roman")).Times(1));
+ }
+ 
+-- 
+2.51.2.windows.1
+
