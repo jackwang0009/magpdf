@@ -24,6 +24,15 @@ const MAX_PAGE_LEVEL: usize = 1024;
 /// 数页数时的递归深度上限（PDFium 没有这个上限，靠已访问集合防环；这里再加一道防栈溢出）。
 const MAX_COUNT_DEPTH: usize = 256;
 
+/// 从页树的根走到一页，经过的一层：在哪个节点的 `/Kids` 里、第几项。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct PathStep {
+    /// 节点的对象号。节点的字典直接写在别处（上一层的 `/Kids` 里，或者目录的 `/Pages` 里）时是 0。
+    pub node: u32,
+    /// 在这个节点的 `/Kids` 里的下标。
+    pub kid: usize,
+}
+
 /// 一页的结构信息。
 #[derive(Debug, Clone, PartialEq)]
 pub struct PageInfo {
@@ -36,6 +45,9 @@ pub struct PageInfo {
     pub contents: Contents,
     /// 资源字典（含继承）。
     pub resources: Option<PdfDict>,
+    /// 从页树的根到这一页的路径，根在前。同一个页对象（或者同一个中间节点）可以在页树里出现
+    /// 好几次、占好几个页号，这时对象号相同而路径不同。页树的根自己就是一页时为空。
+    pub path: Vec<PathStep>,
 }
 
 /// `/Contents` 的形态。
@@ -231,7 +243,7 @@ pub fn walk_pages(doc: &PdfDocument) -> Vec<Option<PageInfo>> {
         count,
         fixed_as_page,
     } = counted(doc);
-    let mut found: Vec<Option<(u32, PdfDict)>> = Vec::new();
+    let mut found: Vec<Option<(u32, PdfDict, Vec<PathStep>)>> = Vec::new();
     if let Some((root_number, root)) = pages_root(doc) {
         match array_for(doc, &root, b"Kids") {
             None => {
@@ -243,7 +255,7 @@ pub fn walk_pages(doc: &PdfDocument) -> Vec<Option<PageInfo>> {
                         if guessed {
                             dict.set(b"Type", PdfObject::Name(b"Page".to_vec()));
                         }
-                        found.push(Some((root_number, dict)));
+                        found.push(Some((root_number, dict, Vec::new())));
                     }
                     (NodeType::Branch, _) => {}
                 }
@@ -280,8 +292,18 @@ pub fn walk_pages(doc: &PdfDocument) -> Vec<Option<PageInfo>> {
                         continue;
                     }
                     if dict.get(b"Kids").is_none() {
-                        frame.next += 1;
-                        found.push(Some((number, dict)));
+                        // 每一层的 `next` 此刻正指着路径上的那一项。
+                        let path = stack
+                            .iter()
+                            .map(|f| PathStep {
+                                node: f.number,
+                                kid: f.next,
+                            })
+                            .collect();
+                        if let Some(frame) = stack.last_mut() {
+                            frame.next += 1;
+                        }
+                        found.push(Some((number, dict, path)));
                         continue;
                     }
                     let Some(kids) = array_for(doc, &dict, b"Kids") else {
@@ -308,7 +330,7 @@ pub fn walk_pages(doc: &PdfDocument) -> Vec<Option<PageInfo>> {
         .into_iter()
         .enumerate()
         .map(|(index, node)| {
-            let (number, dict) = node?;
+            let (number, dict, path) = node?;
             let type_fixed = number != 0 && fixed_as_page.contains(&number);
             if !type_fixed && !is_valid_page_dict(doc, &dict) {
                 return None;
@@ -321,6 +343,7 @@ pub fn walk_pages(doc: &PdfDocument) -> Vec<Option<PageInfo>> {
                 dict,
                 contents,
                 resources,
+                path,
             })
         })
         .collect()
