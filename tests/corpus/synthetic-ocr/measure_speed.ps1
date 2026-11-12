@@ -19,6 +19,9 @@
 
   PDF 一次只能给一个文件，所以 PDF 那两项每份文件各起一个进程，进程数是 Runs × 3。
 
+  全部跑完要半个小时左右。每一轮结束都把到这一轮为止的结果写一次；中途被打断，结果文件里是已经
+  跑完的那几轮，runs_completed 是轮数（跑完时等于 runs）。
+
 .EXAMPLE
   pwsh tests/corpus/synthetic-ocr/measure_speed.ps1
   pwsh tests/corpus/synthetic-ocr/measure_speed.ps1 -Only png300,pdf300 -Out out/speed-quick.json
@@ -32,6 +35,8 @@ param(
     [string[]]$Only = @()
 )
 $ErrorActionPreference = 'Stop'
+# 写成 `pwsh measure_speed.ps1 -Only a,b` 另起一个进程时，a,b 进来是一个带逗号的字符串，这里拆开。
+$Only = @($Only | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 $root = Resolve-Path (Join-Path $PSScriptRoot '..\..\..')
 $speed = Join-Path $PSScriptRoot 'out\speed'
 if (-not (Test-Path (Join-Path $speed 'Label.txt'))) {
@@ -129,8 +134,8 @@ foreach ($case in $selected) {
     }
 }
 
-for ($run = 0; $run -lt $Runs; $run++) {
-    Write-Host ("第 {0} 轮 / {1}（{2}）" -f ($run + 1), $Runs, (Get-Date).ToString('HH:mm:ss'))
+# 跑一轮：每个测量项起一个进程（PDF 是每份文件一个），量到的数攒进 $state。
+function Measure-Round([int]$run) {
     foreach ($case in $selected) {
         $st = $state[$case.Name]
         $outDir = Join-Path $st.Dir "run$run"
@@ -167,74 +172,89 @@ for ($run = 0; $run -lt $Runs; $run++) {
     }
 }
 
-$results = @()
-foreach ($case in $selected) {
-    $st = $state[$case.Name]
-    $pageRows = foreach ($page in ($st.Samples.Keys | Sort-Object)) {
-        $s = $st.Samples[$page]
-        $total = Stat ($s | ForEach-Object { $_.total })
-        $acq = Stat $st.Acquires[$page]
-        [ordered]@{
-            page = $page
-            info = $st.Info[$page]
-            acquire_ms = $acq
-            total_ms = $total
-            det_ms = Stat ($s | ForEach-Object { StageTotal $_ })
-            det_infer_ms = Stat ($s | ForEach-Object { $_.det.infer })
-            cls_ms = Stat ($s | ForEach-Object { $_.cls })
-            rec_ms = Stat ($s | ForEach-Object { $_.rec })
-            convert_crop_ms = Stat ($s | ForEach-Object { $_.convert + $_.crop })
-            # 取图加识别：两边的中位数相加，不是逐次相加。
-            acquire_plus_total_median_ms = [Math]::Round($acq.median + $total.median, 1)
-        }
-    }
-    $row = [ordered]@{
-        name = $case.Name
-        note = $case.Note
-        args = ($case.Args -join ' ')
-        models = $st.Models
-        processes = $st.Procs.Count
-        cpu_load_before_percent = Stat $st.Cpu
-        load_ms = [ordered]@{
-            total = Stat ($st.Loads | ForEach-Object { $_.total })
-            runtime = Stat ($st.Loads | ForEach-Object { $_.runtime })
-            det = Stat ($st.Loads | ForEach-Object { $_.det })
-            cls = Stat ($st.Loads | ForEach-Object { $_.cls })
-            rec = Stat ($st.Loads | ForEach-Object { $_.rec })
-        }
-        first_page_ms = Stat ($st.Firsts | ForEach-Object { $_.total })
-        peak_working_set_mb = Stat ($st.Procs | ForEach-Object { $_.PeakMb })
-        process_wall_ms = Stat ($st.Procs | ForEach-Object { $_.WallMs })
-        process_cpu_ms = Stat ($st.Procs | ForEach-Object { $_.CpuMs })
-        pages = @($pageRows)
-    }
-    $results += $row
-    Write-Host ("{0,-18} {1}（系统 CPU 占用中位数 {2}%，{3}–{4}%）" -f $case.Name, $case.Note,
-        $row.cpu_load_before_percent.median, $row.cpu_load_before_percent.min, $row.cpu_load_before_percent.max)
-    foreach ($pr in $pageRows) {
-        Write-Host ("    {0,-36} {1,3} 行  取图 {2,7} ms  识别 {3,8} ms（{4}–{5}，{6} 次）  det {7} / cls {8} / rec {9}" -f `
-            $pr.page, $pr.info.lines, $pr.acquire_ms.median, $pr.total_ms.median, $pr.total_ms.min, $pr.total_ms.max,
-            $pr.total_ms.n, $pr.det_ms.median, $pr.cls_ms.median, $pr.rec_ms.median)
-    }
-    Write-Host ("    首次加载 {0} ms（{1}–{2}），第一页 {3} ms，峰值工作集 {4} MB" -f `
-        $row.load_ms.total.median, $row.load_ms.total.min, $row.load_ms.total.max, $row.first_page_ms.median, $row.peak_working_set_mb.median)
-}
-
 $cpuInfo = Get-CimInstance Win32_Processor | Select-Object -First 1
 $os = Get-CimInstance Win32_OperatingSystem
-$report = [ordered]@{
-    generated = (Get-Date).ToString('yyyy-MM-ddTHH:mm:sszzz')
-    machine = [ordered]@{
-        cpu = $cpuInfo.Name.Trim()
-        cores = $cpuInfo.NumberOfCores
-        logical_processors = $cpuInfo.NumberOfLogicalProcessors
-        memory_gb = [Math]::Round($os.TotalVisibleMemorySize / 1MB, 1)
-        os = "$($os.Caption) $($os.Version)"
-    }
-    cli = "$Cli"
-    runs = $Runs
-    repeat = $Repeat
-    cases = $results
+$machine = [ordered]@{
+    cpu = $cpuInfo.Name.Trim()
+    cores = $cpuInfo.NumberOfCores
+    logical_processors = $cpuInfo.NumberOfLogicalProcessors
+    memory_gb = [Math]::Round($os.TotalVisibleMemorySize / 1MB, 1)
+    os = "$($os.Caption) $($os.Version)"
 }
-$report | ConvertTo-Json -Depth 12 | Set-Content $Out -Encoding utf8
+
+# 把到现在为止量到的数汇总，写成 JSON。每一轮结束都写一次：全部跑完要半个小时左右，中途被打断时
+# 文件里留着已经跑完的那几轮（runs_completed 小于 runs），不会全丢。-Print 时把各项的结果打出来。
+function Save-Report([int]$Done, [switch]$Print) {
+    $results = @()
+    foreach ($case in $selected) {
+        $st = $state[$case.Name]
+        $pageRows = foreach ($page in ($st.Samples.Keys | Sort-Object)) {
+            $s = $st.Samples[$page]
+            $total = Stat ($s | ForEach-Object { $_.total })
+            $acq = Stat $st.Acquires[$page]
+            [ordered]@{
+                page = $page
+                info = $st.Info[$page]
+                acquire_ms = $acq
+                total_ms = $total
+                det_ms = Stat ($s | ForEach-Object { StageTotal $_ })
+                det_infer_ms = Stat ($s | ForEach-Object { $_.det.infer })
+                cls_ms = Stat ($s | ForEach-Object { $_.cls })
+                rec_ms = Stat ($s | ForEach-Object { $_.rec })
+                convert_crop_ms = Stat ($s | ForEach-Object { $_.convert + $_.crop })
+                # 取图加识别：两边的中位数相加，不是逐次相加。
+                acquire_plus_total_median_ms = [Math]::Round($acq.median + $total.median, 1)
+            }
+        }
+        $row = [ordered]@{
+            name = $case.Name
+            note = $case.Note
+            args = ($case.Args -join ' ')
+            models = $st.Models
+            processes = $st.Procs.Count
+            cpu_load_before_percent = Stat $st.Cpu
+            load_ms = [ordered]@{
+                total = Stat ($st.Loads | ForEach-Object { $_.total })
+                runtime = Stat ($st.Loads | ForEach-Object { $_.runtime })
+                det = Stat ($st.Loads | ForEach-Object { $_.det })
+                cls = Stat ($st.Loads | ForEach-Object { $_.cls })
+                rec = Stat ($st.Loads | ForEach-Object { $_.rec })
+            }
+            first_page_ms = Stat ($st.Firsts | ForEach-Object { $_.total })
+            peak_working_set_mb = Stat ($st.Procs | ForEach-Object { $_.PeakMb })
+            process_wall_ms = Stat ($st.Procs | ForEach-Object { $_.WallMs })
+            process_cpu_ms = Stat ($st.Procs | ForEach-Object { $_.CpuMs })
+            pages = @($pageRows)
+        }
+        $results += $row
+        if (-not $Print) { continue }
+        Write-Host ("{0,-18} {1}（系统 CPU 占用中位数 {2}%，{3}–{4}%）" -f $case.Name, $case.Note,
+            $row.cpu_load_before_percent.median, $row.cpu_load_before_percent.min, $row.cpu_load_before_percent.max)
+        foreach ($pr in $pageRows) {
+            Write-Host ("    {0,-36} {1,3} 行  取图 {2,7} ms  识别 {3,8} ms（{4}–{5}，{6} 次）  det {7} / cls {8} / rec {9}" -f `
+                $pr.page, $pr.info.lines, $pr.acquire_ms.median, $pr.total_ms.median, $pr.total_ms.min, $pr.total_ms.max,
+                $pr.total_ms.n, $pr.det_ms.median, $pr.cls_ms.median, $pr.rec_ms.median)
+        }
+        Write-Host ("    首次加载 {0} ms（{1}–{2}），第一页 {3} ms，峰值工作集 {4} MB" -f `
+            $row.load_ms.total.median, $row.load_ms.total.min, $row.load_ms.total.max, $row.first_page_ms.median, $row.peak_working_set_mb.median)
+    }
+    $report = [ordered]@{
+        generated = (Get-Date).ToString('yyyy-MM-ddTHH:mm:sszzz')
+        machine = $machine
+        cli = "$Cli"
+        runs = $Runs
+        runs_completed = $Done
+        repeat = $Repeat
+        cases = $results
+    }
+    # 先写到临时文件再改名：写到一半被打断，也不会留下半截的 JSON。
+    $report | ConvertTo-Json -Depth 12 | Set-Content "$Out.tmp" -Encoding utf8
+    Move-Item -Force "$Out.tmp" $Out
+}
+
+for ($run = 0; $run -lt $Runs; $run++) {
+    Write-Host ("第 {0} 轮 / {1}（{2}）" -f ($run + 1), $Runs, (Get-Date).ToString('HH:mm:ss'))
+    Measure-Round $run
+    Save-Report ($run + 1) -Print:($run + 1 -eq $Runs)
+}
 Write-Host "结果写入 $Out"
