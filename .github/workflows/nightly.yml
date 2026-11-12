@@ -1,0 +1,78 @@
+# 每晚流水线（《工程规范》第 7 节、《测试计划》第 7 节“每晚”、《P0 技术验证计划》V14）：往返测试全量、操作符级比对、
+# 按来源分类的报告页面、和主干基线比较。编辑测试、第二渲染器比对、性能基准落地后各加一个 job。
+#
+# 逻辑都在 scripts/nightly-roundtrip.ps1 里，本机跑的是同一个脚本；这里只准备环境、上传产物。
+# 退步怎么判、基线怎么更新：tests/baselines/README.md。
+#
+# 注意：这个文件写出来之后还没有在 GitHub 上跑过（docs/p0/V14-每晚往返与分类报告.md“没做的和没验的”）。
+name: Nightly
+
+on:
+  schedule:
+    # 北京时间每天 02:00。定时触发只认默认分支上的这个文件。
+    - cron: '0 18 * * *'
+  workflow_dispatch:
+    inputs:
+      fail_on:
+        description: 什么情况算失败。any：有退步就算；alarm：只有到报警线才算；never：只出报告
+        type: choice
+        options:
+          - any
+          - alarm
+          - never
+        default: any
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  roundtrip:
+    name: 往返测试全量与分类报告
+    runs-on: windows-latest
+    # 没有缓存时，发布版 magpdf-cli 的编译占大头；往返测试本身在开发机上是几十秒到几分钟。
+    timeout-minutes: 60
+    env:
+      # 定时触发时没有输入，按 any 算。
+      FAIL_ON: ${{ inputs.fail_on || 'any' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: 拉取 PDFium 预编译库
+        run: pwsh scripts/fetch-pdfium-prebuilt.ps1
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.99.1
+      - uses: Swatinem/rust-cache@v2
+      - name: 构建发布版 magpdf-cli（pdfium.dll 会被复制到它旁边）
+        run: cargo build --release --locked -p magpdf-cli
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 安装测试用的 Python 包
+        run: python -m pip install -r tests/requirements-test.txt
+      - name: 报告工具的单元测试
+        run: python -X dev -m unittest discover -s tests/corpus/tools -p "test_*.py"
+      - name: PDFium 公开测试集的缓存
+        uses: actions/cache@v4
+        with:
+          path: tests/out/corpus-cache/pdfium
+          # 版本和内容指纹都固定在取文件的脚本里，脚本变了缓存就作废。
+          key: public-pdfium-${{ hashFiles('scripts/fetch-public-corpus.ps1') }}
+      - name: 取 PDFium 公开测试集（chromium/8138，core.autocrlf=false，核对内容指纹）
+        run: pwsh scripts/fetch-public-corpus.ps1
+      - name: 往返测试、报告页面、和基线比较
+        run: pwsh scripts/nightly-roundtrip.ps1 -RequireBaseline -FailOn $env:FAIL_ON
+      - name: 上传报告页面和 JSON
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: roundtrip-report-${{ github.run_number }}
+          # report.html 要和各语料集的 diff 目录放在一起才点得开原图。保存结果（saved）不传。
+          path: |
+            tests/out/nightly
+            !tests/out/nightly/*/saved/**
+          if-no-files-found: warn
+          retention-days: 30
