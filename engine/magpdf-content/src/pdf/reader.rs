@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use super::filter::apply_filter_chain;
 use super::lexer::Lexer;
-use super::lexer::find;
+use super::lexer::{find, rfind};
 use super::object::{PdfDict, PdfObject};
 use super::{Error, Result};
 
@@ -95,8 +95,10 @@ impl PdfDocument {
         }
     }
 
+    /// 取**最后一个** `startxref`。增量更新过的文件里有好几个，前面的指向旧版本的交叉引用，
+    /// 按它读会拿到被替换之前的对象（首轮取的是第一个，增量更新的文件因此读到了旧内容流）。
     fn find_startxref(&self) -> Option<usize> {
-        let startxref = find(&self.data, b"startxref")?;
+        let startxref = rfind(&self.data, b"startxref")?;
         let mut lx = Lexer::at(&self.data, startxref + b"startxref".len());
         lx.skip_ws();
         let word = lx.read_word();

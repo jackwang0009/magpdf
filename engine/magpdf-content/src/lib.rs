@@ -7,11 +7,11 @@
 //! - [`map`]：按 PDFium `CPDF_StreamContentParser` 的规则，把操作符与 PDFium 的页面对象一一对应。
 //! - [`rewrite`]：只重写改过的对象，按方案 2.3 的生成规则处理状态泄漏、剪切共用、文字块。
 //!
-//! 设计取舍与对应规则见 `docs/p0/V17-自研无损内容流读写层（第一轮）.md`。
+//! 实验（往返、随机修改、回退、像素比对）在 `magpdf-cli` 的 `content` 模块里，这里只有读写本身。
+//! 设计取舍、对应规则和实验结果见 `docs/p0/V17-自研无损内容流读写层原型.md`。
 #![forbid(unsafe_code)]
 
 pub mod content;
-pub mod experiment;
 pub mod map;
 pub mod pdf;
 pub mod rewrite;

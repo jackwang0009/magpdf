@@ -56,6 +56,18 @@ pub fn pair_pages(doc: &PdfDocument, pdfium: &[pdfium_sys::PageGeometry]) -> Vec
     out
 }
 
+/// 核对页树里的一页与 PDFium 的同序号页是不是同一页（旋转、尺寸）。不一致时返回原因。
+pub fn check_page(
+    doc: &PdfDocument,
+    info: &PageInfo,
+    g: &pdfium_sys::PageGeometry,
+) -> Result<(), String> {
+    match check(doc, info, g) {
+        (true, _) => Ok(()),
+        (false, why) => Err(why.unwrap_or_else(|| "页面几何不一致".to_owned())),
+    }
+}
+
 fn check(
     doc: &PdfDocument,
     info: &PageInfo,
