@@ -1,0 +1,86 @@
+From 9c541c2ca4c14278e4fdcca2f35ba8a049352ecb Mon Sep 17 00:00:00 2001
+From: jackwang0009 <93422958+jackwang0009@users.noreply.github.com>
+Date: Thu, 12 Nov 2026 10:28:48 +0800
+Subject: [PATCH] [upstream-candidate] Update embedder test expectations for
+ device colors
+
+Writing colors in their own color space changes two things the embedder
+tests pin down:
+
+- FPDFEditEmbedderTest.Bug1549: the DeviceCMYK rectangle now keeps its
+  color after the content stream is regenerated and saved, which is what
+  the TODO for crbug.com/42270554 asked for. Compare the saved document
+  against bug_1549_removed and drop bug_1549_incorrect.dump.txt.
+- FPDFSaveWithFontSubsetEmbedderTest.SaveWith{,out}SubsetWithNewText:
+  the new text's black is written as `0 g 0 G` instead of
+  `0 0 0 rg 0 0 0 RG`, so the saved files are 2 bytes smaller.
+
+These should have been part of "Write colors in their own color space";
+the embedder tests were not run for that change.
+
+Tests: pdfium_embeddertests passes except FPDFAnnotEmbedderTest.
+SetFontColor, which also fails without any of these changes on a machine
+whose fallback font is not Noto Sans CJK JP.
+
+Co-authored-by: Cursor <cursoragent@cursor.com>
+---
+ fpdfsdk/fpdf_edit_embeddertest.cpp                         | 5 ++---
+ fpdfsdk/fpdf_save_embeddertest.cpp                         | 4 ++--
+ .../resources/embedder_tests/bug_1549_incorrect.dump.txt   | 7 -------
+ 3 files changed, 4 insertions(+), 12 deletions(-)
+ delete mode 100644 testing/resources/embedder_tests/bug_1549_incorrect.dump.txt
+
+diff --git a/fpdfsdk/fpdf_edit_embeddertest.cpp b/fpdfsdk/fpdf_edit_embeddertest.cpp
+index bea12c8a6e..43beafcd48 100644
+--- a/fpdfsdk/fpdf_edit_embeddertest.cpp
++++ b/fpdfsdk/fpdf_edit_embeddertest.cpp
+@@ -745,9 +745,8 @@ TEST_F(FPDFEditEmbedderTest, Bug1549) {
+ 
+   ASSERT_TRUE(FPDF_SaveAsCopy(document(), this, 0));
+ 
+-  // TODO(crbug.com/42270554): Color should be 0xff00aeef instead of black,
+-  // TODO(crbug.com/42270554): Should be "bug_1549_removed".
+-  VerifySavedDocumentWithDisplayList("bug_1549_incorrect");
++  // The DeviceCMYK fill color survives the content stream regeneration.
++  VerifySavedDocumentWithDisplayList("bug_1549_removed");
+ }
+ 
+ TEST_F(FPDFEditEmbedderTest, SetText) {
+diff --git a/fpdfsdk/fpdf_save_embeddertest.cpp b/fpdfsdk/fpdf_save_embeddertest.cpp
+index 4901d5738e..f521f71147 100644
+--- a/fpdfsdk/fpdf_save_embeddertest.cpp
++++ b/fpdfsdk/fpdf_save_embeddertest.cpp
+@@ -427,7 +427,7 @@ TEST_F(FPDFSaveWithFontSubsetEmbedderTest, SaveWithoutSubsetWithNewText) {
+   // font.
+   EXPECT_TRUE(FPDF_SaveAsCopy(document(), this, 0));
+   EXPECT_THAT(GetString(), StartsWith("%PDF-1.7\r\n"));
+-  EXPECT_EQ(5004u, GetString().size());
++  EXPECT_EQ(5002u, GetString().size());
+ 
+   // Verify the text is visible.
+   VerifySavedDocumentWithDisplayList("save_new_text");
+@@ -455,7 +455,7 @@ TEST_F(FPDFSaveWithFontSubsetEmbedderTest, SaveWithSubsetWithNewText) {
+   // font, since text only contains a subset of the characters in the test font.
+   EXPECT_TRUE(FPDF_SaveAsCopy(document(), this, FPDF_SUBSET_NEW_FONTS));
+   EXPECT_THAT(GetString(), StartsWith("%PDF-1.7\r\n"));
+-  EXPECT_EQ(4454u, GetString().size());
++  EXPECT_EQ(4452u, GetString().size());
+ 
+   // Verify the text is visible.
+   VerifySavedDocumentWithDisplayList("save_new_text");
+diff --git a/testing/resources/embedder_tests/bug_1549_incorrect.dump.txt b/testing/resources/embedder_tests/bug_1549_incorrect.dump.txt
+deleted file mode 100644
+index eb26afd950..0000000000
+--- a/testing/resources/embedder_tests/bug_1549_incorrect.dump.txt
++++ /dev/null
+@@ -1,7 +0,0 @@
+-SaveState
+-SetBaseClip [0,0,100,150]
+-SetClip_PathFill rule=winding matrix=none points=[move(0.0000,150.0000) line(0.0000,0.0000) line(100.0000,0.0000) line(100.0000,150.0000) line(0.0000,150.0000,close)]
+-SaveState
+-FillRect [30,90,80,130] color=0xff000000
+-RestoreState
+-RestoreState
+-- 
+2.51.2.windows.1
+
