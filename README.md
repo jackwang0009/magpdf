@@ -62,6 +62,9 @@ python -m pip install -r tests/requirements-test.txt
 python tests/corpus/perf/generate.py
 # 引擎一侧各步各花多久（加载页面、渲染瓦片、列对象、保真校验、挪一个对象），要用发布版
 cargo run --release -p magpdf-cli -- perf tests/out/perf/drawing-5000-objects.pdf
+# 界面一侧：首屏、平移缩放、悬停点选、修改到重画完（发布版程序），环境变量见 apps/desktop/e2e/perf.mjs 开头；
+# 结果怎么读见 docs/p0/V05-渲染与编辑性能.md
+pnpm --filter @magpdf/desktop perf
 ```
 
 代码检查：`cargo fmt --all --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo deny check`、
