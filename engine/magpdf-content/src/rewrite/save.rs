@@ -11,13 +11,16 @@
 //! - 上面这些都做不到（比如页字典在对象流里而文件的交叉引用是表，往上也没有能改的节点）：这一页
 //!   不写，记在 [`SavedDocument::rejected`] 里，由调用方交给 PDFium；
 //! - 新内容是空的：写成不带过滤器、`/Length 0` 的流。压缩过的空内容解出来是空的，PDFium 这时会退回去
-//!   用压缩后的原始字节当内容流。
+//!   用压缩后的原始字节当内容流；
+//! - 一条内容流的字典带着 XObject 的记号（它同时被当成表单 XObject 用）：也不原地替换，另建一条；
+//! - 一条内容流原来没能完整解码（`/Filter` 里有不认得的过滤器，或者解码失败、PDFium 退回去用了原始
+//!   字节）：这一页不写。手里的字节只是 PDFium 的看法，换掉原来的流会让别的阅读器看到另一份内容。
 //!
 //! 一页要么全部写进去，要么完全不动：先检查，检查通过才登记。
 //!
-//! 没有发现的情况：内容流同时被别的地方引用（比如又被当成表单 XObject），原地替换会连带改到那里。
-//! 页对象出现了几次是按 PDFium 认到的页数来数的（`/Count` 比实际的少时，后面那些 PDFium 看不到的
-//! 位置不算）。
+//! 没有发现的情况：内容流同时被别的地方引用、而字典上看不出来（没有 `/Type`、`/Subtype`），原地替换会
+//! 连带改到那里。页对象出现了几次是按 PDFium 认到的页数来数的（`/Count` 比实际的少时，后面那些 PDFium
+//! 看不到的位置不算）。
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -380,7 +383,22 @@ fn check<'u>(
             }
             return Err("新内容落在 /Contents 里不是流的那一项上".to_owned());
         };
+        let original = match doc.object(*number) {
+            Some(PdfObject::Stream(stream)) => Some(stream),
+            _ => None,
+        };
+        // 原来的流没能完整解码（有不认得的过滤器、解码失败退回了原始字节……）：手里的字节只是 PDFium
+        // 对这条流的看法，配上新的 /Filter 写回去，别的读得懂原来那条流的阅读器看到的内容就变了。
+        if let Some(stream) = &original
+            && !doc.decode_stream_checked(stream).1
+        {
+            return Err(format!(
+                "/Contents 的第 {} 项没能完整解码（过滤器不认得，或者解码失败），不能照解出来的样子写回去",
+                index + 1
+            ));
+        }
         let in_place = stream_uses.get(number).copied().unwrap_or(0) == 1
+            && !original.as_ref().is_some_and(|s| also_an_xobject(doc, s))
             && writer.check_replace(*number, true).is_ok();
         new_objects |= !in_place;
         writes.push((index, *number, data.as_slice(), in_place));
@@ -431,6 +449,17 @@ fn check<'u>(
         page,
         slots,
     }))
+}
+
+/// 这条流的字典带着 XObject 的记号（`/Type /XObject`，或者有 `/Subtype`）：它多半还被哪个资源字典当成
+/// 表单或图像引用着（见过页面的 `/Contents` 和页面资源里的 `/X1` 是同一个对象的文件）。原地替换会连带
+/// 改到那里，所以这样的流一律另建一条。只看字典上的记号，没有去数整份文件里有谁引用它。
+fn also_an_xobject(doc: &PdfDocument, stream: &PdfStreamRef) -> bool {
+    stream.dict.get(b"Subtype").is_some()
+        || matches!(
+            doc.resolve(stream.dict.get(b"Type")),
+            Some(PdfObject::Name(name)) if name == b"XObject"
+        )
 }
 
 /// 新的内容流对象：沿用原来的流字典里别的键，过滤器相关的键按新数据重写。
@@ -722,6 +751,77 @@ mod tests {
         assert_eq!(saved.rejected.len(), 1);
         assert!(saved.rejected[0].1.contains("不是流"));
         assert_eq!(saved.bytes, doc.bytes(), "写不了的页一个字节都不动");
+    }
+
+    #[test]
+    fn a_content_stream_that_is_also_a_form_xobject_gets_a_new_object() {
+        // 页面的 /Contents 和页面资源里的 /X1 是同一个对象（pdf.js 测试文件 issue18894.pdf 的写法）：
+        // 原地改写会连表单那一份一起改掉。
+        const FORM: &str = "<< /Type /XObject /Subtype /Form /BBox [0 0 100 100] /Length 3 >>\nstream\nq Q\nendstream";
+        let raw = build(
+            &[
+                (1, CATALOG),
+                (2, PAGES),
+                (
+                    3,
+                    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Contents 4 0 R \
+                     /Resources << /XObject << /X1 4 0 R >> >> >>",
+                ),
+                (4, FORM),
+            ],
+            "",
+        );
+        let doc = PdfDocument::load(raw.clone()).unwrap();
+        let pages = walk_pages(&doc);
+        let saved = save_incremental(&doc, &pages, &[update(0, &[Some(b"0 g")])], true).unwrap();
+        assert!(saved.rejected.is_empty());
+        assert_eq!(saved.pages[&0], [Some(5)], "另建一条流");
+        assert_eq!(
+            (
+                saved.streams_written,
+                saved.deshared_streams,
+                saved.page_dicts_rewritten
+            ),
+            (1, 1, 1)
+        );
+        assert_eq!(reread(&saved.bytes), [b"0 g".to_vec()]);
+        // 表单那一份还是原来的内容，页面资源还指着它。
+        let again = PdfDocument::load(saved.bytes).unwrap();
+        let Some(PdfObject::Stream(form)) = again.object(4) else {
+            panic!("对象 4 应当还是流");
+        };
+        assert_eq!(again.decode_stream(&form), b"q Q");
+        let page = again.object(3).unwrap();
+        let dict = page.as_dict().unwrap();
+        assert_eq!(dict.get(b"Contents"), Some(&PdfObject::Ref(5, 0)));
+        assert!(dict.get(b"Resources").is_some());
+    }
+
+    #[test]
+    fn a_stream_that_was_not_fully_decoded_is_not_rewritten() {
+        // /Filter 里有这边不认得的过滤器（PDFium 没编进 Brotli 时的情况）：手里的“内容”是没解开的数据，
+        // 不能配上 /FlateDecode 写回去。
+        for filter in ["/BrotliDecode", "[/ASCIIHexDecode /BrotliDecode]", "/Crypt"] {
+            let stream = format!("<< /Length 4 /Filter {filter} >>\nstream\n7120\nendstream");
+            let raw = build(&[(1, CATALOG), (2, PAGES), (3, PAGE), (4, &stream)], "");
+            let doc = PdfDocument::load(raw.clone()).unwrap();
+            let pages = walk_pages(&doc);
+            // 不改动、原样写回（--rewrite-all 的做法）也一样不行。
+            let same = Content::read(&doc, &pages[0].as_ref().unwrap().contents).data;
+            let saved = save_incremental(&doc, &pages, &[update(0, &[Some(&same)])], true).unwrap();
+            assert_eq!(saved.rejected.len(), 1, "{filter}");
+            assert!(saved.rejected[0].1.contains("没能完整解码"), "{filter}");
+            assert_eq!(saved.bytes, raw, "写不了的页一个字节都不动（{filter}）");
+        }
+        // 认得的过滤器照常写。
+        let stream = "<< /Length 6 /Filter /ASCIIHexDecode >>\nstream\n712051\nendstream";
+        let raw = build(&[(1, CATALOG), (2, PAGES), (3, PAGE), (4, stream)], "");
+        let doc = PdfDocument::load(raw).unwrap();
+        let pages = walk_pages(&doc);
+        assert_eq!(reread(doc.bytes()), [b"q Q".to_vec()]);
+        let saved = save_incremental(&doc, &pages, &[update(0, &[Some(b"0 g")])], true).unwrap();
+        assert!(saved.rejected.is_empty());
+        assert_eq!(reread(&saved.bytes), [b"0 g".to_vec()]);
     }
 
     #[test]

@@ -22,7 +22,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
-use super::filter::decode_like_pdfium;
+use super::filter::{decode_like_pdfium, decode_like_pdfium_checked};
 use super::lexer::{Lexer, atoi64, atoui, direct_length};
 use super::object::{PdfDict, PdfObject, PdfStreamRef};
 use super::{Error, Result};
@@ -1067,7 +1067,13 @@ impl PdfDocument {
 
     /// 照 PDFium 的容错规则解码一条流（见 [`decode_like_pdfium`]）。
     pub fn decode_stream(&self, stream: &PdfStreamRef) -> Vec<u8> {
-        decode_like_pdfium(
+        self.decode_stream_checked(stream).0
+    }
+
+    /// 同 [`Self::decode_stream`]，另外说明解码是不是完整的（见
+    /// [`crate::pdf::decode_like_pdfium_checked`]）。
+    pub fn decode_stream_checked(&self, stream: &PdfStreamRef) -> (Vec<u8>, bool) {
+        decode_like_pdfium_checked(
             &stream.data,
             self.resolve(stream.dict.get(b"Filter")).as_ref(),
             self.resolve(stream.dict.get(b"DecodeParms")).as_ref(),

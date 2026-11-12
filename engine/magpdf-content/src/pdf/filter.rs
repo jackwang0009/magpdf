@@ -124,23 +124,41 @@ pub fn decode_like_pdfium(
     parms: Option<&PdfObject>,
     resolve: &dyn Fn(&PdfObject) -> Option<PdfObject>,
 ) -> Vec<u8> {
+    decode_like_pdfium_checked(data, filter, parms, resolve).0
+}
+
+/// 同 [`decode_like_pdfium`]，另外说明这次解码是不是**完整**的：`/Filter` 里的每一个过滤器都认得、
+/// 都解成功了（没有过滤器也算）。
+///
+/// 不完整时，PDFium 用的那一串字节（返回的第一项）只是它自己的看法：停在不认得的过滤器前面、解码失败后
+/// 退回原始字节……别的阅读器（比如支持 Brotli 的）读同一条流，得到的可以是另一串。写回层不能拿这样的
+/// 字节配上一个新的 `/Filter` 把原来的流换掉，见 `rewrite::save`。
+///
+/// 没有管的一种情况：Flate 数据损坏时 PDFium 用已经解出来的那一部分，这里照样算完整。
+pub fn decode_like_pdfium_checked(
+    data: &[u8],
+    filter: Option<&PdfObject>,
+    parms: Option<&PdfObject>,
+    resolve: &dyn Fn(&PdfObject) -> Option<PdfObject>,
+) -> (Vec<u8>, bool) {
     if data.is_empty() {
-        return Vec::new();
+        return (Vec::new(), true);
     }
+    let raw = |complete: bool| (data.to_vec(), complete);
     let mut decoders: Vec<(Vec<u8>, Option<PdfObject>)> = Vec::new();
     match filter {
-        None | Some(PdfObject::Null) => return data.to_vec(),
+        None | Some(PdfObject::Null) => return raw(true),
         Some(PdfObject::Array(items)) => {
             let mut names = Vec::with_capacity(items.len());
             for item in items {
                 match resolve(item) {
                     Some(PdfObject::Name(name)) => names.push(name),
-                    _ => return data.to_vec(),
+                    _ => return raw(false),
                 }
             }
             let text_only = names.len().saturating_sub(1);
             if names[..text_only].iter().any(|n| !is_text_decoder(n)) {
-                return data.to_vec();
+                return raw(false);
             }
             let parm_items = match parms {
                 Some(PdfObject::Array(a)) => Some(a),
@@ -160,30 +178,39 @@ pub fn decode_like_pdfium(
                 parms.filter(|p| p.as_dict().is_some()).cloned(),
             ));
         }
-        Some(_) => return data.to_vec(),
+        Some(_) => return raw(false),
     }
 
+    let mut complete = true;
     let mut decoded: Option<Vec<u8>> = None;
     for (name, parm) in &decoders {
         let src: &[u8] = decoded.as_deref().unwrap_or(data);
         let out = match name.as_slice() {
-            b"Crypt" => continue,
+            // PDFium 跳过它；数据要是真的另外加过密，这里看到的就不是明文。
+            b"Crypt" => {
+                complete = false;
+                continue;
+            }
             b"FlateDecode" | b"Fl" => flate_or_lzw(false, src, parm.as_ref()),
             b"LZWDecode" | b"LZW" => flate_or_lzw(true, src, parm.as_ref()),
             b"ASCII85Decode" | b"A85" => Some(a85_decode_pdfium(src).0),
             b"ASCIIHexDecode" | b"AHx" => Some(hex_decode_pdfium(src).0),
             b"RunLengthDecode" | b"RL" => run_length_decode_pdfium(src).map(|r| r.0),
             // 当作图像解码器：到此为止。
-            _ => break,
+            _ => {
+                complete = false;
+                break;
+            }
         };
         match out {
             Some(out) => decoded = Some(out),
-            None => return data.to_vec(),
+            None => return raw(false),
         }
     }
     match decoded {
-        Some(out) if !out.is_empty() => out,
-        _ => data.to_vec(),
+        Some(out) if !out.is_empty() => (out, complete),
+        // 有过滤器而一个字节都没解出来：PDFium 退回去用原始字节，那不是这条流真正的内容。
+        _ => raw(false),
     }
 }
 
@@ -821,5 +848,58 @@ mod tests {
     fn unsupported_filter_is_error() {
         let f = PdfObject::Name(b"DCTDecode".to_vec());
         assert!(apply_filter_chain(b"x", Some(&f), None).is_err());
+    }
+
+    #[test]
+    fn checked_decode_tells_whether_every_filter_was_applied() {
+        let name = |n: &[u8]| PdfObject::Name(n.to_vec());
+        let resolve = |o: &PdfObject| Some(o.clone());
+        let check = |data: &[u8], filter: Option<&PdfObject>| {
+            decode_like_pdfium_checked(data, filter, None, &resolve)
+        };
+        // 没有过滤器、认得的过滤器：完整。
+        assert_eq!(check(b"q Q", None), (b"q Q".to_vec(), true));
+        assert_eq!(
+            check(b"712051>", Some(&name(b"ASCIIHexDecode"))),
+            (b"q Q".to_vec(), true)
+        );
+        let packed = encode_flate(b"0 g");
+        assert_eq!(
+            check(&packed, Some(&name(b"FlateDecode"))),
+            (b"0 g".to_vec(), true)
+        );
+        // 不认得的过滤器：PDFium 停在它前面，用到此为止解出来的数据（一步都没解时是原始字节）。
+        assert_eq!(
+            check(b"\x1b\x51", Some(&name(b"BrotliDecode"))),
+            (b"\x1b\x51".to_vec(), false)
+        );
+        let chain = PdfObject::Array(vec![name(b"ASCIIHexDecode"), name(b"BrotliDecode")]);
+        assert_eq!(check(b"1b51>", Some(&chain)), (b"\x1b\x51".to_vec(), false));
+        // /Crypt 被跳过；/Filter 的写法不对、图像过滤器不在最后：整条按原始字节用。都不算完整。
+        assert_eq!(
+            check(b"q Q", Some(&name(b"Crypt"))),
+            (b"q Q".to_vec(), false)
+        );
+        assert_eq!(
+            check(b"q Q", Some(&PdfObject::Int(1))),
+            (b"q Q".to_vec(), false)
+        );
+        let wrong_order = PdfObject::Array(vec![name(b"DCTDecode"), name(b"ASCIIHexDecode")]);
+        assert_eq!(
+            check(b"712051>", Some(&wrong_order)),
+            (b"712051>".to_vec(), false)
+        );
+        // 有过滤器而什么都没解出来：PDFium 用原始字节，那不是真正的内容。
+        assert_eq!(
+            check(b">", Some(&name(b"ASCIIHexDecode"))),
+            (b">".to_vec(), false)
+        );
+        // 空数据谈不上解码。
+        assert_eq!(check(b"", Some(&name(b"BrotliDecode"))), (Vec::new(), true));
+        // 不带“完整”标记的那个函数给的字节不变。
+        assert_eq!(
+            decode_like_pdfium(b"1b51>", Some(&chain), None, &resolve),
+            b"\x1b\x51"
+        );
     }
 }

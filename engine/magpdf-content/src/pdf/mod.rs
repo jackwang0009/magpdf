@@ -17,7 +17,9 @@ pub mod pairs;
 pub mod reader;
 pub mod writer;
 
-pub use filter::{FilterError, apply_filter_chain, decode_like_pdfium, encode_flate};
+pub use filter::{
+    FilterError, apply_filter_chain, decode_like_pdfium, decode_like_pdfium_checked, encode_flate,
+};
 pub use object::{PdfDict, PdfObject, PdfStreamRef, encode_name};
 pub use reader::{EntryLocation, PdfDocument, XrefError};
 pub use writer::{IncrementalWriter, WriteError, format_real, write_object};
