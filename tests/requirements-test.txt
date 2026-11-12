@@ -3,3 +3,5 @@
 pikepdf==10.17.0
 # Pillow：MIT-CMU（HPND）；生成合成 OCR 样本图（tests/corpus/synthetic-ocr/gen_synthetic.py）
 Pillow==12.3.0
+# fontTools：MIT；性能样本里报表的字体子集（tests/corpus/perf/generate.py）
+fonttools==4.68.0

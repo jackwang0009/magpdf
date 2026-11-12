@@ -7,6 +7,7 @@ mod edit_line;
 mod fidelity;
 mod image;
 mod ocr;
+mod perf;
 mod roundtrip;
 mod text_blocks;
 
@@ -73,6 +74,8 @@ enum Command {
     Ocr(ocr::OcrArgs),
     /// 用 PPOCRLabel 标注评测 OCR 结果：字符准确率、文字行召回率（V09）
     OcrEval(ocr::OcrEvalArgs),
+    /// 引擎一侧各步各花多久：加载页面、渲染瓦片、列对象、保真校验、挪一个对象（V05）
+    Perf(perf::PerfArgs),
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -127,6 +130,7 @@ fn main() -> Result<()> {
         Command::TextBlocks(args) => text_blocks::run(&lib, args),
         Command::Ocr(args) => ocr::ocr(&lib, args),
         Command::OcrEval(args) => ocr::ocr_eval(args),
+        Command::Perf(args) => perf::run(&lib, &args),
     }
 }
 
