@@ -21,7 +21,7 @@ param(
     [string[]]$OcrArgs = @(),
     [string[]]$EvalArgs = @(),
     [string]$Cli = '',
-    # 样本子目录：images（评测用的全套）或 speed（量速度用的三页）
+    # 样本子目录：images（评测用的全套）、speed（量速度用的三页）、images-red（make_red_channel.py 出的红色通道图）
     [string]$Set = 'images',
     [ValidateRange(1, 16)] [int]$Shards = 1
 )
@@ -36,6 +36,7 @@ if (-not $Cli) { $Cli = Join-Path $root 'target\release\magpdf-cli.exe' }
 if (-not (Test-Path $Cli)) { throw "找不到 $Cli，先 cargo build -p magpdf-cli --release" }
 
 $runDir = Join-Path $out $Name
+if ($Name -eq $Set) { throw "输出目录不能和样本目录同名（$Name）：开头要清空输出目录，会把样本删掉" }
 $predDir = Join-Path $runDir 'pred'
 Remove-Item -Recurse -Force $runDir -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $predDir | Out-Null

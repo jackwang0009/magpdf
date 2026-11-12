@@ -205,7 +205,19 @@ def variant_set(variant: str, res: str) -> str:
     return f"scan{res}"
 
 
-def analyze(run: Path, meta: dict[str, dict[str, dict[str, object]]], examples: int) -> dict[str, object]:
+def image_stems(run: Path) -> set[str]:
+    """一个输出目录里评测过的图（文件名去掉扩展名）。"""
+    details = json.loads((run / "details.json").read_text(encoding="utf-8"))
+    return {Path(img["image"]).stem for img in details}
+
+
+def analyze(
+    run: Path,
+    meta: dict[str, dict[str, dict[str, object]]],
+    examples: int,
+    only: set[str] | None = None,
+) -> dict[str, object]:
+    """`only` 给了就只统计这些图（compare_runs.py 用它把两次运行限制在同一批图上）。"""
     details = json.loads((run / "details.json").read_text(encoding="utf-8"))
     groups: dict[str, dict[str, Acc]] = defaultdict(lambda: defaultdict(Acc))
     classes: dict[str, Counter[str]] = defaultdict(Counter)
@@ -214,6 +226,8 @@ def analyze(run: Path, meta: dict[str, dict[str, dict[str, object]]], examples: 
     garbled: list[dict[str, object]] = []
     for img in details:
         stem = Path(img["image"]).stem
+        if only is not None and stem not in only:
+            continue
         info = meta["images"][stem]
         page = meta["pages"][str(info["page"])]
         lang = img["lang"]
@@ -236,6 +250,7 @@ def analyze(run: Path, meta: dict[str, dict[str, dict[str, object]]], examples: 
                 "leading": f"{vset}|{page['leading']}",
                 "ruled_cell": f"{vset}|{'ruled' if page['ruled'] else 'plain'}" if ann["kind"] == "cell" else "",
                 "seal": f"{lang}|{vset}|{'under_seal' if ann['under_seal'] else 'clear'}",
+                "seal_variant": f"{lang}|{variant}|{res}|{'under_seal' if ann['under_seal'] else 'clear'}",
             }
             measured = Line.of(text, pred, edits)
             for g, key in keys.items():
