@@ -163,6 +163,16 @@ class SummaryTests(unittest.TestCase):
         snap = snapshot(files, prefix="public/pdfium/")
         self.assertEqual(sorted(model.summarize(snap.files)), ["public/pdfium/pixel", "public/pdfium/resources"])
 
+    def test_root_source_does_not_follow_the_directory_name(self) -> None:
+        # 同一批文件拷到名叫 pdfium-copy 的目录里跑：直接放在目录下的文件，命令行工具给的来源是目录名。
+        files = [file("a.pdf", "pdfium-copy", [page(0)]), file("pixel/b.pdf", "pixel", [page(0)]), file("pixel/deep/c.pdf", "pixel", [page(0)])]
+        snap = model.load_run(roundtrip(files), None, name="public-pdfium", source_prefix="public/pdfium/", root_source="resources")
+        self.assertEqual({f.path: f.source for f in snap.files}, {
+            "a.pdf": "public/pdfium/resources",
+            "pixel/b.pdf": "public/pdfium/pixel",
+            "pixel/deep/c.pdf": "public/pdfium/pixel",
+        })
+
     def test_operator_level_counts(self) -> None:
         files = [
             file("clean.pdf", "s", [page(0, objects=2)]),

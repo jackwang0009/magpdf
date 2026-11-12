@@ -226,10 +226,13 @@ def load_run(
     *,
     name: str,
     source_prefix: str = "",
+    root_source: str = "",
 ) -> Snapshot:
     """把一次 `roundtrip --json`（和可选的 `ops_diff.py --json`）读成 Snapshot。
 
-    来源 = `source_prefix` + 命令行工具给的来源（输入目录下的第一级子目录名，根目录下的文件用目录名）。
+    来源 = `source_prefix` + 命令行工具给的来源（输入目录下的第一级子目录名，直接放在输入目录下的文件用输入目录的名字）。
+    给了 `root_source` 时，直接放在输入目录下的文件改用它：来源名就不跟着输入目录叫什么变了
+    （PDFium 的 `testing/resources` 拷到别的名字的目录里，来源还是 `resources`）。
     """
     ops_by_path: dict[str, dict[str, Any]] = {}
     if ops is not None:
@@ -237,9 +240,12 @@ def load_run(
             ops_by_path[str(record.get("path"))] = record
     files: list[FileResult] = []
     for entry in roundtrip.get("files") or []:
+        source = str(entry.get("source") or "")
+        if root_source and "/" not in str(entry["path"]):
+            source = root_source
         result = FileResult(
             path=str(entry["path"]),
-            source=source_prefix + str(entry.get("source") or ""),
+            source=source_prefix + source,
             status=str(entry.get("status") or "ok"),
             pages=[_page_from_record(p) for p in entry.get("pages") or []],
             error=clean_error(entry.get("error")),

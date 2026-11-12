@@ -95,6 +95,7 @@ class SetInput:
     title: str
     roundtrip: Path
     source_prefix: str = ""
+    root_source: str = ""
     ops: Path | None = None
     ops_error: str = ""
     diff_dir: Path | None = None
@@ -174,12 +175,13 @@ def read_json(path: Path) -> Any:
 
 def load_set(spec: SetInput) -> SetReport:
     ops = read_json(spec.ops) if spec.ops is not None and spec.ops.is_file() else None
-    snapshot = load_run(read_json(spec.roundtrip), ops, name=spec.name, source_prefix=spec.source_prefix)
+    naming = {"name": spec.name, "source_prefix": spec.source_prefix, "root_source": spec.root_source}
+    snapshot = load_run(read_json(spec.roundtrip), ops, **naming)
     if spec.corpus_dir is not None and spec.corpus_dir.is_dir():
         snapshot.meta["corpus"] = corpus_fingerprint(spec.corpus_dir)
     report = SetReport(spec=spec, snapshot=snapshot)
     if spec.calibrate is not None and spec.calibrate.is_file():
-        cal = load_run(read_json(spec.calibrate), None, name=spec.name, source_prefix=spec.source_prefix)
+        cal = load_run(read_json(spec.calibrate), None, **naming)
         result = Calibration()
         for file in cal.files:
             if file.status in ("crashed", "timed_out"):
@@ -246,6 +248,7 @@ def baseline_meta(current: SetReport, report: Report) -> dict[str, Any]:
         "corpus": meta.get("corpus") or {},
         "has_ops": current.snapshot.has_ops,
         "source_prefix": current.spec.source_prefix,
+        "root_source": current.spec.root_source,
     }
 
 
@@ -1315,6 +1318,7 @@ def specs_from_run(run_path: Path) -> tuple[list[SetInput], dict[str, Any]]:
                 title=str(entry.get("title") or entry["name"]),
                 roundtrip=roundtrip,
                 source_prefix=str(entry.get("source_prefix") or ""),
+                root_source=str(entry.get("root_source") or ""),
                 ops=resolve(entry.get("ops")),
                 ops_error=str(entry.get("ops_error") or ""),
                 diff_dir=resolve(entry.get("diff_dir")),
@@ -1339,6 +1343,7 @@ def main(argv: Iterable[str] | None = None) -> int:
     parser.add_argument("--diff-dir", type=Path, help="同一批的 roundtrip --diff-dir 目录")
     parser.add_argument("--name", default="run", help="语料集的名字（也是基线文件名）")
     parser.add_argument("--source-prefix", default="", help="加在来源名前面，例如 public/pdfium/")
+    parser.add_argument("--root-source", default="", help="直接放在输入目录下的文件算哪个来源（默认用输入目录的名字），例如 resources")
     parser.add_argument("--corpus-dir", type=Path, help="语料目录，用来算语料指纹")
     parser.add_argument("--baseline", type=Path, help="基线文件")
     parser.add_argument("--out", type=Path, required=True, help="写出的 HTML 页面")
@@ -1362,6 +1367,7 @@ def main(argv: Iterable[str] | None = None) -> int:
                     title=args.name,
                     roundtrip=args.roundtrip,
                     source_prefix=args.source_prefix,
+                    root_source=args.root_source,
                     ops=args.ops,
                     diff_dir=args.diff_dir,
                     baseline=args.baseline,
