@@ -5,3 +5,9 @@ pikepdf==10.17.0
 Pillow==12.3.0
 # fontTools：MIT；性能样本里报表的字体子集（tests/corpus/perf/generate.py）
 fonttools==4.68.0
+
+# 个别评估和原型另有自己的依赖文件，装在单独的虚拟环境里，不并进这一份（包之间互相冲突，《工程规范》第 5 节）：
+#   tests/corpus/synthetic-ocr/requirements.txt（V09）
+#   tests/perf/gpu/requirements.txt、requirements-cpu.txt、requirements-winml.txt（V10）
+#   tests/prototypes/v11-inpaint/requirements.txt、requirements-contrib.txt（V11）
+# 它们同样登记在《开源许可与合规清单》第 3 节。

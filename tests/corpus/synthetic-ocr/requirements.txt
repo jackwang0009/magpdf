@@ -1,5 +1,6 @@
 # tests/corpus/synthetic-ocr 里的脚本用到的包，只在开发机上用，不进安装包。
 # Pillow：MIT-CMU（HPND）；gen_synthetic.py、make_red_channel.py 画图、改图。tests/requirements-test.txt 里已有。
 Pillow==12.3.0
-# PyYAML：MIT；check_dicts.py 解析官方 inference.yml。tests/requirements-test.txt 里还没有。
+# PyYAML：MIT；check_dicts.py 解析官方 inference.yml。只在这里用，没有并进 tests/requirements-test.txt；
+# 已登记在《开源许可与合规清单》第 3 节。
 PyYAML==6.0.3
