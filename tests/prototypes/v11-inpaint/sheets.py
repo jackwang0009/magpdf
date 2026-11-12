@@ -32,8 +32,9 @@ from PIL import ImageDraw, ImageFont
 from common import DEFAULT_OUT, Image, dilate, imread, imwrite, read_json
 from masks import DEFAULT_DILATE
 
-# 默认拿给人看的几列：每一类方法挑一两种（挑法见报告），太多了打不过来。“方法@掩膜”是这一列换一套掩膜
-DEFAULT_METHODS = ["fill-local", "fill-local-grain", "telea-r3", "fsr-fast", "shiftmap", "lama", "lama@auto-d7"]
+# 默认拿给人看的几列：每一类方法挑一两种（挑法见报告），太多了打不过来。
+# 还可以写成“方法@掩膜”，让这一列换一套掩膜（比如 lama@auto-d7），默认没有用到
+DEFAULT_METHODS = ["fill-local", "fill-local-grain", "telea-r3", "fsr-fast", "shiftmap", "lama"]
 CATEGORIES = [("plain", "纯色背景"), ("texture", "底纹背景"), ("seal", "压着红章")]
 TAG_NAMES = {
     "white": "白纸",

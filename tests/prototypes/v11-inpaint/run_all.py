@@ -17,11 +17,10 @@
   sheets      给人打分用的对照图和打分表（另出一套不写方法名的）      sheets.py、sheets.py --blind
 
 缺了 xphoto 的环境或 LaMa 的模型，对应的步骤跳过，别的照常跑，跳过了什么记在 run.json 里。
-全部跑完在开发机上要一个小时上下（时间大半花在对每一组结果跑 OCR、xphoto 和 LaMa 上），--quick 少得多；
-实际用了多久看 run.json。
+全部跑完很慢（时间大半花在对每一组结果跑 OCR、xphoto 和 LaMa 上），--quick 少得多；实际用了多久看 run.json。
 
-输出都在 <out>（默认 tests/out/v11/，不入库）：run.json 记每一步的命令、耗时和环境；评价结果在 evaluation.json、
-evaluation.md；对照图在 sheets/。量时间另有 bench.py。
+输出都在 <out>（默认 tests/out/v11/，不入库）：run.json 记每一步的命令、耗时和环境（用 --stages 只跑几步时记在
+run-stages.json 里，不盖掉整趟的记录）；评价结果在 evaluation.json、evaluation.md；对照图在 sheets/。量时间另有 bench.py。
 
 用法：python run_all.py [--out tests/out/v11] [--stages ...] [--quick] [--clean] [--contrib-python ...] [--lama-model ...]
 """
@@ -102,6 +101,8 @@ def main() -> None:
             else:
                 child.unlink()
     wanted = args.stages or (QUICK_STAGES if args.quick else STAGES)
+    # 只跑几步时另记一个文件，免得把整趟的记录盖掉
+    record_path = out / ("run-stages.json" if args.stages else "run.json")
     py = [sys.executable, *python_flags()]
     out_arg = ["--out", str(out)]
     ocr_args = ["--cli", str(args.cli), "--models-dir", str(args.models_dir)]
@@ -188,11 +189,11 @@ def main() -> None:
             }.items()
             if (out / path).exists()
         }
-        write_json(out / "run.json", record)
+        write_json(record_path, record)
         lock.unlink(missing_ok=True)
     if failed:
-        sys.exit(f"有一步失败了，见上面的输出；{out / 'run.json'} 里记了是哪一步")
-    print(f"跑完了，记录在 {out / 'run.json'}")
+        sys.exit(f"有一步失败了，见上面的输出；{record_path} 里记了是哪一步")
+    print(f"跑完了，记录在 {record_path}")
 
 
 if __name__ == "__main__":

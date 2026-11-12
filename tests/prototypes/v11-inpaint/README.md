@@ -32,8 +32,10 @@ OCR 用现成的 `D:\workspace\magpdf-wt\bin\magpdf-cli.exe` 和 `D:\workspace\m
 D:\workspace\magpdf-wt\venvs\v11\Scripts\python -X dev tests/prototypes/v11-inpaint/run_all.py
 ```
 
-按顺序跑下面几步，输出都在 `tests/out/v11/`（不入库）。全部跑完在开发机上约一个小时；加 `--quick` 不跑带 * 的三步，约十分钟；
-`--stages` 只跑指定的几步；`--clean` 先清空输出目录。同一个输出目录同时只能有一个 `run_all.py` 在跑（有锁文件）。
+按顺序跑下面几步，输出都在 `tests/out/v11/`（不入库）。开发机上从空目录全部跑完，机器比较空的时候 23 分钟，
+被别的任务占满的时候 96 分钟；时间主要花在 evaluate 对每一组结果跑 OCR、掩膜对比和 LaMa 上。加 `--quick` 不跑带 * 的三步，
+要评价的结果少得多，机器比较空的时候 6 分 14 秒。`--stages` 只跑指定的几步；`--clean` 先清空输出目录。
+同一个输出目录同时只能有一个 `run_all.py` 在跑（有锁文件）。重跑出来的样本、结果图和评价的数是逐字节相同的（耗时除外）。
 
 | 步骤 | 做什么 | 脚本 | 主要输出 |
 |---|---|---|---|
@@ -47,7 +49,8 @@ D:\workspace\magpdf-wt\venvs\v11\Scripts\python -X dev tests/prototypes/v11-inpa
 | evaluate | 客观评价（含对每一组结果跑 OCR） | `evaluate.py` | `evaluation.json`、`evaluation.md` |
 | sheets | 给人打分用的对照图和打分表 | `sheets.py`、`sheets.py --blind` | `sheets/`、`sheets-blind/` |
 
-每一步的命令、耗时、跳过了什么记在 `run.json` 里。每个脚本也可以单独跑，用法写在各自文件开头。
+每一步的命令、耗时、跳过了什么记在 `run.json` 里（用 `--stages` 只跑几步时记在 `run-stages.json` 里，不盖掉整趟的记录）。
+每个脚本也可以单独跑，用法写在各自文件开头。
 
 ## 重量时间
 
@@ -57,11 +60,21 @@ D:\workspace\magpdf-wt\venvs\v11\Scripts\python -X dev tests/prototypes/v11-inpa
 
 结果写 `tests/out/v11/bench.json`（`--json` 可以改位置）：
 
-- LaMa 处理一个 512×512 区域：默认线程数和限 4 线程各起一个新进程量，记建会话的时间、第一次推理、之后 7 次的中位数和最小最大、峰值工作集；
+- LaMa 处理一个 512×512 区域：默认线程数、4、2、1 线程四种设置，每种起 5 个新进程，每个进程建一次会话、预热一次、再推理 7 次；
+  记建会话的时间、第一次推理、之后 35 次推理的中位数和最小最大、峰值工作集和峰值提交内存；
 - 传统方法和算掩膜处理一行字：10 行，每行 5 次取中位数（要先跑过 `run_all.py`；xphoto 的两种用第二个环境的 Python 量）；
 - 量之前、量之后整机的 CPU 占用。
 
-只量 LaMa：加 `--skip-traditional`（两三分钟）。这台开发机不是参考机 R1。
+只量 LaMa：加 `--skip-traditional`。只量任务书要的两种线程设置：加 `--threads 0 4`。
+机器上有别的任务在跑时，加 `--priority high` 把量的进程调成高优先级再量一遍（另存一份：`--json tests/out/v11/bench-high.json`），
+两份对着看。这台开发机不是参考机 R1。
+
+LaMa 建一次会话要十秒上下，这段时间省不省得掉，另有一个脚本量（默认设置、关掉图优化、读事先优化好的模型三种办法各建 5 次，
+结果写 `tests/out/v11/bench-init.json`；要 LaMa 的模型，量的时候在临时目录里存一份约 200 MB 的优化模型，量完就删）：
+
+```powershell
+D:\workspace\magpdf-wt\venvs\v11\Scripts\python -X dev tests/prototypes/v11-inpaint/bench_init.py
+```
 
 ## 样本
 
@@ -117,6 +130,17 @@ D:\workspace\magpdf-wt\venvs\v11\Scripts\python -X dev tests/prototypes/v11-inpa
 - 章、底纹的像素还在的比例：掩膜里原来有章或底纹线条的像素，修补之后还剩一半以上“线条的颜色”的占多少。
 - 两行基准：“不修补”是带字原图本身；“噪声底”是 `ref_nonoise.png`，修得再好也不会比它更接近 `ref.png`。
 
+“超过阈值的像素”数不到一种痕迹：补上去的颜色和周围只差几级到十几级，但连成一片、形状就是原来那行字，人看得出来
+（报告第 13.3 节）。`faint_traces.py` 另算一个数来补它：亮度差用 σ=2 像素的高斯抹平之后，超过 6 级的像素占多少。
+它不在 `run_all.py` 的步骤里，跑完之后单独跑：
+
+```powershell
+D:\workspace\magpdf-wt\venvs\v11\Scripts\python -X dev tests/prototypes/v11-inpaint/faint_traces.py --each
+```
+
+这个数适合纯色、渐变、水印字这类没有细密图案的背景；网纹、点阵上只能在方法之间比着看（说明写在脚本开头）。
+两种指标都代替不了主观分。
+
 ## 主观打分怎么做
 
 主观分由三位评分人打，脚本和写脚本的人都不打。材料在 `tests/out/v11/sheets/`：
@@ -158,8 +182,9 @@ D:\workspace\magpdf-wt\venvs\v11\Scripts\python tests/prototypes/v11-inpaint/sco
 D:\workspace\magpdf-wt\venvs\v11\Scripts\python tests/prototypes/v11-inpaint/score_summary.py <填好的表.csv> --key tests/out/v11/sheets-blind/blind-key.csv
 ```
 
-对照图上默认放这几列（`sheets.py --methods` 可以改）：`fill-local`、`fill-local-grain`、`telea-r3`、`fsr-fast`、`shiftmap`、`lama`、`lama@auto-d7`
-（最后一列是掩膜往外扩 7 像素之后的 LaMa；别的列都是扩 3 像素）。50 个样本 × 7 列，每人 350 个分。
+对照图上默认放六列：`fill-local`、`fill-local-grain`、`telea-r3`、`fsr-fast`、`shiftmap`、`lama`，都用 `auto-d3` 掩膜。
+50 个样本 × 6 列，每人 300 个分。要换列用 `sheets.py --methods`；写成“方法@掩膜”可以让某一列换一套掩膜
+（比如 `lama@auto-d7` 是掩膜往外扩 7 像素之后的 LaMa）。
 
 ## 文件
 
@@ -171,8 +196,8 @@ D:\workspace\magpdf-wt\venvs\v11\Scripts\python tests/prototypes/v11-inpaint/sco
 | `masks.py` | 从行框里分出字的像素 |
 | `inpaint.py` | 各种修补方法 |
 | `lama.py`、`fetch_lama.py` | LaMa 的推理和窗口排法；下载模型 |
-| `evaluate.py` | 客观评价 |
+| `evaluate.py`、`faint_traces.py` | 客观评价；另算一种更严的指标（差得不多但连成字形的浅痕） |
 | `sheets.py`、`score_summary.py` | 对照图和打分表；汇总填好的打分表 |
-| `bench.py` | 量时间 |
+| `bench.py`、`bench_init.py` | 量时间；量 LaMa 建会话的时间省不省得掉 |
 | `run_all.py` | 一条命令跑全部 |
 | `requirements.txt`、`requirements-contrib.txt` | 两个虚拟环境的依赖（写死版本，注了许可证） |
