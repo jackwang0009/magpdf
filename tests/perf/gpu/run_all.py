@@ -853,7 +853,8 @@ def main() -> int:
         runner.consistency(dml_targets)
     if "nodes" in steps:
         runner.log("节点落在哪个执行提供程序上")
-        runner.nodes(control + dml_targets)
+        # Windows ML 那份运行时也看一眼：它的 DirectML 和官方 DirectML 包不是同一个构建。
+        runner.nodes(control + dml_targets + [t for t in targets if t.winml])
     if "shapes" in steps:
         runner.log("识别模型换输入宽度的代价")
         runner.shapes(detail)
