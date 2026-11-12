@@ -22,9 +22,9 @@
 - `dml<序号>-<显卡名>`：DirectML 跑在某一块显卡上；本机 DXGI 里能看到的硬件显卡各量一遍，同名的只量第一块。
 - `winml-<版本>-dml<序号>-<显卡名>`：Windows ML 那份 ONNX Runtime 自带的 DirectML 执行提供程序
   （第三个虚拟环境，没有就不量；只量每页耗时）。
-- 标签后面带 `-prio` 的：同一个配置，测量进程的优先级调到“高于正常”再量一遍（只在 timing、server 两步，
-  和正常优先级的轮流跑）。开发机上有别的任务在抢 CPU 时，正常优先级量出来的 CPU 推理时间会被拉长，
-  这一份更接近机器空闲时的情况。`--no-priority-pass` 不量这一份。
+- 标签后面带 `-prio` 的：同一个配置，测量进程的优先级调到“高于正常”。开发机上有别的任务在抢 CPU 时，
+  正常优先级量出来的 CPU 推理时间会被拉长，这一份更接近机器空闲时的情况。timing、server 两步里它和
+  正常优先级的轮流跑，两份都留；shapes、widths、soak 三步只量这一份。`--no-priority-pass` 全部按正常优先级量。
 """
 from __future__ import annotations
 
@@ -666,6 +666,7 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"生成时间：{summary['generated']}。时间单位 ms，写法是“中位数（最小–最大）”：每次运行是一个新进程，"
         "先在进程里取各页的中位数，再对各次运行取中位数、最小、最大。",
         "“别的进程占的 CPU”是量的那一段时间里，整机 CPU 时间有百分之几被别的进程用掉（100 % = 所有逻辑处理器全满）。",
+        f"标签带 `{PRIO_SUFFIX}` 的是把测量进程的优先级调到“高于正常”量的：机器上有别的任务抢 CPU 时，这一份更接近机器空闲时的情况。",
         "",
     ]
     env = summary.get("env") or {}
@@ -831,6 +832,9 @@ def main() -> int:
     raised = [] if args.no_priority_pass else [t.raised() for t in control + dml_targets]
     if raised:
         runner.log("优先级调高一档再量一份的：" + "、".join(t.label for t in raised))
+    # 换宽度的代价、宽度分档、连续处理这三项看的是同一个配置自己前后比，别的任务一抢 CPU 就看不清，
+    # 所以直接用优先级调高一档的那一份来量（不量那一份时才用正常优先级的）。
+    detail = raised or (control + dml_targets)
 
     if "prepare" in steps:
         runner.prepare()
@@ -852,13 +856,13 @@ def main() -> int:
         runner.nodes(control + dml_targets)
     if "shapes" in steps:
         runner.log("识别模型换输入宽度的代价")
-        runner.shapes(control + dml_targets)
+        runner.shapes(detail)
     if "widths" in steps:
         runner.log("识别模型的宽度分档")
-        runner.widths(control + dml_targets)
+        runner.widths(detail)
     if "soak" in steps:
         runner.log(f"连续处理 {args.soak_pages} 页")
-        runner.soak(control + dml_targets)
+        runner.soak(detail)
     if "summarize" in steps:
         summarize(args.out, runner.failures)
         runner.log(f"汇总写到 {args.out / 'summary.md'}")
