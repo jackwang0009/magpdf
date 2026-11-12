@@ -204,13 +204,30 @@ export function pageRectOnScreen(page) {
   });
 }
 
-/** 把鼠标挪到画布左上角的标尺交汇处：那里底下没有对象，不会留下悬停的高亮。 */
+/**
+ * 把鼠标挪到画布左上角的标尺交汇处：那里底下没有对象，不会留下悬停的高亮。
+ * 等页面真的收到这一下移动再返回：`mouse.move` 返回时页面不一定处理过它，紧接着截图的话，上一个位置的
+ * 悬停高亮还在图上（冒烟测试偶尔报“只能叠加内容的页画面变了”就是这样来的）。鼠标本来就停在那里时
+ * 页面收不到移动事件，等一会儿就不等了。
+ */
 export async function parkMouse(page) {
   const corner = await page.evaluate(() => {
     const rect = window.__magpdf.controller().container.getBoundingClientRect();
-    return { x: rect.left + 6, y: rect.top + 6 };
+    const corner = { x: rect.left + 6, y: rect.top + 6 };
+    window.__parked = false;
+    const onMove = (event) => {
+      if (Math.abs(event.clientX - corner.x) < 1 && Math.abs(event.clientY - corner.y) < 1) {
+        window.__parked = true;
+        window.removeEventListener('pointermove', onMove, true);
+      }
+    };
+    window.addEventListener('pointermove', onMove, true);
+    return corner;
   });
   await page.mouse.move(corner.x, corner.y);
+  await page
+    .waitForFunction(() => window.__parked === true, null, { timeout: 1000, polling: 5 })
+    .catch(() => undefined);
 }
 
 /**
