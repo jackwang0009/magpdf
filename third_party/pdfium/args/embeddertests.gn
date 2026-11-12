@@ -1,0 +1,21 @@
+# 给 PDFium 自己的 embedder 测试（pdfium_embeddertests）用的构建参数。
+# 这些测试直接调用 core/ 里的内部类，要和 PDFium 静态链接在一起：共享库构建（release.gn 的 pdf_is_shared_lib）
+# 只导出 FPDF_* 公共接口，测试程序里会另有一份内部代码和全局状态，不能用。所以另起一个输出目录：
+#   pwsh third_party/pdfium/build.ps1 -Source D:\pdfium-src\pdfium -Jobs 8 -Out out\Tests `
+#     -ArgsTemplate third_party/pdfium/args/embeddertests.gn -Targets pdfium_embeddertests -NoDist
+# 其余参数和 release.gn 相同。
+
+pdf_is_standalone = true
+is_component_build = false
+is_debug = false
+pdf_enable_v8 = false
+pdf_enable_xfa = false
+pdf_use_partition_alloc = false
+target_cpu = "x64"
+target_os = "win"
+treat_warnings_as_errors = false
+symbol_level = 1
+
+use_siso = false
+use_remoteexec = false
+clang_use_chrome_plugins = false

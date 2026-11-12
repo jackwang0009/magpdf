@@ -29,6 +29,9 @@ param(
     [string[]]$Targets = @('pdfium', 'pdfium_test', 'pdfium_unittests'),
     # 追加到 args.gn 末尾的行，如 'symbol_level = 2'
     [string[]]$ExtraArgs = @(),
+    # 用这份 args 模板代替 args/<config>.gn，例如 args/embeddertests.gn（静态链接，给 pdfium_embeddertests 用）；
+    # 要配 -Out 另起一个输出目录和 -NoDist
+    [string]$ArgsTemplate = '',
     # 写进 dist/VERSION 的版本（MAJOR.MINOR.BUILD.PATCH）；默认从 chromium/NNNN 分支推导
     [string]$Version = '',
     # Visual Studio / Build Tools 安装目录；默认用 vswhere 找
@@ -113,7 +116,7 @@ Step "工具链 VS $vsVersion @ $VsPath  MSVC $msvcVersion  Windows SDK $WinSdkV
 & (Join-Path $here 'apply-patches.ps1') -Source $Source
 
 # ---------- args.gn + gn gen ----------
-$template = Join-Path $here "args\$($Config.ToLower()).gn"
+$template = if ($ArgsTemplate) { (Resolve-Path $ArgsTemplate).Path } else { Join-Path $here "args\$($Config.ToLower()).gn" }
 $argsText = @("# 由 third_party/pdfium/build.ps1 从 $(Split-Path $template -Leaf) 生成于 $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')；改参数请改模板或用 -ExtraArgs。") +
     (Get-Content $template) + $ExtraArgs
 $argsFile = Join-Path $Out 'args.gn'
