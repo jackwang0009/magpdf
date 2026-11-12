@@ -1,3 +1,4 @@
+use std::cell::{Cell, RefCell};
 use std::ffi::{CString, c_int, c_void};
 use std::marker::PhantomData;
 use std::path::Path;
@@ -75,7 +76,18 @@ pub struct Document<'lib> {
     /// 文档是从这块数据打开的。PDFium 只读它，从不改写：打开之后的修改都记在 PDFium 自己的对象里。
     /// 所以它可以和 [`Document::reopen`] 得到的文档共用；新建的文档没有数据，这里是空的。
     data: Arc<Vec<u8>>,
+    /// 一直开着的页面（[`Document::keep_page`]）。
+    kept: RefCell<Vec<KeptPage>>,
+    /// 给 [`KeptPage::used`] 编号：越大越是最近用过的。
+    uses: Cell<u64>,
     _lib: PhantomData<&'lib Library>,
+}
+
+/// 一直开着的一页。句柄归文档，[`Document::release_pages`] 或关文档时才关闭。
+struct KeptPage {
+    index: usize,
+    handle: raw::FPDF_PAGE,
+    used: u64,
 }
 
 impl std::fmt::Debug for Document<'_> {
@@ -115,11 +127,17 @@ impl<'lib> Document<'lib> {
         if handle.is_null() {
             return Err(Error::Load(LoadError::last()));
         }
-        Ok(Self {
+        Ok(Self::wrap(handle, data))
+    }
+
+    fn wrap(handle: raw::FPDF_DOCUMENT, data: Arc<Vec<u8>>) -> Self {
+        Self {
             handle,
             data,
+            kept: RefCell::new(Vec::new()),
+            uses: Cell::new(0),
             _lib: PhantomData,
-        })
+        }
     }
 
     /// 把这份文档打开时用的数据再打开一遍，得到一份互不相干的文档：它是文件原来的样子，不含打开之后
@@ -140,14 +158,11 @@ impl<'lib> Document<'lib> {
         if handle.is_null() {
             return Err(Error::Load(LoadError::last()));
         }
-        Ok(Self {
-            handle,
-            data: Arc::new(Vec::new()),
-            _lib: PhantomData,
-        })
+        Ok(Self::wrap(handle, Arc::new(Vec::new())))
     }
 
     /// 插入一张空白页，尺寸单位是点。`index` 可以等于当前页数，表示追加。
+    /// 一直开着的页面跟着往后挪，仍然对得上各自的页序号。
     pub fn add_blank_page(&self, index: usize, width: f32, height: f32) -> Result<Page<'_>> {
         if !(width.is_finite() && height.is_finite() && width > 0.0 && height > 0.0) {
             return Err(Error::InvalidSize {
@@ -165,6 +180,11 @@ impl<'lib> Document<'lib> {
             unsafe { raw::FPDFPage_New(self.handle, idx, f64::from(width), f64::from(height)) };
         if handle.is_null() {
             return Err(Error::LoadPage(LoadError::last()));
+        }
+        for page in self.kept.borrow_mut().iter_mut() {
+            if page.index >= index {
+                page.index += 1;
+            }
         }
         // SAFETY: handle 是刚由 FPDFPage_New 返回的有效页面句柄，归 Page 所有。
         Ok(unsafe { Page::from_raw(handle, self) })
@@ -209,8 +229,74 @@ impl<'lib> Document<'lib> {
         (ok != 0).then_some(v)
     }
 
-    /// 加载第 `index` 页（从 0 开始）。
+    /// 第 `index` 页（从 0 开始）。这一页一直开着的话（[`Document::keep_page`]），给的就是那一份：在上面做的
+    /// 修改别处都看得到，返回值丢掉也不会关闭它。没有开着就加载一份，丢掉时关闭。
     pub fn page(&self, index: usize) -> Result<Page<'_>> {
+        if let Some(handle) = self.kept_handle(index) {
+            // SAFETY: handle 是本文档一直开着的页面；要 `&mut self`（`release_pages`）或关文档才会关闭它，
+            // 返回的 Page 借着 `&self`，所以在它用完之前句柄一直有效。
+            return Ok(unsafe { Page::kept(handle, self) });
+        }
+        self.load_page(index)
+    }
+
+    /// 让第 `index` 页一直开着，返回它。之后 [`Document::page`] 给的都是这一份，渲染、列对象、修改都不用
+    /// 再解析一遍内容流（方案第 7 节：可见页和有未保存修改的页常驻内存）。用 [`Document::release_pages`] 关掉。
+    pub fn keep_page(&self, index: usize) -> Result<Page<'_>> {
+        if let Some(handle) = self.kept_handle(index) {
+            // SAFETY: 同 `page`。
+            return Ok(unsafe { Page::kept(handle, self) });
+        }
+        let handle = self.load_page(index)?.into_raw();
+        let used = self.next_use();
+        self.kept.borrow_mut().push(KeptPage {
+            index,
+            handle,
+            used,
+        });
+        // SAFETY: handle 刚交给本文档保管，同 `page`。
+        Ok(unsafe { Page::kept(handle, self) })
+    }
+
+    /// 一直开着的页面只留最近用过的 `keep` 页，其余关掉。关掉的页下次用到时重新加载：内存里没有生成内容流的
+    /// 修改会跟着丢掉，所以改完页面要先 [`Page::generate_content`]。
+    pub fn release_pages(&mut self, keep: usize) {
+        let kept = self.kept.get_mut();
+        if kept.len() <= keep {
+            return;
+        }
+        kept.sort_by_key(|page| std::cmp::Reverse(page.used));
+        for page in kept.drain(keep..) {
+            // SAFETY: 句柄归本文档保管；`&mut self` 保证没有借着它的 Page 还活着。
+            unsafe { raw::FPDF_ClosePage(page.handle) };
+        }
+    }
+
+    /// 一直开着的是哪几页，按页序号从小到大。
+    pub fn kept_pages(&self) -> Vec<usize> {
+        let mut pages: Vec<usize> = self.kept.borrow().iter().map(|page| page.index).collect();
+        pages.sort_unstable();
+        pages
+    }
+
+    /// 一直开着的第 `index` 页的句柄，顺便记下用了一次。
+    fn kept_handle(&self, index: usize) -> Option<raw::FPDF_PAGE> {
+        let used = self.next_use();
+        let mut kept = self.kept.borrow_mut();
+        let page = kept.iter_mut().find(|page| page.index == index)?;
+        page.used = used;
+        Some(page.handle)
+    }
+
+    fn next_use(&self) -> u64 {
+        let used = self.uses.get() + 1;
+        self.uses.set(used);
+        used
+    }
+
+    /// 另外加载一份第 `index` 页，不管它是不是一直开着。这一份和别的句柄互不相干：在上面做的事（比如分层渲染时
+    /// 暂时隐藏对象，见 [`crate::render_rect_filtered`]）一直开着的那一份看不到，丢掉时关闭。
+    pub fn load_page(&self, index: usize) -> Result<Page<'_>> {
         let count = self.page_count();
         if index >= count {
             return Err(Error::PageIndex { index, count });
@@ -312,6 +398,10 @@ impl<'lib> Document<'lib> {
 
 impl Drop for Document<'_> {
     fn drop(&mut self) {
+        for page in self.kept.get_mut().drain(..) {
+            // SAFETY: 一直开着的页面归本文档保管，借着它的 Page 已全部析构；页面要先于文档关闭。
+            unsafe { raw::FPDF_ClosePage(page.handle) };
+        }
         // SAFETY: handle 有效且只关闭一次；借用本文档的 Page 已全部析构。
         unsafe { raw::FPDF_CloseDocument(self.handle) };
     }

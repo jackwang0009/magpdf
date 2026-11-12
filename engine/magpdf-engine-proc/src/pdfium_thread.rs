@@ -752,21 +752,26 @@ impl PdfiumState {
         let (d, page) = self.page_of(doc_id, page_id)?;
         let version = d.session.version();
         // 层里的对象换成页内序号。对不上的（不在这一页、已经删掉）整块瓦片不画。
-        let kept = match layer {
+        let filter = match layer {
             None => None,
             Some(Layer::Without(ids)) => Some((false, d.session.z_indices(page, ids)?)),
             Some(Layer::Only(ids)) => Some((true, d.session.z_indices(page, ids)?)),
         };
-        // 页面句柄用完就关：分层渲染在句柄里留下的“已修改”标记随它一起没有，文档不受影响
-        // （见 `render_rect_filtered` 的说明）。
-        let page = d
-            .session
-            .document()
-            .page(page)
-            .map_err(|e| EngineError::Render(e.to_string()))?;
+        let failed = |e: &dyn std::fmt::Display| EngineError::Render(e.to_string());
+        // 整页的瓦片画在一直开着的那一份页面上，不用每块瓦片都重新解析内容流（方案第 7 节）。分层渲染要暂时
+        // 隐藏对象，会在页面句柄里留下“已修改”的标记（见 `render_rect_filtered` 的说明），所以另开一份
+        // 句柄来画，画完关掉，标记随它一起没有。
+        let page = match filter {
+            None => d.session.page(page).map_err(|e| failed(&e))?,
+            Some(_) => d
+                .session
+                .document()
+                .load_page(page)
+                .map_err(|e| failed(&e))?,
+        };
         let surface = PageSurface::new(&page, scale);
         let rect = PixelRect::tile(x, y);
-        let bitmap = match &kept {
+        let bitmap = match &filter {
             None => render_rect(&page, surface, rect, RenderFlags::NONE, PAPER),
             Some((false, indices)) => render_rect_filtered(
                 &page,

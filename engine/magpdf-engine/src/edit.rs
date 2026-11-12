@@ -86,6 +86,11 @@ pub type Result<T> = std::result::Result<T, EditError>;
 
 const DEFAULT_LIMIT: usize = 50;
 
+/// 一份文档最多让几页一直开着（方案第 7 节：可见页和有未保存修改的页常驻内存）。一直开着的页渲染、列对象、
+/// 修改都不用再解析内容流；超出的按最近用过的先后关掉，下次用到时重新加载。屏幕上同时看得到的页一般不超过
+/// 这个数。一页 5000 个对象约占几 MB，扫描页还要加上解码后的图像。
+const KEPT_PAGES: usize = 8;
+
 /// 作用在一个对象上的一步。
 enum Atom {
     Transform {
@@ -224,9 +229,17 @@ impl<'lib> Session<'lib> {
         }
     }
 
-    /// 底下的文档，渲染和查询页面尺寸时用。修改要走本类型的命令，否则撤销记录和编号表会对不上。
+    /// 底下的文档，查询页面尺寸、另开页面句柄做分层渲染时用。修改要走本类型的命令，否则撤销记录和编号表会
+    /// 对不上。
     pub fn document(&self) -> &Document<'lib> {
         &self.doc
+    }
+
+    /// 取一页来渲染。这一页会一直开着（最多 [`KEPT_PAGES`] 页），和列对象、修改用的是同一份页面句柄，
+    /// 下次再画不用重新解析内容流。
+    pub fn page(&mut self, index: usize) -> Result<Page<'_>> {
+        self.doc.release_pages(KEPT_PAGES);
+        Ok(self.doc.keep_page(index)?)
     }
 
     pub fn history_limit(&self) -> usize {
@@ -268,7 +281,8 @@ impl<'lib> Session<'lib> {
 
     /// 一页上的全部对象，按层级从下到上。
     pub fn objects(&mut self, page: usize) -> Result<Vec<ObjectSummary>> {
-        let page_obj = self.doc.page(page)?;
+        self.doc.release_pages(KEPT_PAGES);
+        let page_obj = self.doc.keep_page(page)?;
         let count = page_obj.object_count();
         let page_box = page_obj.bounding_box();
         let ids = page_ids(&mut self.ids, &mut self.next_id, page, count);
@@ -288,7 +302,8 @@ impl<'lib> Session<'lib> {
         y: f32,
         mode: HitMode,
     ) -> Result<Vec<ObjectSummary>> {
-        let page_obj = self.doc.page(page)?;
+        self.doc.release_pages(KEPT_PAGES);
+        let page_obj = self.doc.keep_page(page)?;
         let count = page_obj.object_count();
         let page_box = page_obj.bounding_box();
         let ids = page_ids(&mut self.ids, &mut self.next_id, page, count);
@@ -401,6 +416,7 @@ impl<'lib> Session<'lib> {
     }
 
     pub fn undo(&mut self) -> Result<Change> {
+        self.doc.release_pages(KEPT_PAGES);
         let mut command = self.undo.pop().ok_or(EditError::NothingToUndo)?;
         let mut log = ChangeLog::default();
         for i in (0..command.atoms.len()).rev() {
@@ -420,6 +436,7 @@ impl<'lib> Session<'lib> {
     }
 
     pub fn redo(&mut self) -> Result<Change> {
+        self.doc.release_pages(KEPT_PAGES);
         let mut command = self.redo.pop().ok_or(EditError::NothingToRedo)?;
         let mut log = ChangeLog::default();
         for i in 0..command.atoms.len() {
@@ -454,6 +471,7 @@ impl<'lib> Session<'lib> {
         if targets.is_empty() {
             return Err(EditError::NoTarget);
         }
+        self.doc.release_pages(KEPT_PAGES);
         // 先确认对象都在、所在的页都能改，再动文档。
         let mut pages: Vec<usize> = Vec::new();
         for id in &targets {
@@ -540,7 +558,7 @@ impl<'lib> Session<'lib> {
                 } else {
                     let (page, z) = slot.ok_or(EditError::NoObject(*id))?;
                     let detached = object.as_mut().ok_or(EditError::NoObject(*id))?;
-                    let page_obj = self.doc.page(page)?;
+                    let page_obj = self.doc.keep_page(page)?;
                     page_obj.attach(detached, z)?;
                     // 句柄已经归页面。生成内容流即使失败，撤销记录也不能再销毁它。
                     *object = None;
@@ -577,9 +595,10 @@ impl<'lib> Session<'lib> {
             .ok_or(EditError::NoObject(id))
     }
 
-    /// 改完必须 `generate_content`，否则页面句柄一关，内存里的对象改动就没了。
+    /// 改的是一直开着的那一份页面。改完马上 `generate_content`：页面随时可能被关掉（超出 [`KEPT_PAGES`]），
+    /// 关掉之前没写进内容流的改动就没了；保存、保真校验用的副本看的也是内容流。
     fn with_page<T>(&self, page: usize, f: impl FnOnce(&Page<'_>) -> Result<T>) -> Result<T> {
-        let page_obj = self.doc.page(page)?;
+        let page_obj = self.doc.keep_page(page)?;
         let value = f(&page_obj)?;
         page_obj.generate_content()?;
         Ok(value)

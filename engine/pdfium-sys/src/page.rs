@@ -88,10 +88,13 @@ impl RenderOptions {
     }
 }
 
-/// 文档中的一页。借用 [`Document`]，析构时关闭页面。
+/// 文档中的一页。借用 [`Document`]，析构时关闭页面；一直开着的页面（[`Document::keep_page`]）归文档，
+/// 析构时不关闭。
 pub struct Page<'doc> {
     handle: raw::FPDF_PAGE,
     doc: &'doc Document<'doc>,
+    /// 句柄归这个值（析构时关闭），还是归文档。
+    owned: bool,
     _marker: PhantomData<&'doc ()>,
 }
 
@@ -121,8 +124,27 @@ impl<'doc> Page<'doc> {
         Self {
             handle,
             doc,
+            owned: true,
             _marker: PhantomData,
         }
+    }
+
+    /// # Safety
+    /// `handle` 必须是 `doc` 一直开着的页面：由文档保管，在 `doc` 被可变借用或关闭之前有效。
+    pub(crate) unsafe fn kept(handle: raw::FPDF_PAGE, doc: &'doc Document<'doc>) -> Self {
+        Self {
+            handle,
+            doc,
+            owned: false,
+            _marker: PhantomData,
+        }
+    }
+
+    /// 交出句柄，之后由调用方负责关闭（文档把它收进一直开着的页面）。
+    pub(crate) fn into_raw(self) -> raw::FPDF_PAGE {
+        let handle = self.handle;
+        std::mem::forget(self);
+        handle
     }
 
     pub fn document(&self) -> &'doc Document<'doc> {
@@ -308,6 +330,9 @@ impl<'doc> Page<'doc> {
 
 impl Drop for Page<'_> {
     fn drop(&mut self) {
+        if !self.owned {
+            return;
+        }
         // SAFETY: handle 有效且只关闭一次；借用本页的对象与文字页已全部析构。
         unsafe { raw::FPDF_ClosePage(self.handle) };
     }
