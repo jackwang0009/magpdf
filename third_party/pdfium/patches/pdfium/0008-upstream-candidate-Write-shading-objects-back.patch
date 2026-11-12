@@ -1,0 +1,337 @@
+From 24e188eec7e38ca13dae7910971faca322b332c6 Mon Sep 17 00:00:00 2001
+From: jackwang0009 <93422958+jackwang0009@users.noreply.github.com>
+Date: Thu, 12 Nov 2026 11:30:55 +0800
+Subject: [PATCH] [upstream-candidate] Write shading objects back
+
+CPDF_PageContentGenerator::ProcessPageObject() had no case for shading
+objects, so everything painted with the `sh` operator disappeared as
+soon as its content stream was regenerated.
+
+Write them as `q <clip> <ExtGState> <matrix> cm /Name sh Q`. The object
+already holds the matrix that was in effect, the clip path and the
+general graphics state; `sh` uses neither the current color nor the
+line parameters.
+
+The parser now records the resource name the `sh` operator used. The
+generator writes that name when the holder's /Shading resources still
+map it to the same shading, any other name that does otherwise, and
+realizes the shading as a new FXS resource when it is not a resource of
+the holder at all (for instance when the object was moved to another
+page). A shading dictionary that is a direct object of another
+resources dictionary becomes an indirect object in that case, the same
+way inline streams do for images, so that both dictionaries refer to
+the one shading.
+
+Tests: CPDFPageContentGeneratorTest.ProcessShading (clip, nested cm,
+direct and indirect shading dictionaries; generate -> parse -> generate
+is stable) and ProcessShadingOnAnotherPage. pdfium_unittests and
+pdfium_embeddertests: no new failures.
+
+Verification (ops_diff.py): missing shading events 11 -> 0 on the
+synthetic corpus; no-diff pages 55/67 -> 61/67 synthetic (shading-axial,
+shading-functions, shading-mesh, shading-radial,
+shading-stitching-background, text-clip-modes), 384/388 -> 384/388
+public.
+
+Co-authored-by: Cursor <cursoragent@cursor.com>
+---
+ .../edit/cpdf_pagecontentgenerator.cpp        |  83 ++++++++++++
+ core/fpdfapi/edit/cpdf_pagecontentgenerator.h |  15 +++
+ .../cpdf_pagecontentgenerator_unittest.cpp    | 126 ++++++++++++++++++
+ .../fpdfapi/page/cpdf_streamcontentparser.cpp |   2 +
+ 4 files changed, 226 insertions(+)
+
+diff --git a/core/fpdfapi/edit/cpdf_pagecontentgenerator.cpp b/core/fpdfapi/edit/cpdf_pagecontentgenerator.cpp
+index 1c005331f6..0901ab0c8c 100644
+--- a/core/fpdfapi/edit/cpdf_pagecontentgenerator.cpp
++++ b/core/fpdfapi/edit/cpdf_pagecontentgenerator.cpp
+@@ -33,6 +33,8 @@
+ #include "core/fpdfapi/page/cpdf_path.h"
+ #include "core/fpdfapi/page/cpdf_pathobject.h"
+ #include "core/fpdfapi/page/cpdf_pattern.h"
++#include "core/fpdfapi/page/cpdf_shadingobject.h"
++#include "core/fpdfapi/page/cpdf_shadingpattern.h"
+ #include "core/fpdfapi/page/cpdf_textobject.h"
+ #include "core/fpdfapi/page/cpdf_textstate.h"
+ #include "core/fpdfapi/page/cpdf_tilingpattern.h"
+@@ -1126,6 +1128,8 @@ void CPDF_PageContentGenerator::ProcessPageObject(fxcrt::ostringstream* buf,
+     ProcessPath(buf, pPathObj);
+   } else if (CPDF_TextObject* pTextObj = pPageObj->AsText()) {
+     ProcessText(buf, pTextObj);
++  } else if (CPDF_ShadingObject* pShadingObj = pPageObj->AsShading()) {
++    ProcessShading(buf, pShadingObj);
+   }
+   pPageObj->SetDirty(false);
+ }
+@@ -1325,6 +1329,85 @@ void CPDF_PageContentGenerator::ProcessForm(fxcrt::ostringstream* buf,
+   EndProcessGraphics(*buf);
+ }
+ 
++// "sh" paints a shading over the current clip, in the coordinate system the
++// CTM sets up. It uses the alpha, blend mode and the rest of the general
++// graphics state, but neither the current color nor the line parameters.
++void CPDF_PageContentGenerator::ProcessShading(
++    fxcrt::ostringstream* buf,
++    CPDF_ShadingObject* pShadingObj) {
++  ByteString name = GetShadingResourceName(pShadingObj);
++  if (name.IsEmpty()) {
++    return;
++  }
++  pShadingObj->SetResourceName(name);
++
++  ProcessGraphics(buf, pShadingObj);
++
++  const CFX_Matrix& matrix = pShadingObj->matrix();
++  if (!matrix.IsIdentity()) {
++    WriteMatrix(*buf, matrix) << " cm ";
++  }
++
++  *buf << "/" << PDF_NameEncode(name) << " sh";
++  EndProcessGraphics(*buf);
++}
++
++ByteString CPDF_PageContentGenerator::GetShadingResourceName(
++    const CPDF_ShadingObject* pShadingObj) const {
++  const CPDF_ShadingPattern* pattern = pShadingObj->pattern();
++  if (!pattern || !pattern->IsShadingObject()) {
++    return ByteString();
++  }
++  // For a shading painted by "sh", the pattern object is the shading
++  // dictionary or stream itself.
++  RetainPtr<CPDF_Object> shading = pattern->GetPatternObj();
++  if (!shading) {
++    return ByteString();
++  }
++
++  ByteString name = FindResourceName("Shading", shading.Get(),
++                                     pShadingObj->GetResourceName());
++  if (!name.IsEmpty()) {
++    return name;
++  }
++
++  // The shading is not in the resources of this page (anymore), which
++  // happens when the object moved here from another page. Add it.
++  if (!document_) {
++    return ByteString();
++  }
++  if (!shading->GetObjNum()) {
++    // A shading dictionary that is a direct object of another resources
++    // dictionary cannot be referenced from here. Make it an indirect object;
++    // the dictionary that holds it writes a reference from then on.
++    document_->AddIndirectObject(shading);
++  }
++  return RealizeResource(shading.Get(), "Shading");
++}
++
++ByteString CPDF_PageContentGenerator::FindResourceName(
++    ByteStringView type,
++    const CPDF_Object* object,
++    const ByteString& preferred_name) const {
++  RetainPtr<const CPDF_Dictionary> resources = obj_holder_->GetResources();
++  RetainPtr<const CPDF_Dictionary> resources_of_type =
++      resources ? resources->GetDictFor(type) : nullptr;
++  if (!resources_of_type) {
++    return ByteString();
++  }
++  if (!preferred_name.IsEmpty() &&
++      resources_of_type->GetDirectObjectFor(preferred_name.AsStringView()) ==
++          object) {
++    return preferred_name;
++  }
++  for (const ByteString& key : resources_of_type->GetKeys()) {
++    if (resources_of_type->GetDirectObjectFor(key.AsStringView()) == object) {
++      return key;
++    }
++  }
++  return ByteString();
++}
++
+ // Processing path construction with operators from Table 4.9 of PDF spec 1.7:
+ // "re" appends a rectangle (here, used only if the whole path is a rectangle)
+ // "m" moves current point to the given coordinates
+diff --git a/core/fpdfapi/edit/cpdf_pagecontentgenerator.h b/core/fpdfapi/edit/cpdf_pagecontentgenerator.h
+index 751d1d880b..82538d16a7 100644
+--- a/core/fpdfapi/edit/cpdf_pagecontentgenerator.h
++++ b/core/fpdfapi/edit/cpdf_pagecontentgenerator.h
+@@ -32,6 +32,7 @@ class CPDF_PageObjectHolder;
+ class CPDF_Path;
+ class CPDF_PathObject;
+ class CPDF_Pattern;
++class CPDF_ShadingObject;
+ class CPDF_TextObject;
+ 
+ class CPDF_PageContentGenerator {
+@@ -61,6 +62,20 @@ class CPDF_PageContentGenerator {
+   bool WriteInlineImageColorSpace(fxcrt::ostringstream& buf,
+                                   CPDF_Image* image,
+                                   const CPDF_Object* color_space) const;
++  // Writes a shading object as `q <graphics state> <matrix> cm /Name sh Q`.
++  void ProcessShading(fxcrt::ostringstream* buf,
++                      CPDF_ShadingObject* pShadingObj);
++  // Returns the name of the /Shading resource `pShadingObj` paints, adding
++  // the shading to the resources when it is not there. Empty when there is
++  // nothing that could be named.
++  ByteString GetShadingResourceName(
++      const CPDF_ShadingObject* pShadingObj) const;
++  // Returns the name under which `object` is a resource of type `type`
++  // ("Shading", "ExtGState", ...), preferring `preferred_name` when several
++  // names refer to it. Empty when it is not a resource of this page or form.
++  ByteString FindResourceName(ByteStringView type,
++                              const CPDF_Object* object,
++                              const ByteString& preferred_name) const;
+   void ProcessGraphics(fxcrt::ostringstream* buf, CPDF_PageObject* pPageObj);
+   void ProcessDefaultGraphics(fxcrt::ostringstream* buf);
+   void ProcessText(fxcrt::ostringstream* buf, CPDF_TextObject* pTextObj);
+diff --git a/core/fpdfapi/edit/cpdf_pagecontentgenerator_unittest.cpp b/core/fpdfapi/edit/cpdf_pagecontentgenerator_unittest.cpp
+index 1914d71a76..e856ed0706 100644
+--- a/core/fpdfapi/edit/cpdf_pagecontentgenerator_unittest.cpp
++++ b/core/fpdfapi/edit/cpdf_pagecontentgenerator_unittest.cpp
+@@ -902,6 +902,132 @@ TEST_F(CPDFPageContentGeneratorTest, ProcessInlineImageWithNewBitmap) {
+   EXPECT_EQ(2, xobject->GetDict()->GetIntegerFor("Width"));
+ }
+ 
++namespace {
++
++// Makes `shading` an axial shading from red to blue along the x axis.
++void FillAxialShading(CPDF_Dictionary* shading) {
++  shading->SetNewFor<CPDF_Number>("ShadingType", 2);
++  shading->SetNewFor<CPDF_Name>("ColorSpace", "DeviceRGB");
++  auto coords = shading->SetNewFor<CPDF_Array>("Coords");
++  for (int value : {0, 0, 1, 0}) {
++    coords->AppendNew<CPDF_Number>(value);
++  }
++  auto function = shading->SetNewFor<CPDF_Dictionary>("Function");
++  function->SetNewFor<CPDF_Number>("FunctionType", 2);
++  auto domain = function->SetNewFor<CPDF_Array>("Domain");
++  domain->AppendNew<CPDF_Number>(0);
++  domain->AppendNew<CPDF_Number>(1);
++  auto c0 = function->SetNewFor<CPDF_Array>("C0");
++  for (int value : {1, 0, 0}) {
++    c0->AppendNew<CPDF_Number>(value);
++  }
++  auto c1 = function->SetNewFor<CPDF_Array>("C1");
++  for (int value : {0, 0, 1}) {
++    c1->AppendNew<CPDF_Number>(value);
++  }
++  function->SetNewFor<CPDF_Number>("N", 1);
++}
++
++}  // namespace
++
++TEST_F(CPDFPageContentGeneratorTest, ProcessShading) {
++  auto doc = std::make_unique<CPDF_TestDocument>();
++  doc->CreateNewDoc();
++
++  // One shading that is an indirect object, one that is a direct object of
++  // the resources dictionary.
++  auto resources = doc->New<CPDF_Dictionary>();
++  auto shadings = resources->SetNewFor<CPDF_Dictionary>("Shading");
++  auto indirect_shading = doc->NewIndirect<CPDF_Dictionary>();
++  FillAxialShading(indirect_shading.Get());
++  shadings->SetNewFor<CPDF_Reference>("Sh1", doc.get(),
++                                      indirect_shading->GetObjNum());
++  FillAxialShading(shadings->SetNewFor<CPDF_Dictionary>("Sh2").Get());
++
++  static constexpr char kContents[] =
++      "q 10 20 100 50 re W n 2 0 0 2 30 40 cm /Sh1 sh Q\n"
++      "/Sh2 sh\n"
++      "q 1 0 0 1 5 6 cm 3 0 0 3 0 0 cm /Sh1 sh Q\n";
++  RetainPtr<CPDF_Page> page = CreateParsedPage(doc.get(), resources, kContents);
++  ASSERT_EQ(3u, page->GetPageObjectCount());
++  for (size_t i = 0; i < 3; ++i) {
++    ASSERT_TRUE(page->GetPageObjectByIndex(i)->IsShading());
++  }
++
++  CPDF_PageContentGenerator generator(page.Get());
++  auto generate = [&](size_t index) {
++    fxcrt::ostringstream buf;
++    TestProcessPageObject(&generator, &buf, page->GetPageObjectByIndex(index));
++    return ByteString(buf);
++  };
++
++  // The clip, the matrix and the resource name are all kept.
++  EXPECT_EQ("q 10 20 100 50 re W n 2 0 0 2 30 40 cm /Sh1 sh Q\n", generate(0));
++  EXPECT_EQ("q /Sh2 sh Q\n", generate(1));
++  EXPECT_EQ("q 3 0 0 3 5 6 cm /Sh1 sh Q\n", generate(2));
++
++  // No resource was added, and the direct shading stays a direct object.
++  EXPECT_EQ(2u, shadings->size());
++  EXPECT_EQ(0u, shadings->GetDictFor("Sh2")->GetObjNum());
++
++  // Parsing the generated content gives the same objects again.
++  ByteString regenerated = generate(0) + generate(1) + generate(2);
++  RetainPtr<CPDF_Page> page2 =
++      CreateParsedPage(doc.get(), resources, regenerated.AsStringView());
++  ASSERT_EQ(3u, page2->GetPageObjectCount());
++  CPDF_PageContentGenerator generator2(page2.Get());
++  ByteString regenerated2;
++  for (size_t i = 0; i < 3; ++i) {
++    fxcrt::ostringstream buf;
++    TestProcessPageObject(&generator2, &buf, page2->GetPageObjectByIndex(i));
++    regenerated2 += ByteString(buf);
++  }
++  EXPECT_EQ(regenerated, regenerated2);
++}
++
++TEST_F(CPDFPageContentGeneratorTest, ProcessShadingOnAnotherPage) {
++  auto doc = std::make_unique<CPDF_TestDocument>();
++  doc->CreateNewDoc();
++
++  auto resources = doc->New<CPDF_Dictionary>();
++  auto shadings = resources->SetNewFor<CPDF_Dictionary>("Shading");
++  RetainPtr<CPDF_Dictionary> direct_shading =
++      shadings->SetNewFor<CPDF_Dictionary>("Sh1");
++  FillAxialShading(direct_shading.Get());
++
++  RetainPtr<CPDF_Page> page =
++      CreateParsedPage(doc.get(), resources, "50 0 0 50 10 10 cm /Sh1 sh\n");
++  ASSERT_EQ(1u, page->GetPageObjectCount());
++  CPDF_PageObject* shading_obj = page->GetPageObjectByIndex(0);
++  ASSERT_TRUE(shading_obj->IsShading());
++
++  // On a page without that resource, the shading becomes a resource of that
++  // page under a new name. A direct object cannot be shared between two
++  // resources dictionaries, so it becomes an indirect object.
++  RetainPtr<CPDF_Page> other_page = CreateParsedPage(doc.get(), nullptr, "");
++  CPDF_PageContentGenerator generator(other_page.Get());
++  const char kExpected[] = "q 50 0 0 50 10 10 cm /FXS1 sh Q\n";
++  {
++    fxcrt::ostringstream buf;
++    TestProcessPageObject(&generator, &buf, shading_obj);
++    EXPECT_EQ(kExpected, ByteString(buf));
++  }
++  RetainPtr<const CPDF_Dictionary> other_shadings =
++      other_page->GetResources()->GetDictFor("Shading");
++  ASSERT_TRUE(other_shadings);
++  EXPECT_EQ(direct_shading, other_shadings->GetDictFor("FXS1"));
++  EXPECT_NE(0u, direct_shading->GetObjNum());
++  EXPECT_EQ(direct_shading, shadings->GetDictFor("Sh1"));
++
++  // Generating again reuses the new resource.
++  {
++    fxcrt::ostringstream buf;
++    TestProcessPageObject(&generator, &buf, shading_obj);
++    EXPECT_EQ(kExpected, ByteString(buf));
++  }
++  EXPECT_EQ(1u, other_shadings->size());
++}
++
+ TEST_F(CPDFPageContentGeneratorTest, ProcessEmptyForm) {
+   auto doc = std::make_unique<CPDF_TestDocument>();
+   doc->CreateNewDoc();
+diff --git a/core/fpdfapi/page/cpdf_streamcontentparser.cpp b/core/fpdfapi/page/cpdf_streamcontentparser.cpp
+index 53a5e534eb..a6aecd5d1f 100644
+--- a/core/fpdfapi/page/cpdf_streamcontentparser.cpp
++++ b/core/fpdfapi/page/cpdf_streamcontentparser.cpp
+@@ -1240,6 +1240,8 @@ void CPDF_StreamContentParser::Handle_ShadeFill() {
+       cur_states_->current_transformation_matrix() * mt_content_to_user_;
+   auto pObj = std::make_unique<CPDF_ShadingObject>(GetCurrentStreamIndex(),
+                                                    pShading, matrix);
++  // Save the resource name, so the object can be written back with it.
++  pObj->SetResourceName(GetString(0));
+   SetGraphicStates(pObj.get(), false, false, false);
+   CFX_FloatRect bbox =
+       pObj->clip_path().HasRef() ? pObj->clip_path().GetClipBox() : bbox_;
+-- 
+2.51.2.windows.1
+
