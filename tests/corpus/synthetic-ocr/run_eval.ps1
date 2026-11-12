@@ -11,9 +11,11 @@
   的一样。这样跑出来的耗时互相挤占，不能当速度数据；量速度用 measure_speed.ps1。
 
 .EXAMPLE
-  pwsh tests/corpus/synthetic-ocr/run_eval.ps1 -Name default
-  pwsh tests/corpus/synthetic-ocr/run_eval.ps1 -Name en-rec -Filter 'en_*' -OcrArgs @('--lang','en')
-  pwsh tests/corpus/synthetic-ocr/run_eval.ps1 -Name server -Filter '*_300' -OcrArgs @('--server') -Shards 3
+  在 PowerShell 7 里直接调用。-Filter、-OcrArgs 是数组，写成 `pwsh run_eval.ps1 -OcrArgs ...` 另起一个
+  进程时传不进去（多个值会报错，或者被当成一个值）。
+  ./tests/corpus/synthetic-ocr/run_eval.ps1 -Name default
+  ./tests/corpus/synthetic-ocr/run_eval.ps1 -Name en-rec -Filter 'en_*' -OcrArgs '--lang','en'
+  ./tests/corpus/synthetic-ocr/run_eval.ps1 -Name server -Filter '*_300' -OcrArgs '--server' -Shards 3
 #>
 param(
     [Parameter(Mandatory)] [string]$Name,
@@ -21,7 +23,8 @@ param(
     [string[]]$OcrArgs = @(),
     [string[]]$EvalArgs = @(),
     [string]$Cli = '',
-    # 样本子目录：images（评测用的全套）、speed（量速度用的三页）、images-red（make_red_channel.py 出的红色通道图）
+    # 样本子目录：images（评测用的全套）、speed（量速度用的三页）、images-red（make_red_channel.py 出的红色通道图）、
+    # images-bin（make_binary.py 出的二值图）
     [string]$Set = 'images',
     [ValidateRange(1, 16)] [int]$Shards = 1
 )
