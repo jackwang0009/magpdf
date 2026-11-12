@@ -10,7 +10,7 @@ use std::time::Instant;
 use magpdf_content::content::Content;
 use magpdf_content::map::{self, ObjKind, PageMap, Unmatched};
 use magpdf_content::pdf::PdfDocument;
-use magpdf_content::pdf::pages::{PageInfo, walk_pages};
+use magpdf_content::pdf::pages::{PageInfo, generator_may_abort, walk_pages};
 use magpdf_content::pdf::pairs::check_page;
 use magpdf_content::rewrite::{
     EditSet, EditTarget, PageUpdate, plan_page, save_full_rewrite, save_incremental,
@@ -33,6 +33,9 @@ pub(super) const REASON_REWRITE: &str = "改写层写不了这次修改";
 /// 对应本身没问题、只是文件的结构让改写层没法把这一页写回去（比如内容流多页共用、页字典又改不了）。
 /// 汇总时这样的页也不算“对不上”。
 pub(super) const REASON_SAVE: &str = "改写层没法把这一页写回文件";
+/// 这份文件不能交给 PDFium 的生成器（`generator_may_abort`）：回退的页留着原样，对照组不跑。
+const NOTE_GENERATOR_ABORTS: &str =
+    "PDFium 的生成器在这份文件上会让进程中止（页树里有一页的 /Type 不是 Page），没有跑";
 
 /// 退回生成器的原因（汇总时按它计数，所以只写类别，细节放进 [`PageWork::notes`]）。
 mod reason {
@@ -188,6 +191,8 @@ pub fn run_file(
         }
     }
     timings.map_us = micros(t);
+    // 这种文件一交给 PDFium 的生成器进程就中止：回退和对照组都不能跑。
+    let generator_unsafe = pdf.as_ref().is_some_and(generator_may_abort);
 
     // 随机修改：每页独立播种，抽哪些对象与这一页对不对得上无关。
     if config.modify_ratio > 0.0 {
@@ -286,7 +291,15 @@ pub fn run_file(
     let needs_fallback = work
         .iter()
         .any(|w| w.error.is_none() && w.route() == Route::Fallback && w.objects > 0);
-    let saved = if needs_fallback {
+    let saved = if needs_fallback && generator_unsafe {
+        // 这些页留着原样；做了修改的页，后面的像素比对会报出差异。
+        for w in &mut work {
+            if w.error.is_none() && w.route() == Route::Fallback && w.objects > 0 {
+                w.notes.push(format!("回退：{NOTE_GENERATOR_ABORTS}"));
+            }
+        }
+        stage_a
+    } else if needs_fallback {
         match regenerate_fallback_pages(lib, &stage_a, &mut work) {
             Ok(bytes) => bytes,
             Err(e) => {
@@ -356,7 +369,11 @@ pub fn run_file(
             }
             timings.render_us = micros(t);
 
-            if config.control {
+            if config.control && generator_unsafe {
+                for w in work.iter_mut().filter(|w| w.error.is_none()) {
+                    w.control = Some(Check::error(NOTE_GENERATOR_ABORTS));
+                }
+            } else if config.control {
                 let t = Instant::now();
                 let control = run_control(lib, &data, &work).and_then(|bytes| {
                     Document::load_bytes(lib, bytes, None)

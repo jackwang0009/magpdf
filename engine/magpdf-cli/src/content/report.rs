@@ -13,7 +13,7 @@ use super::run::{REASON_REWRITE, REASON_SAVE};
 pub struct Tally {
     pub pass: usize,
     pub diff: usize,
-    /// 预期画面就渲染不出来的页，不计入比例。
+    /// 比不了的页，不计入比例：预期画面就渲染不出来，或者（对照组）生成器在这份文件上跑不了。
     pub error: usize,
 }
 

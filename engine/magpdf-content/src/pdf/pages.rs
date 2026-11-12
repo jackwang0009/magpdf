@@ -239,6 +239,25 @@ struct Frame {
 ///
 /// 相当于按页号从小到大依次调用 `CPDF_Document::GetPageDictionary`。
 pub fn walk_pages(doc: &PdfDocument) -> Vec<Option<PageInfo>> {
+    walk(doc).0
+}
+
+/// 这份文件交给 PDFium 的内容流生成器会不会让进程中止。
+///
+/// 生成器写资源字典之前（`CPDF_PageContentGenerator::UpdateResourcesDict` →
+/// `IsPageResourceShared`）要给文档的**每一页**各构造一个 `CPDF_Page`，而构造函数里有
+/// `CHECK(IsValidPageDictLoose(…))`：只要有一页的字典取得到、`/Type` 写了却不是 `Page`
+/// （`FPDF_LoadPage` 对这种页只是返回失败），进程就在这里中止。原版和修补版都一样
+/// （公开测试集的 `bad_page_type.pdf`）。
+///
+/// 这里的判断偏保守：`IsPageResourceShared` 在走到那一页之前就得出结论的情形也算在内。
+pub fn generator_may_abort(doc: &PdfDocument) -> bool {
+    walk(doc).1
+}
+
+/// [`walk_pages`] 的实现。第二个返回值：有没有哪一页的字典取得到、但类型不对（见
+/// [`generator_may_abort`]）。
+fn walk(doc: &PdfDocument) -> (Vec<Option<PageInfo>>, bool) {
     let Counted {
         count,
         fixed_as_page,
@@ -326,13 +345,15 @@ pub fn walk_pages(doc: &PdfDocument) -> Vec<Option<PageInfo>> {
     }
     found.truncate(count);
     found.resize(count, None);
-    found
+    let mut bad_type = false;
+    let pages = found
         .into_iter()
         .enumerate()
         .map(|(index, node)| {
             let (number, dict, path) = node?;
             let type_fixed = number != 0 && fixed_as_page.contains(&number);
             if !type_fixed && !is_valid_page_dict(doc, &dict) {
+                bad_type = true;
                 return None;
             }
             let contents = contents_of(doc, &dict);
@@ -346,7 +367,8 @@ pub fn walk_pages(doc: &PdfDocument) -> Vec<Option<PageInfo>> {
                 path,
             })
         })
-        .collect()
+        .collect();
+    (pages, bad_type)
 }
 
 /// 页的 `/Contents`（`CPDF_ContentParser` 的构造函数）。
@@ -537,6 +559,40 @@ mod tests {
         ]);
         assert_eq!(pages.len(), 1);
         assert!(pages[0].is_some());
+    }
+
+    #[test]
+    fn generator_aborts_only_on_a_page_dict_of_the_wrong_type() {
+        let may_abort = |objects: &[(u32, &str)]| {
+            generator_may_abort(&PdfDocument::load(build(objects, "")).expect("能打开"))
+        };
+        // bad_page_type.pdf 的结构：第二页的字典取得到，/Type 却不是 Page。
+        assert!(may_abort(&[
+            (1, CATALOG),
+            (2, "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>"),
+            (3, "<< /Type /Page /Parent 2 0 R >>"),
+            (4, "<< /Type /Template /Parent 2 0 R >>"),
+        ]));
+        // 类型写成引用、指向的不是名字 Page，也一样。
+        assert!(may_abort(&[
+            (1, CATALOG),
+            (2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+            (3, "<< /Type 4 0 R /Parent 2 0 R >>"),
+            (4, "(Page)"),
+        ]));
+        // 数页数时被 PDFium 改成了 Page 的不算。
+        assert!(!may_abort(&[
+            (1, CATALOG),
+            (2, "<< /Type /Pages /Kids [3 0 R] >>"),
+            (3, "<< /Type /Template /Parent 2 0 R >>"),
+        ]));
+        // 取不到字典的页（PDFium 的生成器会跳过）、没写 /Type 的页都不算。
+        assert!(!may_abort(&[
+            (1, CATALOG),
+            (2, "<< /Type /Pages /Kids [9 0 R 3 0 R 4 0 R] /Count 4 >>"),
+            (3, "<< /Parent 2 0 R >>"),
+            (4, "<< /Type /Page /Parent 2 0 R >>"),
+        ]));
     }
 
     #[test]
