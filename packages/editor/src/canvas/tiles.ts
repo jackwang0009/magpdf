@@ -89,6 +89,24 @@ export function tilePageRect(grid: TileGrid, tx: number, ty: number): Rect {
   };
 }
 
+/** 页面上一块地方变了以后，往外再多重画几个设备像素：抗锯齿会画到对象的包围盒外面一点。 */
+export const DAMAGE_MARGIN_PX = 2;
+
+/**
+ * 这块瓦片碰不碰得到页面上的 `rect`（页面坐标，pt）。`rect` 先往外放宽 `marginPx` 个设备像素
+ * （按这块瓦片的缩放档换算），擦边的也算碰到。
+ */
+export function tileTouches(key: TileKey, rect: Rect, marginPx = DAMAGE_MARGIN_PX): boolean {
+  const pxPerPt = levelPxPerPt(key.level);
+  const left = rect.x * pxPerPt - marginPx;
+  const top = rect.y * pxPerPt - marginPx;
+  const right = (rect.x + rect.width) * pxPerPt + marginPx;
+  const bottom = (rect.y + rect.height) * pxPerPt + marginPx;
+  const x0 = key.tx * TILE_SIZE;
+  const y0 = key.ty * TILE_SIZE;
+  return right > x0 && left < x0 + TILE_SIZE && bottom > y0 && top < y0 + TILE_SIZE;
+}
+
 /** 与页面局部矩形（pt）相交的瓦片索引范围，按行优先返回。 */
 export function tilesInPageRect(
   grid: TileGrid,

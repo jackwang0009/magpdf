@@ -9,7 +9,7 @@ import { t } from '../i18n';
 import { createEditorStore } from '../store/editorStore';
 import { NUDGE_STEP_PT } from '../tools/selectTool';
 import { cssPxPerPt } from '../view/viewState';
-import { CanvasController } from './canvasController';
+import { CanvasController, repaintedArea } from './canvasController';
 import { GlTileRenderer } from './glRenderer';
 import { AbortError } from './tileProvider';
 import type { RawPixels, TileProvider, TileRequest, TileResult } from './tileProvider';
@@ -59,6 +59,30 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   document.body.replaceChildren();
+});
+
+describe('页面的画面变了哪里', () => {
+  const page = { index: 0, width: 200, height: 100, objects: [] };
+  const rect: Rect = { x: 10, y: 20, width: 30, height: 40 };
+
+  it('修订号没变就没变；变了而且说了变的是哪一块，只重画那一块', () => {
+    expect(repaintedArea({ ...page, revision: 1 }, { ...page, revision: 1 })).toBeNull();
+    expect(
+      repaintedArea({ ...page, revision: 1 }, { ...page, revision: 2, damage: { since: 1, rect } }),
+    ).toEqual(rect);
+    expect(repaintedArea({ ...page, revision: 1 }, { ...page, revision: 2 })).toBe('page');
+  });
+
+  it('中间漏看了一次修订号：说的那一块不全，整页重画', () => {
+    expect(
+      repaintedArea({ ...page, revision: 1 }, { ...page, revision: 3, damage: { since: 2, rect } }),
+    ).toBe('page');
+  });
+
+  it('模拟文档没有修订号：页面对象换了就整页重画', () => {
+    expect(repaintedArea(page, { ...page, objects: [] })).toBe('page');
+    expect(repaintedArea(page, page)).toBeNull();
+  });
 });
 
 describe('画布上的“WebGL2 不可用”提示层', () => {

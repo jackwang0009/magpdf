@@ -1,8 +1,9 @@
+import type { Rect } from '../geometry';
 import type { TileRequestSpec } from './renderPlan';
 import type { TileCache, TileEntry } from './tileCache';
 import { isAbortError, releasePixels } from './tileProvider';
 import type { TileProvider, TileRequest } from './tileProvider';
-import { TILE_SIZE, tileBytes } from './tiles';
+import { TILE_SIZE, tileBytes, tileTouches } from './tiles';
 
 /**
  * 瓦片调度：维护“想要的瓦片”队列，按优先级向 TileProvider 发请求，限制并发，视图移走后取消不再需要的请求。
@@ -86,6 +87,24 @@ export class TileScheduler {
     }
     this.queue = this.queue.filter((spec) => spec.key.page !== page);
     this.cache.markPageStale(page);
+  }
+
+  /**
+   * 某页上只有 `rect`（页面坐标，pt）这一块画面变了：和它相交的瓦片在途的请求取消、排队的拿掉，缓存里的
+   * 标成旧的。别处的瓦片还是对的，留着不动，不用再向引擎要。
+   */
+  invalidateArea(page: number, rect: Rect): void {
+    const touched = (spec: TileRequestSpec) =>
+      spec.key.page === page && tileTouches(spec.key, rect);
+    for (const [id, pending] of this.pending) {
+      if (touched(pending.spec)) {
+        pending.controller.abort();
+        this.pending.delete(id);
+        this.stats.aborted++;
+      }
+    }
+    this.queue = this.queue.filter((spec) => !touched(spec));
+    this.cache.markAreaStale(page, rect);
   }
 
   /** 页面的排布变了（页数、尺寸）：在途和排队的请求全部作废。缓存由调用方清空。 */

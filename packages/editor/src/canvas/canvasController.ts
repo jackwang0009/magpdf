@@ -514,7 +514,9 @@ export class CanvasController {
       this.cache.clear();
     } else {
       for (let i = 0; i < snapshot.pages.length; i++) {
-        if (pageRepainted(previous.pages[i]!, snapshot.pages[i]!)) this.scheduler.invalidatePage(i);
+        const area = repaintedArea(previous.pages[i]!, snapshot.pages[i]!);
+        if (area === 'page') this.scheduler.invalidatePage(i);
+        else if (area) this.scheduler.invalidateArea(i, area);
       }
     }
     this.invalidate();
@@ -1252,15 +1254,15 @@ function buildLayout(snapshot: DocumentSnapshot | undefined): PageLayout {
 }
 
 /**
- * 这一页的画面是不是变了（瓦片要重画）。给了修订号的页只看修订号；
- * 没给的（模拟文档）页面对象换了就算变了。
+ * 这一页的画面变了没有、变了哪里：`null` 没变；`'page'` 整页重画；矩形（页面坐标，pt）只重画和它相交的瓦片。
+ * 给了修订号的页只看修订号，修订号正是从上一个变过来、又说了变的是哪一块（`damage`），就只重画那一块；
+ * 没给修订号的（模拟文档）页面对象换了就算整页变了。
  */
-function pageRepainted(before: PageSnapshot, after: PageSnapshot): boolean {
-  if (before === after) return false;
-  if (before.revision !== undefined || after.revision !== undefined) {
-    return before.revision !== after.revision;
-  }
-  return true;
+export function repaintedArea(before: PageSnapshot, after: PageSnapshot): Rect | 'page' | null {
+  if (before === after) return null;
+  if (before.revision === undefined && after.revision === undefined) return 'page';
+  if (before.revision === after.revision) return null;
+  return after.damage && after.damage.since === before.revision ? after.damage.rect : 'page';
 }
 
 function pagesResized(a: DocumentSnapshot, b: DocumentSnapshot): boolean {

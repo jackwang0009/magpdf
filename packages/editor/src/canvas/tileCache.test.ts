@@ -38,6 +38,26 @@ describe('瓦片 LRU 缓存', () => {
     expect(cache.has('a')).toBe(false);
   });
 
+  it('只有一块地方变了：各个缩放档里碰到它的瓦片标成旧的，别的不动', () => {
+    const cache = new TileCache(1000);
+    const at = (id: string, page: number, level: number, tx: number): TileEntry => ({
+      ...entry(id, 10, page),
+      key: { page, level, tx, ty: 0 },
+    });
+    cache.set(at('100%-0', 0, 6, 0)); // x 0–192 pt
+    cache.set(at('100%-1', 0, 6, 1)); // x 192–384 pt
+    cache.set(at('200%-0', 0, 8, 0)); // x 0–96 pt
+    cache.set(at('200%-1', 0, 8, 1)); // x 96–192 pt
+    cache.set(at('第 2 页', 1, 6, 0));
+    cache.markAreaStale(0, { x: 10, y: 10, width: 20, height: 20 });
+    const fresh = ['100%-0', '100%-1', '200%-0', '200%-1', '第 2 页'].filter((id) =>
+      cache.isFresh(id),
+    );
+    expect(fresh).toEqual(['100%-1', '200%-1', '第 2 页']);
+    // 旧的先留着顶上
+    expect(cache.has('100%-0')).toBe(true);
+  });
+
   it('按页失效只清掉该页', () => {
     const cache = new TileCache(1000);
     cache.set(entry('p0', 100, 0));

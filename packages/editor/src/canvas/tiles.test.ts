@@ -7,6 +7,7 @@ import {
   pageTileGrid,
   tileBytes,
   tilePageRect,
+  tileTouches,
   tilesInPageRect,
 } from './tiles';
 
@@ -74,5 +75,16 @@ describe('页面瓦片网格', () => {
 
   it('瓦片字节数按 RGBA 计', () => {
     expect(tileBytes(TILE_SIZE, TILE_SIZE)).toBe(TILE_SIZE * TILE_SIZE * 4);
+  });
+
+  it('瓦片碰不碰得到页面上的一块地方：往外放宽两个设备像素，擦边也算', () => {
+    // 100% 档（每 pt 4/3 像素），第 2 列：x 192–384 pt，y 0–192 pt
+    const key = { page: 0, level: 6, tx: 1, ty: 0 };
+    expect(tileTouches(key, { x: 200, y: 10, width: 10, height: 10 })).toBe(true);
+    // 右边到 150 pt，也就是 200 像素，放宽之后到 202，碰不到从 256 像素开始的这一块
+    expect(tileTouches(key, { x: 100, y: 10, width: 50, height: 10 })).toBe(false);
+    // 右边到 191 pt，离这一块不到两个像素
+    expect(tileTouches(key, { x: 150, y: 10, width: 41, height: 10 })).toBe(true);
+    expect(tileTouches(key, { x: 200, y: 200, width: 10, height: 10 })).toBe(false);
   });
 });

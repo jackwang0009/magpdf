@@ -586,6 +586,24 @@ async fn edit_commands_change_the_document_and_can_be_undone() {
         )
         .await;
     assert_eq!(version, 1);
+    // 画面变了的地方：挪之前和挪之后的包围盒合在一起，界面只重画这一块
+    let mut changed = changed;
+    let area = changed["changes"][0]
+        .as_object_mut()
+        .and_then(|change| change.remove("area"))
+        .expect("doc.changed 带着画面变了的地方");
+    let area: Vec<f64> = area
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_f64().unwrap())
+        .collect();
+    assert!(
+        area.iter()
+            .zip([left, bottom, right + 5.0, top])
+            .all(|(got, want)| (got - want).abs() < 0.6),
+        "{area:?}"
+    );
     assert_eq!(
         changed,
         json!({

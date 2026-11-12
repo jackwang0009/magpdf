@@ -662,6 +662,34 @@ describe('EngineSession：引擎推送的变化', () => {
     expect(snapshot()).toBe(settled);
   });
 
+  it('引擎说了画面变在哪里：记成这一页修订号的变化范围（页面坐标）；下次没说就整页重画', async () => {
+    const { engine, snapshot } = await attached();
+    const before = snapshot().pages[0]!;
+    engine.transport.emit(EVENT.DOC_CHANGED, {
+      docId: 1,
+      version: 1,
+      changes: [{ pageId: 20, added: [], removed: [], modified: [2], area: [30, 396, 130, 416] }],
+      pagesChanged: false,
+    });
+    await flush();
+    const after = snapshot().pages[0]!;
+    expect(after.revision).not.toBe(before.revision);
+    expect(after.damage).toEqual({
+      since: before.revision,
+      rect: { x: 30, y: 24, width: 100, height: 20 },
+    });
+
+    engine.transport.emit(EVENT.DOC_CHANGED, {
+      docId: 1,
+      version: 2,
+      changes: [{ pageId: 20, added: [], removed: [], modified: [2] }],
+      pagesChanged: false,
+    });
+    await flush();
+    expect(snapshot().pages[0]!.revision).not.toBe(after.revision);
+    expect(snapshot().pages[0]!.damage).toBeUndefined();
+  });
+
   it('引擎重启：按路径对上新的 docId，页面和对象重新取，视图留着；对不上的关掉并告诉用户', async () => {
     const { engine, store, session, open, notices, snapshot, objects } = setup();
     open.push(engine.open('提单.pdf', fourPages()), engine.open('发票.pdf', [plainPage(30)]));

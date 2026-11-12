@@ -1,5 +1,7 @@
+import type { Rect } from '../geometry';
 import { releasePixels } from './tileProvider';
 import type { TilePixels } from './tileProvider';
+import { tileTouches } from './tiles';
 import type { TileKey } from './tiles';
 
 /**
@@ -100,6 +102,16 @@ export class TileCache {
     for (const id of ids) {
       const entry = this.entries.get(id);
       if (entry) entry.stale = true;
+    }
+  }
+
+  /** 某页上只有 `rect`（页面坐标，pt）这一块变了：和它相交的瓦片（各个缩放档）标成旧的，别的不动。 */
+  markAreaStale(page: number, rect: Rect): void {
+    const ids = this.byPage.get(page);
+    if (!ids) return;
+    for (const id of ids) {
+      const entry = this.entries.get(id);
+      if (entry && tileTouches(entry.key, rect)) entry.stale = true;
     }
   }
 

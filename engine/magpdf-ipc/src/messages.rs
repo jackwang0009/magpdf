@@ -546,7 +546,7 @@ pub struct EditResult {
 }
 
 /// `doc.changed` 里一页上的变化。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct PageChange {
@@ -554,10 +554,14 @@ pub struct PageChange {
     pub added: Vec<u64>,
     pub removed: Vec<u64>,
     pub modified: Vec<u64>,
+    /// 这一页画面可能变了的地方 `[left, bottom, right, top]`（PDF 用户空间）：动过的对象改之前和改之后
+    /// 包围盒的并集。界面只重画和它相交的瓦片；没有这一项时整页重画。V05 加的，《接口协议》第 7 节还没写。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub area: Option<[f32; 4]>,
 }
 
 /// `doc.changed` 事件的参数（《接口协议》第 7 节）。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct DocChanged {

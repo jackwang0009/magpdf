@@ -857,6 +857,7 @@ async fn apply_edit(
                 added: page.added.iter().map(|id| id.0).collect(),
                 removed: page.removed.iter().map(|id| id.0).collect(),
                 modified: page.modified.iter().map(|id| id.0).collect(),
+                area: page.area.map(|r| [r.left, r.bottom, r.right, r.top]),
             })
             .collect(),
         pages_changed: false,

@@ -91,6 +91,11 @@ export interface PageSnapshot {
    */
   readonly revision?: number;
   /**
+   * 修订号这一次是怎么变的：从 `since` 变过来，画面只有 `rect`（页面坐标，pt）这一块变了。画布看到修订号
+   * 正是从 `since` 变过来的，就只重画和 `rect` 相交的瓦片；对不上（中间漏看了一次）或者没有这一项，整页重画。
+   */
+  readonly damage?: { readonly since: number; readonly rect: Rect };
+  /**
    * 有值表示这一页没有通过保真校验（方案 2.3）：只能在上面添加内容，原有的对象可以选中、查看，
    * 不能移动、缩放、删除。`reason` 是引擎给的具体原因，供排查用；给用户看的说法由界面统一写。
    */

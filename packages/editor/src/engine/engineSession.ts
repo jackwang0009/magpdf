@@ -29,6 +29,7 @@ import {
 } from '../document/pageSpace';
 import type { Matrix } from '../document/pageSpace';
 import type { DocumentSnapshot, ObjectType, PageObject } from '../document/types';
+import type { Rect } from '../geometry';
 import { format, t } from '../i18n';
 import type { EditorHost, HostNotice } from '../shell/editorHost';
 import type { EditorStore } from '../store/editorStore';
@@ -589,25 +590,32 @@ export class EngineSession implements EditorHost {
   }
 
   /**
-   * 文档变了（《接口协议》5.2）：记下新版本号；变了的页取一个新的修订号，画布据此重画；
-   * 这些页的对象列表界面上在用的话，重新取一份。
+   * 文档变了（《接口协议》5.2）：记下新版本号；变了的页取一个新的修订号，画布据此重画。引擎给了画面变了的
+   * 地方（`area`）的话一并记下，画布只重画那一块。这些页的对象列表界面上在用的话，重新取一份。
    */
   private onDocumentChanged(change: DocChanged): void {
     const document = this.find(change.docId);
     if (!document) return;
     document.version = Math.max(document.version, change.version);
-    const repainted = new Map<number, number>();
-    for (const { pageId } of change.changes) {
+    const repainted = new Map<number, { revision: number; rect: Rect | null }>();
+    for (const { pageId, area } of change.changes) {
       const index = document.pages.findIndex((page) => page.pageId === pageId);
-      if (index >= 0) repainted.set(index, ++this.revision);
+      if (index < 0) continue;
+      const display = document.pages[index]!.display;
+      const rect = area && display ? userBoxToPageRect(display, area) : null;
+      repainted.set(index, { revision: ++this.revision, rect });
     }
     this.mutate(document, (snapshot) => ({
       ...snapshot,
       version: document.version,
       dirty: true,
       pages: snapshot.pages.map((page) => {
-        const revision = repainted.get(page.index);
-        return revision === undefined ? page : { ...page, revision };
+        const next = repainted.get(page.index);
+        if (!next) return page;
+        const { damage: _previous, ...rest } = page;
+        return next.rect && page.revision !== undefined
+          ? { ...rest, revision: next.revision, damage: { since: page.revision, rect: next.rect } }
+          : { ...rest, revision: next.revision };
       }),
     }));
     for (const index of repainted.keys()) {

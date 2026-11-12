@@ -43,16 +43,19 @@ pub struct ObjectSummary {
 }
 
 /// 一页上的变化。
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct PageChange {
     pub page: usize,
     pub added: Vec<ObjectId>,
     pub removed: Vec<ObjectId>,
     pub modified: Vec<ObjectId>,
+    /// 这一页画面可能变了的地方（PDF 用户空间）：动过的对象改之前和改之后包围盒的并集。界面只重画和它
+    /// 相交的瓦片。`None` 表示说不准（有对象没有包围盒），整页都要重画。
+    pub area: Option<Rect>,
 }
 
 /// 一条命令（或一次撤销、重做）之后文档的变化，对应 `doc.changed` 事件（《接口协议》第 7 节）。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Change {
     /// 变化之后的文档版本号。
     pub version: u64,
@@ -125,6 +128,8 @@ struct Command {
 #[derive(Default)]
 struct ChangeLog {
     pages: BTreeMap<usize, PageChange>,
+    /// 各页画过对象的地方；有对象没有包围盒的页记 `None`（整页）。
+    areas: BTreeMap<usize, Option<Rect>>,
 }
 
 impl ChangeLog {
@@ -135,11 +140,32 @@ impl ChangeLog {
         })
     }
 
-    fn finish(self, version: u64) -> Change {
+    /// 这一页上，某个对象改之前或改之后画在 `bounds` 这里。
+    fn painted(&mut self, page: usize, bounds: Option<Rect>) {
+        let area = self.areas.entry(page).or_insert(bounds);
+        *area = match (*area, bounds) {
+            (Some(a), Some(b)) => Some(union(a, b)),
+            _ => None,
+        };
+    }
+
+    fn finish(mut self, version: u64) -> Change {
+        for (page, change) in &mut self.pages {
+            change.area = self.areas.get(page).copied().flatten();
+        }
         Change {
             version,
             pages: self.pages.into_values().collect(),
         }
+    }
+}
+
+fn union(a: Rect, b: Rect) -> Rect {
+    Rect {
+        left: a.left.min(b.left),
+        bottom: a.bottom.min(b.bottom),
+        right: a.right.max(b.right),
+        top: a.top.max(b.top),
     }
 }
 
@@ -514,8 +540,14 @@ impl<'lib> Session<'lib> {
             } => {
                 let (page, z) = self.locate(*id)?;
                 let matrix = if forward { *matrix } else { *inverse };
-                self.with_object(page, z, *id, |object| Ok(object.transform(matrix)?))?;
+                let (was, now) = self.with_object(page, z, *id, |object| {
+                    let was = object.bounds();
+                    object.transform(matrix)?;
+                    Ok((was, object.bounds()))
+                })?;
                 log.page(page).modified.push(*id);
+                log.painted(page, was);
+                log.painted(page, now);
             }
             Atom::Fill {
                 id,
@@ -524,37 +556,46 @@ impl<'lib> Session<'lib> {
                 keep_alpha,
             } => {
                 let (page, z) = self.locate(*id)?;
-                if forward {
-                    let (was, now) = self.with_object(page, z, *id, |object| {
+                let bounds = if forward {
+                    let (was, now, bounds) = self.with_object(page, z, *id, |object| {
                         let was = object.fill_color();
                         let mut now = *after;
                         if *keep_alpha && let Some(was) = was {
                             now.a = was.a;
                         }
                         object.set_fill_color(now)?;
-                        Ok((was, now))
+                        Ok((was, now, object.bounds()))
                     })?;
                     if before.is_none() {
                         *before = was;
                     }
                     *after = now;
                     *keep_alpha = false;
+                    bounds
                 } else {
                     let color = before.ok_or(EditError::NoFill)?;
-                    self.with_object(page, z, *id, |object| Ok(object.set_fill_color(color)?))?;
-                }
+                    self.with_object(page, z, *id, |object| {
+                        object.set_fill_color(color)?;
+                        Ok(object.bounds())
+                    })?
+                };
                 log.page(page).modified.push(*id);
+                log.painted(page, bounds);
             }
             Atom::Delete { id, slot, object } => {
                 if forward {
                     let (page, z) = self.locate(*id)?;
-                    let detached = self.with_page(page, |page_obj| Ok(page_obj.detach_at(z)?))?;
+                    let (detached, was) = self.with_page(page, |page_obj| {
+                        let was = page_obj.object(z).and_then(|o| o.bounds());
+                        Ok((page_obj.detach_at(z)?, was))
+                    })?;
                     if let Some(ids) = self.ids.get_mut(&page) {
                         ids.remove(z);
                     }
                     *slot = Some((page, z));
                     *object = Some(detached);
                     log.page(page).removed.push(*id);
+                    log.painted(page, was);
                 } else {
                     let (page, z) = slot.ok_or(EditError::NoObject(*id))?;
                     let detached = object.as_mut().ok_or(EditError::NoObject(*id))?;
@@ -565,8 +606,10 @@ impl<'lib> Session<'lib> {
                     if let Some(ids) = self.ids.get_mut(&page) {
                         ids.insert(z.min(ids.len()), *id);
                     }
+                    let now = page_obj.object(z).and_then(|o| o.bounds());
                     page_obj.generate_content()?;
                     log.page(page).added.push(*id);
+                    log.painted(page, now);
                 }
             }
         }
@@ -752,7 +795,7 @@ fn skipped_when_picking(
 
 #[cfg(test)]
 mod tests {
-    use pdfium_sys::{Library, Matrix, PageObject, Rgba};
+    use pdfium_sys::{Library, Matrix, PageObject, Rect, Rgba};
 
     use super::{EditError, HitMode, ObjectId, Session};
 
@@ -874,6 +917,41 @@ mod tests {
             assert!(session.objects(0).unwrap().is_empty());
             session.undo().unwrap();
             assert!(session.history().is_empty());
+        });
+    }
+
+    /// 每一页的变化带着画面可能变了的地方：动过的对象改之前和改之后包围盒的并集，界面只重画那一块。
+    #[test]
+    fn changes_carry_the_area_to_repaint() {
+        with_session(|session| {
+            let id = session.objects(0).unwrap()[0].id;
+            let area = |change: &super::Change| change.pages[0].area.expect("对象有包围盒");
+            let near = |got: Rect, want: [f32; 4]| {
+                [got.left, got.bottom, got.right, got.top]
+                    .iter()
+                    .zip(want)
+                    .all(|(a, b)| (a - b).abs() < 0.6)
+            };
+            let home = [10.0, 10.0, 50.0, 30.0];
+            let both = [10.0, 10.0, 100.0, 30.0];
+
+            // 挪 50 pt：原来的地方和新的地方都要重画；撤销也一样
+            let moved = session
+                .transform(&[id], Matrix::translation(50.0, 0.0))
+                .unwrap();
+            assert!(near(area(&moved), both), "{:?}", moved.pages[0].area);
+            assert!(near(area(&session.undo().unwrap()), both));
+
+            // 改颜色、删除、撤销删除：对象所在的地方
+            let red = Rgba {
+                r: 200,
+                g: 0,
+                b: 0,
+                a: 255,
+            };
+            assert!(near(area(&session.set_fill(&[id], red).unwrap()), home));
+            assert!(near(area(&session.delete(&[id]).unwrap()), home));
+            assert!(near(area(&session.undo().unwrap()), home));
         });
     }
 

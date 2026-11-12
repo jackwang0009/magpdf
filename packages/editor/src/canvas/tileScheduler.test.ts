@@ -146,6 +146,21 @@ describe('瓦片调度', () => {
     expect(cache.has(inFlight.id)).toBe(false);
   });
 
+  it('只有一块地方变了：碰到它的瓦片重新要，别的瓦片留着、在途的照样有效', async () => {
+    const { provider, cache, scheduler } = setup();
+    const [left, right, far] = [spec(0, 0), spec(0, 1), spec(0, 3)];
+    scheduler.setWanted([left, right, far], 0);
+    provider.requests[0]!.finish();
+    await settle();
+    // 变的地方在第 1 块里（x 200–260 pt），离第 0 块 8 pt，往外放宽两个像素也碰不到
+    scheduler.invalidateArea(0, { x: 200, y: 10, width: 60, height: 20 });
+    expect(cache.isFresh(left.id)).toBe(true);
+    expect(provider.open.map(({ request }) => request.tx)).toEqual([3]);
+
+    scheduler.setWanted([left, right, far], 1);
+    expect(provider.open.map(({ request }) => request.tx)).toEqual([3, 1]);
+  });
+
   it('一页改了，别的页在途的瓦片照样有效', async () => {
     const { provider, cache, scheduler } = setup();
     const other = spec(1, 0);
