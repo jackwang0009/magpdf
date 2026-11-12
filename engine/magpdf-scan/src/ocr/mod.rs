@@ -30,7 +30,7 @@ pub use self::image::{ImageView, PixelFormat};
 pub use self::models::{Manifest, ModelSelection};
 pub use self::rec::RecParams;
 
-use self::cls::Classifier;
+use self::cls::{Classifier, Verify, needs_verify, prefer_reversed};
 use self::det::Detector;
 use self::geometry::quad_sides;
 use self::image::RgbImage;
@@ -228,6 +228,12 @@ pub struct OcrResult {
     pub lines: Vec<OcrLine>,
     /// 检测到但识别置信度低于 `drop_score` 而丢弃的行数。
     pub dropped: usize,
+    /// 方向复核了几行（正着、倒着各识别一次；见 `cls::needs_verify`）。
+    #[serde(default)]
+    pub orientation_checked: usize,
+    /// 复核之后没有采用方向分类的判断的行数。
+    #[serde(default)]
+    pub orientation_overruled: usize,
     pub timings: StageTimings,
     pub models: ModelIdentity,
 }
@@ -347,6 +353,7 @@ impl OcrEngine {
         timings.crop = Millis::since(t);
 
         let mut rotated = vec![false; crops.len()];
+        let mut verify = vec![Verify::No; crops.len()];
         if let Some(cls) = &mut self.classifier {
             let (results, ms) = cls.classify(&crops)?;
             timings.cls = ms;
@@ -356,10 +363,36 @@ impl OcrEngine {
                     rotated[i] = true;
                 }
             }
+            if self.config.cls.verify {
+                verify = needs_verify(&rotated, &vertical);
+            }
         }
 
-        let (rec_results, rec_ms) = self.recognizer.recognize(&crops)?;
+        let (mut rec_results, rec_ms) = self.recognizer.recognize(&crops)?;
         timings.rec = rec_ms;
+
+        // 复核方向：和同页多数行方向不一样的行，反过来再识别一次，按规则取其中一种读法。
+        let to_check: Vec<usize> = (0..crops.len())
+            .filter(|&i| verify[i] != Verify::No)
+            .collect();
+        let mut overruled = 0usize;
+        if !to_check.is_empty() {
+            let reversed: Vec<RgbImage> = to_check.iter().map(|&i| crops[i].rotate_180()).collect();
+            let (reversed_results, ms) = self.recognizer.recognize(&reversed)?;
+            timings.rec += ms;
+            for (&i, alt) in to_check.iter().zip(reversed_results) {
+                if prefer_reversed(
+                    verify[i],
+                    rec_results[i].confidence,
+                    alt.confidence,
+                    self.config.cls.verify_margin,
+                ) {
+                    rec_results[i] = alt;
+                    rotated[i] = !rotated[i];
+                    overruled += 1;
+                }
+            }
+        }
 
         let mut lines = Vec::with_capacity(boxes.len());
         let mut dropped = 0usize;
@@ -383,6 +416,8 @@ impl OcrEngine {
         tracing::debug!(
             lines = lines.len(),
             dropped,
+            orientation_checked = to_check.len(),
+            orientation_overruled = overruled,
             det_ms = timings.det.infer.0,
             cls_ms = timings.cls.0,
             rec_ms = timings.rec.0,
@@ -394,6 +429,8 @@ impl OcrEngine {
             height: view.height(),
             lines,
             dropped,
+            orientation_checked: to_check.len(),
+            orientation_overruled: overruled,
             timings,
             models: self.config.identity.clone(),
         })

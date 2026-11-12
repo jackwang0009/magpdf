@@ -8,7 +8,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use super::geometry::Point;
-use super::{LoadTimings, ModelIdentity, OcrError, OcrResult, StageTimings};
+use super::{LoadTimings, Millis, ModelIdentity, OcrError, OcrResult, StageTimings};
 
 pub const RESULT_FMT: &str = "magpdf-ocr-result/1";
 
@@ -49,10 +49,18 @@ pub struct PageResultFile {
     pub lines: Vec<LineRecord>,
     #[serde(default)]
     pub dropped: usize,
+    /// 方向复核了几行、其中几行没有采用方向分类的判断（`OcrResult` 的同名字段）。
+    #[serde(default)]
+    pub orientation_checked: usize,
+    #[serde(default)]
+    pub orientation_overruled: usize,
     #[serde(default)]
     pub timings: StageTimings,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub load_timings: Option<LoadTimings>,
+    /// 取得位图花的时间，不含在 `timings` 里：图片是读文件加解码；PDF 是打开文档、加载页面、按 `dpi` 渲染。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acquire: Option<Millis>,
     /// `--repeat` 多次运行时每次的耗时（含第一次）。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub runs: Vec<StageTimings>,
@@ -87,8 +95,11 @@ impl PageResultFile {
                 })
                 .collect(),
             dropped: result.dropped,
+            orientation_checked: result.orientation_checked,
+            orientation_overruled: result.orientation_overruled,
             timings: result.timings,
             load_timings: None,
+            acquire: None,
             runs: Vec::new(),
         }
     }
