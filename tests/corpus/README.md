@@ -17,7 +17,22 @@
 
 规则：
 - 真实单证必须先按脱敏规范处理，未脱敏的文件不得入库，也不得上传到任何外部服务（《工程规范》11）。
-- 大文件走 Git LFS；`tests/baselines/` 存像素比对基线。
+- 大文件走 Git LFS；`tests/baselines/` 存比对基线（往返测试存的是每页的判定和几个数，不存图，见 `tests/baselines/README.md`）。
 - 每个目录放一份 `manifest.json`，记录文件来源、生成工具、页数和已知特性，供报告按来源分类。字段见《测试样本收集与脱敏规范》第 6 节；
   用 `tools/make_manifest.py <目录>` 生成或更新（`synthetic/` 由其 `generate.py` 自行生成）。
 - 往返测试按相对路径的第一级目录（`pdfium`、`pdfjs`）区分来源；PDFium 内部的四个子目录在报告里单独列一行。
+
+## 每晚的往返测试
+
+`scripts/nightly-roundtrip.ps1` 对各语料集跑全量往返、校准轮、操作符级比对，生成按来源分类的报告页面，再和
+`tests/baselines/roundtrip/` 里的基线比，有退步时退出码非 0。本机和每晚的流水线（`.github/workflows/nightly.yml`）用同一个脚本。
+
+```powershell
+pwsh scripts/nightly-roundtrip.ps1 -PublicPdfium <PDFium 的 testing\resources> [-Corpus <真实样本的目录>]
+# 报告页面：tests/out/nightly/report.html
+```
+
+- `tools/roundtrip_report.py`：报告页面和退步判定（`roundtrip_model.py` 是口径和规则，`test_roundtrip_report.py` 是它们的单元测试）。
+- `tools/corpus_fingerprint.py`：语料指纹，用来确认两次跑的是同一批文件。
+- `tools/tamper_baseline.py`：故意改一份基线，验证退步检测还管用。
+- 基线存什么、什么时候更新、怎么审：`tests/baselines/README.md`。做法和本机结果：`docs/p0/V14-每晚往返与分类报告.md`。
