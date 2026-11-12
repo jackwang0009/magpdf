@@ -1,0 +1,18 @@
+# V10 评估用的 Python 包，只在开发机上用，不进安装包。
+# 虚拟环境：D:\workspace\magpdf-wt\venvs\v10（run_all.py 用这个环境的 python 启动）
+#
+# onnxruntime-directml：MIT。带 DirectML 执行提供程序的 ONNX Runtime；轮子里另带一份 DirectML.dll 1.15.4，
+#   那一份按微软的 DirectML 许可条款分发（不是开源许可证）。PyPI 上最后一个版本就是 1.24.4，
+#   和产品用的 1.31.1 对不上，所以 CPU 版另放一个环境（requirements-cpu.txt）。
+onnxruntime-directml==1.24.4
+# numpy：BSD-3-Clause（轮子里另含 0BSD、MIT、Zlib、CC0-1.0 的部件）。造模型输入、比输出。
+numpy==2.5.4
+# Pillow：MIT-CMU。读样本图；tests/requirements-test.txt 里已经登记过同一个版本。
+Pillow==12.3.0
+
+# 下面是 onnxruntime-directml 带进来的，版本一并写死。
+flatbuffers==25.12.19   # Apache-2.0
+protobuf==7.36.2        # BSD-3-Clause
+packaging==26.3         # Apache-2.0 OR BSD-2-Clause
+sympy==1.14.0           # BSD-3-Clause
+mpmath==1.3.0           # BSD-3-Clause

@@ -1,0 +1,10 @@
+# V10 评估：CPU 版 ONNX Runtime，和产品用的版本一致（models/manifest.json 里的 1.31.1）。
+# 虚拟环境：D:\workspace\magpdf-wt\venvs\v10-cpu
+# onnxruntime 和 onnxruntime-directml 装出来是同一个 Python 模块，不能放进同一个环境，所以分开。
+onnxruntime==1.31.1     # MIT
+numpy==2.5.4            # BSD-3-Clause（另含 0BSD、MIT、Zlib、CC0-1.0 的部件）
+
+# onnxruntime 带进来的。
+flatbuffers==25.12.19   # Apache-2.0
+protobuf==7.36.2        # BSD-3-Clause
+packaging==26.3         # Apache-2.0 OR BSD-2-Clause

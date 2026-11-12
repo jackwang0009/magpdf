@@ -1,0 +1,16 @@
+# V10 评估：Windows ML 那份 ONNX Runtime 和它的执行提供程序目录。可选，没有这个环境 run_all.py 就不量这一项。
+# 虚拟环境：D:\workspace\magpdf-wt\venvs\v10-winml
+# 另外要系统里已经装着 Windows App Runtime 2.x（本机有 2.3.0 到 2.6.5）；没有的话 winml_probe.py 会报错，不会弹窗。
+#
+# wasdk-*：MIT（pywinrt 项目生成的 Windows App SDK 的 Python 绑定）。[all] 会带进来 winrt-runtime 和
+#   七十多个 winrt-Windows.* 包（都是 3.2.1，MIT），以及 typing_extensions（PSF-2.0）。
+wasdk-Microsoft.Windows.AI.MachineLearning[all]==2.3.0
+wasdk-Microsoft.Windows.ApplicationModel.DynamicDependency.Bootstrap==2.3.0
+# onnxruntime-windowsml：MIT。Windows ML 用的那份 ONNX Runtime（自带 CPU 和 DirectML 两个执行提供程序），
+#   轮子里也带一份 DirectML.dll 1.15.4。版本是 wasdk 包 2.3.0 指定的。
+onnxruntime-windowsml==1.25.2.202605110140
+numpy==2.5.4            # BSD-3-Clause（另含 0BSD、MIT、Zlib、CC0-1.0 的部件）
+
+flatbuffers==25.12.19   # Apache-2.0
+protobuf==7.36.2        # BSD-3-Clause
+packaging==26.3         # Apache-2.0 OR BSD-2-Clause
