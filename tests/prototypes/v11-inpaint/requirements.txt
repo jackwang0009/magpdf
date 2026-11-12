@@ -1,0 +1,21 @@
+# V11 背景修补原型的依赖。只在开发机上评估用，不进安装包。装在虚拟环境里，不要装进全局 Python：
+#   python -m venv D:\workspace\magpdf-wt\venvs\v11
+#   D:\workspace\magpdf-wt\venvs\v11\Scripts\python -m pip install -r tests/prototypes/v11-inpaint/requirements.txt
+
+# OpenCV（Apache-2.0）：二值化、cv2.inpaint、量指标。Windows 的轮子里另带一个 FFmpeg 的 DLL
+# （LGPL-2.1，独立文件），这里不用视频功能。
+opencv-python-headless==5.0.0.93
+# NumPy（BSD-3-Clause；轮子里带的部件另有 0BSD、MIT、Zlib、CC0-1.0）
+numpy==2.5.4
+# Pillow（MIT-CMU，即 HPND）：画样本里的字、章、底纹，给对照图写中文标签。版本和 tests/requirements-test.txt 一致。
+Pillow==12.3.0
+# ONNX Runtime CPU 版（MIT）：跑 LaMa。版本和 models/onnxruntime 里产品用的一致。
+onnxruntime==1.31.1
+# psutil（BSD-3-Clause）：量 LaMa 的峰值内存和系统的 CPU 占用。
+psutil==7.2.2
+
+# 上面几个包带进来的（pip 自动装，这里写死版本好复现）
+# flatbuffers（Apache-2.0）、packaging（Apache-2.0 或 BSD-2-Clause）、protobuf（BSD-3-Clause）：onnxruntime 的依赖
+flatbuffers==25.12.19
+packaging==26.3
+protobuf==7.36.2
