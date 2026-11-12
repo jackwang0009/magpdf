@@ -7,7 +7,7 @@
 
 | 文件 | 语料 | 来源 |
 |---|---|---|
-| `roundtrip/synthetic.json` | `tests/corpus/synthetic/`，58 份自制样本 | `synthetic` |
+| `roundtrip/synthetic.json` | `tests/corpus/synthetic/`，60 份自制样本 | `synthetic` |
 | `roundtrip/public-pdfium.json` | PDFium 的 `testing/resources`（`chromium/8138`，346 个 PDF，不入库，`scripts/fetch-public-corpus.ps1` 取） | `public/pdfium/resources`、`pixel`、`javascript`、`xfa` |
 | `roundtrip/corpus.json`（还没有） | 真实样本的测试文件库 | 第一级目录名（`office-word`、`design`……） |
 

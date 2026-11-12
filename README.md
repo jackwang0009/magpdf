@@ -22,7 +22,9 @@ engine/magpdf-components  组件、条码、校验位、批量生成、打印
 engine/magpdf-scan     OCR、版面分析、样式估计、背景修补
 engine/magpdf-cli      命令行：往返测试、保真校验、批量比对（CI 用）
 third_party/           PDFium 分支、Zint、ZXing-C++（子模块）与预编译库
-tests/corpus           测试文件库（按来源分类）；tests/baselines 像素比对基线
+tests/corpus           测试文件库（按来源分类）和比对工具；tests/baselines 比对基线（往返测试存每页的判定和数值，不存图）
+tests/perf             GPU 加速评估的测量脚本（P0 的 V10）；tests/prototypes 只在开发机上跑的算法原型（P0 的 V11 背景修补）
+scripts/               取 PDFium 预编译库、取公开测试集、每晚往返测试的入口
 models/  assets/       模型清单与下载脚本；内置素材与模板
 ```
 
