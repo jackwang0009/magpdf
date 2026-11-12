@@ -14,7 +14,7 @@ use magpdf_scan::ocr::det::LimitType;
 use magpdf_scan::ocr::eval::{EvalOptions, PageMetrics, Report, evaluate_page};
 use magpdf_scan::ocr::format::{PageResultFile, infer_lang_from_path, read_label_file};
 use magpdf_scan::ocr::models::{Manifest, ModelKind, ModelSelection, find_models_dir};
-use magpdf_scan::{ImageView, Lang, OcrEngine, OcrResult, StageTimings};
+use magpdf_scan::{ImageView, Lang, Millis, OcrEngine, OcrResult, StageTimings};
 use pdfium_sys::{Document, Library, RenderOptions};
 
 #[derive(Args, Debug)]
@@ -54,6 +54,9 @@ pub struct OcrArgs {
     /// 不做文字行方向分类
     #[arg(long)]
     pub no_cls: bool,
+    /// 不复核方向：和同页多数行方向不一样的行，照方向分类的判断识别，不再正反各试一次
+    #[arg(long)]
+    pub no_cls_verify: bool,
     /// 检测缩放规则：max（长边不超过 --det-limit-side）| min（短边不小于 --det-limit-side）
     #[arg(long, value_parser = parse_limit_type)]
     pub det_limit_type: Option<LimitType>,
@@ -227,6 +230,9 @@ pub fn ocr(lib: &Library, args: OcrArgs) -> Result<()> {
     if let Some(lc) = args.low_confidence {
         config.low_confidence = lc;
     }
+    if args.no_cls_verify {
+        config.cls.verify = false;
+    }
 
     // 任务列表。
     let jobs = collect_jobs(lib, &args)?;
@@ -269,13 +275,18 @@ pub fn ocr(lib: &Library, args: OcrArgs) -> Result<()> {
     let mut all_runs: Vec<StageTimings> = Vec::new();
     let mut total_lines = 0usize;
     let mut total_low = 0usize;
+    let mut total_checked = 0usize;
+    let mut total_overruled = 0usize;
     for job in &jobs {
-        let (width, height, result, runs) = run_job(lib, &mut engine, job, &args)?;
+        let done = run_job(lib, &mut engine, job, &args)?;
+        let (width, height, result, runs) = (done.width, done.height, done.result, done.runs);
         total_lines += result.lines.len();
         total_low += result.lines.iter().filter(|l| l.low_confidence).count();
+        total_checked += result.orientation_checked;
+        total_overruled += result.orientation_overruled;
         let t = &result.timings;
         println!(
-            "{}{}：{}×{}，{} 行（低置信度 {}，丢弃 {}），det 输入 {}×{}，耗时 det {} / cls {} / rec {} / 合计 {}",
+            "{}{}：{}×{}，{} 行（低置信度 {}，丢弃 {}，方向复核 {} 改 {}），det 输入 {}×{}，耗时 {} {} / det {} / cls {} / rec {} / 识别合计 {}",
             job.source().display(),
             match job {
                 Job::PdfPage { page, .. } => format!(" 第 {page} 页"),
@@ -286,8 +297,15 @@ pub fn ocr(lib: &Library, args: OcrArgs) -> Result<()> {
             result.lines.len(),
             result.lines.iter().filter(|l| l.low_confidence).count(),
             result.dropped,
+            result.orientation_checked,
+            result.orientation_overruled,
             t.det.input_size.0,
             t.det.input_size.1,
+            match job {
+                Job::PdfPage { .. } => "渲染",
+                Job::Image(_) => "解码",
+            },
+            done.acquire,
             t.det.infer,
             t.cls,
             t.rec,
@@ -307,6 +325,7 @@ pub fn ocr(lib: &Library, args: OcrArgs) -> Result<()> {
             let dpi = matches!(job, Job::PdfPage { .. }).then_some(args.dpi);
             let mut file = PageResultFile::from_result(&result, job.source(), job.page(), dpi);
             file.load_timings = Some(load);
+            file.acquire = Some(done.acquire);
             if runs.len() > 1 {
                 file.runs = runs.clone();
             }
@@ -334,6 +353,9 @@ pub fn ocr(lib: &Library, args: OcrArgs) -> Result<()> {
             total_lines,
             total_low
         );
+    }
+    if total_checked > 0 {
+        println!("方向复核 {total_checked} 行，其中 {total_overruled} 行没有采用方向分类的判断");
     }
     if args.json.is_none() && !args.show_text {
         println!("提示：识别文字不打印到终端；用 --json 写出结果或 --show-text 查看。");
@@ -377,13 +399,21 @@ fn collect_jobs(lib: &Library, args: &OcrArgs) -> Result<Vec<Job>> {
     bail!("不支持的输入类型：{}", input.display())
 }
 
-/// 执行一个任务，返回尺寸、最后一次结果与全部运行的耗时。
-fn run_job(
-    lib: &Library,
-    engine: &mut OcrEngine,
-    job: &Job,
-    args: &OcrArgs,
-) -> Result<(u32, u32, OcrResult, Vec<StageTimings>)> {
+/// 一个任务跑完的结果。
+struct JobDone {
+    width: u32,
+    height: u32,
+    /// 最后一次识别的结果。
+    result: OcrResult,
+    /// 每次识别的耗时。
+    runs: Vec<StageTimings>,
+    /// 取得位图花的时间：图片是读文件加解码；PDF 是打开文档、加载页面、渲染。
+    acquire: Millis,
+}
+
+/// 执行一个任务：取得位图，识别 `--repeat` 次。
+fn run_job(lib: &Library, engine: &mut OcrEngine, job: &Job, args: &OcrArgs) -> Result<JobDone> {
+    let started = Instant::now();
     match job {
         Job::Image(path) => {
             let img = image::ImageReader::open(path)
@@ -391,27 +421,40 @@ fn run_job(
                 .decode()
                 .with_context(|| format!("解码 {}", path.display()))?
                 .into_rgb8();
-            let (w, h) = (img.width(), img.height());
-            let view = ImageView::rgb(w, h, img.as_raw())?;
+            let acquire = Millis::since(started);
+            let (width, height) = (img.width(), img.height());
+            let view = ImageView::rgb(width, height, img.as_raw())?;
             let (result, runs) = recognize_repeated(engine, &view, args.repeat)?;
-            Ok((w, h, result, runs))
+            Ok(JobDone {
+                width,
+                height,
+                result,
+                runs,
+                acquire,
+            })
         }
         Job::PdfPage { file, page } => {
             let doc = Document::load_file(lib, file, None)
                 .with_context(|| format!("打开 {}", file.display()))?;
             let pg = doc.page(page - 1)?;
-            let t = Instant::now();
             let bmp = pg.render(RenderOptions::dpi(args.dpi))?;
+            let acquire = Millis::since(started);
             tracing::debug!(
                 page,
                 width = bmp.width(),
                 height = bmp.height(),
-                render_ms = t.elapsed().as_secs_f64() * 1000.0,
+                render_ms = acquire.0,
                 "PDF 页已渲染"
             );
             let view = ImageView::bgra(bmp.width(), bmp.height(), bmp.stride(), bmp.bgra())?;
             let (result, runs) = recognize_repeated(engine, &view, args.repeat)?;
-            Ok((bmp.width(), bmp.height(), result, runs))
+            Ok(JobDone {
+                width: bmp.width(),
+                height: bmp.height(),
+                result,
+                runs,
+                acquire,
+            })
         }
     }
 }
