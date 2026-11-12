@@ -1,0 +1,1087 @@
+{
+ "kind": "magpdf-roundtrip-baseline",
+ "format": 1,
+ "set": "public-pdfium",
+ "meta": {
+  "cli_sha256": "70da696397a994c78aff97ebe3416e07bd6fb9ff9c257bcc62bc4df5796c6f00",
+  "cli_version": "0.1.0",
+  "commit": "06a2fadc120102b576f16d2da145d9eddac10f94",
+  "corpus": {
+   "bytes": 2848890,
+   "files": 346,
+   "sha256": "0cfbd442a229d5805df4739b77d0faad60f8c27e349fd96c8ad7e82a041b9657"
+  },
+  "generated": "2026-11-12T10:53:13+08:00",
+  "has_ops": true,
+  "machine": "JACK",
+  "pdfium_dll_sha256": "71a3e63e6ab8f5746a0fc9de9bc3d0c0dc07eb60990dfd37d9db7fc891821943",
+  "pdfium_version": "159.0.8138.0",
+  "root_source": "resources",
+  "scale": 2.0,
+  "source_prefix": "public/pdfium/",
+  "thresholds": {
+   "channel_tolerance": 24,
+   "max_diff_ratio": 0.0001,
+   "max_region_pixels": 16
+  }
+ },
+ "files": [
+  {"path": "javascript/xfa_specific/bug_1042915.pdf", "source": "public/pdfium/javascript", "status": "ok", "pages": []},
+  {"path": "javascript/xfa_specific/bug_1042956.pdf", "source": "public/pdfium/javascript", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "javascript/xfa_specific/bug_1043510.pdf", "source": "public/pdfium/javascript", "status": "ok", "pages": []},
+  {"path": "javascript/xfa_specific/bug_1238_2.pdf", "source": "public/pdfium/javascript", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0}
+  ]},
+  {"path": "javascript/xfa_specific/resolve_nodes_1.pdf", "source": "public/pdfium/javascript", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 4, "ops": {}}
+  ]},
+  {"path": "javascript/xfa_specific/resolve_nodes_2.pdf", "source": "public/pdfium/javascript", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 4, "ops": {}}
+  ]},
+  {"path": "pixel/bug_1087.pdf", "source": "public/pdfium/pixel", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {}}
+  ]},
+  {"path": "pixel/bug_1287409.pdf", "source": "public/pdfium/pixel", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 8, "ops": {"color": 8}}
+  ]},
+  {"path": "pixel/bug_1308.pdf", "source": "public/pdfium/pixel", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"gs": 1}}
+  ]},
+  {"path": "pixel/bug_1484283.pdf", "source": "public/pdfium/pixel", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 8, "ops": {"color": 8}}
+  ]},
+  {"path": "pixel/bug_2122.pdf", "source": "public/pdfium/pixel", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 8, "ops": {"color": 8}}
+  ]},
+  {"path": "pixel/bug_2123.pdf", "source": "public/pdfium/pixel", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 8, "ops": {"color": 8}}
+  ]},
+  {"path": "pixel/bug_2152.pdf", "source": "public/pdfium/pixel", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 8, "ops": {"color": 8}}
+  ]},
+  {"path": "pixel/bug_304.pdf", "source": "public/pdfium/pixel", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 4, "ops": {}}
+  ]},
+  {"path": "pixel/bug_332462378.pdf", "source": "public/pdfium/pixel", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 8, "ops": {"color": 8}}
+  ]},
+  {"path": "pixel/bug_335309995.pdf", "source": "public/pdfium/pixel", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 8, "ops": {"color": 8}}
+  ]},
+  {"path": "pixel/bug_345274934.pdf", "source": "public/pdfium/pixel", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 8, "ops": {"color": 8}}
+  ]},
+  {"path": "pixel/bug_349972030.pdf", "source": "public/pdfium/pixel", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 8, "ops": {"color": 8}}
+  ]},
+  {"path": "pixel/bug_42271010.pdf", "source": "public/pdfium/pixel", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"color": 2}}
+  ]},
+  {"path": "pixel/bug_440028542.pdf", "source": "public/pdfium/pixel", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "diff_pixels": 1, "largest_region": 1, "ops": {"events": 1}}
+  ]},
+  {"path": "pixel/bug_512557.pdf", "source": "public/pdfium/pixel", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {}}
+  ]},
+  {"path": "pixel/bug_603518.pdf", "source": "public/pdfium/pixel", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {}}
+  ]},
+  {"path": "pixel/bug_828206.pdf", "source": "public/pdfium/pixel", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0}
+  ]},
+  {"path": "pixel/bug_830221.pdf", "source": "public/pdfium/pixel", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0}
+  ]},
+  {"path": "pixel/bug_867501.pdf", "source": "public/pdfium/pixel", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {}}
+  ]},
+  {"path": "pixel/bug_925736.pdf", "source": "public/pdfium/pixel", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"clip": 1}}
+  ]},
+  {"path": "pixel/direct_content_stream.pdf", "source": "public/pdfium/pixel", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0}
+  ]},
+  {"path": "pixel/freetext_annotation_without_da.pdf", "source": "public/pdfium/pixel", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "pixel/generation_numbers1.pdf", "source": "public/pdfium/pixel", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2}}
+  ]},
+  {"path": "pixel/generation_numbers2.pdf", "source": "public/pdfium/pixel", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2}}
+  ]},
+  {"path": "pixel/xfa_specific/barcode_test.pdf", "source": "public/pdfium/pixel", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 13, "ops": {}}
+  ]},
+  {"path": "pixel/xfa_specific/dynamic_list_box_allow_multiple_selection.pdf", "source": "public/pdfium/pixel", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 14, "ops": {}}
+  ]},
+  {"path": "pixel/xfa_specific/dynamic_password_field_background_fill.pdf", "source": "public/pdfium/pixel", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 14, "ops": {}}
+  ]},
+  {"path": "pixel/xfa_specific/dynamic_table_color_and_width.pdf", "source": "public/pdfium/pixel", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 14, "ops": {}}
+  ]},
+  {"path": "pixel/xfa_specific/resolve_nodes_0.pdf", "source": "public/pdfium/pixel", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 4, "ops": {}}
+  ]},
+  {"path": "pixel/xfa_specific/standard_symbols.pdf", "source": "public/pdfium/pixel", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 73, "ops": {}},
+   {"page": 2, "pixel": "pass", "objects": 64, "ops": {}}
+  ]},
+  {"path": "pixel/xfa_specific/static_list_box_caption.pdf", "source": "public/pdfium/pixel", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 32, "ops": {}}
+  ]},
+  {"path": "pixel/xfa_specific/static_password_field_rotate.pdf", "source": "public/pdfium/pixel", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 189, "ops": {}},
+   {"page": 2, "pixel": "pass", "objects": 168, "ops": {}}
+  ]},
+  {"path": "pixel/xfa_specific/xfa_node_caption.pdf", "source": "public/pdfium/pixel", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 13, "ops": {}}
+  ]},
+  {"path": "344775293.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "363015187.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "about_blank.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"clip": 1}}
+  ]},
+  {"path": "actual_text_rtl.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 29, "ops": {"color": 29}}
+  ]},
+  {"path": "annot_javascript.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "annotation_fileattachment.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"clip": 1}}
+  ]},
+  {"path": "annotation_highlight_long_content.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 36, "ops": {}}
+  ]},
+  {"path": "annotation_highlight_rollover_ap.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "annotation_highlight_square_with_ap.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2, "clip": 2}}
+  ]},
+  {"path": "annotation_ink_multiple.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 31, "ops": {}}
+  ]},
+  {"path": "annotation_markup_multiline_no_ap.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "annotation_stamp_with_ap.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 32, "diff_pixels": 67266, "largest_region": 1265, "ops": {"color": 32, "text": 25}}
+  ]},
+  {"path": "annotiter.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}},
+   {"page": 2, "pixel": "pass", "objects": 0, "ops": {}},
+   {"page": 3, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "annots.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 7, "ops": {"color": 7}},
+   {"page": 2, "pixel": "pass", "objects": 3, "ops": {"color": 3}}
+  ]},
+  {"path": "annots_action_handling.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 4, "ops": {"color": 4}},
+   {"page": 2, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "arabic.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"color": 1}}
+  ]},
+  {"path": "arabic_actual_text_ordering.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 6, "ops": {}},
+   {"page": 2, "pixel": "pass", "objects": 6, "ops": {}},
+   {"page": 3, "pixel": "pass", "objects": 6, "ops": {}},
+   {"page": 4, "pixel": "pass", "objects": 6, "ops": {}}
+  ]},
+  {"path": "bad_annots_entry.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {}}
+  ]},
+  {"path": "bad_dict_keys.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "bad_page_type.pdf", "source": "public/pdfium/resources", "status": "crashed", "pages": []},
+  {"path": "bigtable_mini.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 12, "ops": {"color": 12}}
+  ]},
+  {"path": "black.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {}}
+  ]},
+  {"path": "bookmarks.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"color": 1}},
+   {"page": 2, "pixel": "pass", "objects": 1, "ops": {"color": 1}}
+  ]},
+  {"path": "bookmarks_circular.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"color": 1}},
+   {"page": 2, "pixel": "pass", "objects": 1, "ops": {"color": 1}}
+  ]},
+  {"path": "bookmarks_color.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"color": 1}},
+   {"page": 2, "pixel": "pass", "objects": 1, "ops": {"color": 1}}
+  ]},
+  {"path": "bookmarks_style.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"color": 1}},
+   {"page": 2, "pixel": "pass", "objects": 1, "ops": {"color": 1}}
+  ]},
+  {"path": "brotli_decodeparms.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {}}
+  ]},
+  {"path": "bug_1029.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 76, "ops": {"color": 76, "text": 70}}
+  ]},
+  {"path": "bug_1055869.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "bug_1058653.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "bug_1124998.pdf", "source": "public/pdfium/resources", "status": "load_failed", "pages": []},
+  {"path": "bug_113.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0}
+  ]},
+  {"path": "bug_1139.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2}}
+  ]},
+  {"path": "bug_1206.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"color": 1}}
+  ]},
+  {"path": "bug_1229106.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 5, "ops": {}},
+   {"page": 2, "pixel": "pass", "objects": 5, "ops": {}},
+   {"page": 3, "pixel": "pass", "objects": 5, "ops": {}},
+   {"page": 4, "pixel": "pass", "objects": 5, "ops": {}}
+  ]},
+  {"path": "bug_1265.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "bug_1296920.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2}}
+  ]},
+  {"path": "bug_1301.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "bug_1302355.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"color": 2, "gs": 1}}
+  ]},
+  {"path": "bug_1302455.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "bug_1324189.pdf", "source": "public/pdfium/resources", "status": "load_failed", "pages": []},
+  {"path": "bug_1324503.pdf", "source": "public/pdfium/resources", "status": "load_failed", "pages": []},
+  {"path": "bug_1327884.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0}
+  ]},
+  {"path": "bug_1328389.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "bug_1333298.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "bug_1388_2.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"color": 1}}
+  ]},
+  {"path": "bug_1396264.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {}}
+  ]},
+  {"path": "bug_1399.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 7, "ops": {}}
+  ]},
+  {"path": "bug_1477093.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"color": 1}}
+  ]},
+  {"path": "bug_1506.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}},
+   {"page": 2, "pixel": "pass", "objects": 0, "ops": {}},
+   {"page": 3, "pixel": "pass", "objects": 0, "ops": {}},
+   {"page": 4, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "bug_1549.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 2, "diff_pixels": 8000, "largest_region": 8000, "ops": {"color": 1}}
+  ]},
+  {"path": "bug_1558.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2, "clip": 1}}
+  ]},
+  {"path": "bug_1574.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"clip": 1}}
+  ]},
+  {"path": "bug_1591.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 3, "diff_pixels": 93, "largest_region": 46, "ops": {"events": 3}}
+  ]},
+  {"path": "bug_1646.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {}}
+  ]},
+  {"path": "bug_1658.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "bug_1768.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 14, "ops": {"color": 14, "clip": 14}}
+  ]},
+  {"path": "bug_1769.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 4}}
+  ]},
+  {"path": "bug_182.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 7, "ops": {"color": 7}}
+  ]},
+  {"path": "bug_1893.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 3, "ops": {}}
+  ]},
+  {"path": "bug_1919.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 16, "ops": {"color": 15}}
+  ]},
+  {"path": "bug_2034.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {}}
+  ]},
+  {"path": "bug_213.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2}
+  ]},
+  {"path": "bug_2132.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {}}
+  ]},
+  {"path": "bug_216.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "error", "objects": 0}
+  ]},
+  {"path": "bug_298.pdf", "source": "public/pdfium/resources", "status": "load_failed", "pages": []},
+  {"path": "bug_306123.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "bug_325_a.pdf", "source": "public/pdfium/resources", "status": "load_failed", "pages": []},
+  {"path": "bug_325_b.pdf", "source": "public/pdfium/resources", "status": "load_failed", "pages": []},
+  {"path": "bug_343.pdf", "source": "public/pdfium/resources", "status": "load_failed", "pages": []},
+  {"path": "bug_343075986.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {}}
+  ]},
+  {"path": "bug_344.pdf", "source": "public/pdfium/resources", "status": "load_failed", "pages": []},
+  {"path": "bug_355.pdf", "source": "public/pdfium/resources", "status": "load_failed", "pages": []},
+  {"path": "bug_360.pdf", "source": "public/pdfium/resources", "status": "load_failed", "pages": []},
+  {"path": "bug_378120423.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"color": 1}}
+  ]},
+  {"path": "bug_384770169.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 5, "ops": {"color": 5}}
+  ]},
+  {"path": "bug_399689604.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"color": 1}}
+  ]},
+  {"path": "bug_40162073.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 3, "ops": {}}
+  ]},
+  {"path": "bug_402562387.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"color": 1}}
+  ]},
+  {"path": "bug_410996566.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2}}
+  ]},
+  {"path": "bug_420508260.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 5, "ops": {"color": 5}}
+  ]},
+  {"path": "bug_42270471.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {}}
+  ]},
+  {"path": "bug_42271133.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2}}
+  ]},
+  {"path": "bug_424613308.pdf", "source": "public/pdfium/resources", "status": "load_failed", "pages": []},
+  {"path": "bug_425244539.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2}}
+  ]},
+  {"path": "bug_431824298.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 3, "ops": {"color": 3}}
+  ]},
+  {"path": "bug_444176962.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 9, "ops": {"color": 9}}
+  ]},
+  {"path": "bug_451265.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"color": 2}}
+  ]},
+  {"path": "bug_451830.pdf", "source": "public/pdfium/resources", "status": "load_failed", "pages": []},
+  {"path": "bug_452455.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "bug_454695.pdf", "source": "public/pdfium/resources", "status": "load_failed", "pages": []},
+  {"path": "bug_455199.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2}}
+  ]},
+  {"path": "bug_457855936.pdf", "source": "public/pdfium/resources", "status": "load_failed", "pages": []},
+  {"path": "bug_459580.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"color": 1}}
+  ]},
+  {"path": "bug_461845674.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "bug_481363.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1}
+  ]},
+  {"path": "bug_487928.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "bug_488948351.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2}}
+  ]},
+  {"path": "bug_491161396.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 3, "ops": {"color": 3}}
+  ]},
+  {"path": "bug_491516663.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 3, "ops": {"color": 3}}
+  ]},
+  {"path": "bug_498010830_shared_annots.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}},
+   {"page": 2, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "bug_498010830_shared_widget.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}},
+   {"page": 2, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "bug_504416752.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "bug_507316.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}},
+   {"page": 2, "pixel": "pass", "objects": 0, "ops": {}},
+   {"page": 3, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "bug_509964646.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"color": 2}}
+  ]},
+  {"path": "bug_517126568.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {}}
+  ]},
+  {"path": "bug_544880.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "error", "objects": 0}
+  ]},
+  {"path": "bug_547706.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 1, "diff_pixels": 1223, "largest_region": 763, "ops": {"color": 1}}
+  ]},
+  {"path": "bug_551248.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "bug_551460.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "bug_552046.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {}}
+  ]},
+  {"path": "bug_554790604.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"color": 1}}
+  ]},
+  {"path": "bug_555784.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {}}
+  ]},
+  {"path": "bug_57.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"color": 1}}
+  ]},
+  {"path": "bug_572871.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}},
+   {"page": 2, "pixel": "pass", "objects": 0, "ops": {}},
+   {"page": 3, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "bug_583.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 2, "diff_pixels": 390, "largest_region": 390, "ops": {"events": 1}}
+  ]},
+  {"path": "bug_601362.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 4, "ops": {"color": 4, "clip": 4}}
+  ]},
+  {"path": "bug_602650.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2}}
+  ]},
+  {"path": "bug_620428.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "bug_631912.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {}}
+  ]},
+  {"path": "bug_634394.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "bug_634716.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "bug_642.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 1, "diff_pixels": 1666, "largest_region": 488, "ops": {"events": 1}}
+  ]},
+  {"path": "bug_644.pdf", "source": "public/pdfium/resources", "status": "load_failed", "pages": []},
+  {"path": "bug_650.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 45, "ops": {"clip": 7}}
+  ]},
+  {"path": "bug_664284.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"color": 1}}
+  ]},
+  {"path": "bug_674771.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"color": 1}}
+  ]},
+  {"path": "bug_679649.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "bug_680376.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1},
+   {"page": 2, "pixel": "pass", "objects": 1},
+   {"page": 3, "pixel": "pass", "objects": 1},
+   {"page": 4, "pixel": "pass", "objects": 1}
+  ]},
+  {"path": "bug_707673.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 44, "ops": {"color": 44}}
+  ]},
+  {"path": "bug_709793.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0}
+  ]},
+  {"path": "bug_713197.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "bug_717.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 3, "ops": {"color": 3}}
+  ]},
+  {"path": "bug_750568.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"color": 1}},
+   {"page": 2, "pixel": "pass", "objects": 1, "ops": {"color": 1}},
+   {"page": 3, "pixel": "pass", "objects": 1, "ops": {"color": 1}},
+   {"page": 4, "pixel": "pass", "objects": 1, "ops": {"color": 1}}
+  ]},
+  {"path": "bug_757705.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2}}
+  ]},
+  {"path": "bug_765384.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "bug_773229.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "bug_779.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {}}
+  ]},
+  {"path": "bug_781804.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 5, "ops": {"color": 5, "text": 3}}
+  ]},
+  {"path": "bug_782596.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2}
+  ]},
+  {"path": "bug_821454.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "bug_828049.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0}
+  ]},
+  {"path": "bug_861842.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "bug_889099.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {}}
+  ]},
+  {"path": "bug_890322.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "bug_896366.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "bug_900552.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"color": 1}}
+  ]},
+  {"path": "bug_901654.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 1, "diff_pixels": 876, "largest_region": 255, "ops": {"color": 1}}
+  ]},
+  {"path": "bug_901654_2.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 1, "diff_pixels": 876, "largest_region": 255, "ops": {"color": 1}}
+  ]},
+  {"path": "bug_905142.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "bug_921.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 45, "ops": {}}
+  ]},
+  {"path": "bug_925981.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2}},
+   {"page": 2, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "bug_972518.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "bug_xrefv4_loop.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "calculate.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "circular_viewer_ref.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": []},
+  {"path": "click_form.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 10, "ops": {"color": 2}}
+  ]},
+  {"path": "clip_path.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {}}
+  ]},
+  {"path": "combobox_form.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {}}
+  ]},
+  {"path": "control_characters.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2}}
+  ]},
+  {"path": "cropped_no_overlap.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {}}
+  ]},
+  {"path": "cropped_text.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2}},
+   {"page": 2, "pixel": "pass", "objects": 2, "ops": {"color": 2}},
+   {"page": 3, "pixel": "pass", "objects": 2, "ops": {"color": 2}},
+   {"page": 4, "pixel": "pass", "objects": 2, "ops": {"color": 2}}
+  ]},
+  {"path": "dashed_lines.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 3, "ops": {"color": 3}}
+  ]},
+  {"path": "docmdp.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 8, "ops": {"color": 8}}
+  ]},
+  {"path": "document_aactions.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0},
+   {"page": 2, "pixel": "error", "objects": 0},
+   {"page": 3, "pixel": "error", "objects": 0}
+  ]},
+  {"path": "embedded_attachments.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"color": 1, "gs": 1}}
+  ]},
+  {"path": "embedded_attachments_invalid_data.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "embedded_attachments_invalid_types.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "embedded_attachments_with_af.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "embedded_attachments_with_desc.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "embedded_images.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 39, "ops": {"color": 33, "clip": 37}}
+  ]},
+  {"path": "empty_xref.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2}}
+  ]},
+  {"path": "encrypted.pdf", "source": "public/pdfium/resources", "status": "load_failed", "pages": []},
+  {"path": "encrypted_hello_world_r2.pdf", "source": "public/pdfium/resources", "status": "load_failed", "pages": []},
+  {"path": "encrypted_hello_world_r2_bad_okey.pdf", "source": "public/pdfium/resources", "status": "load_failed", "pages": []},
+  {"path": "encrypted_hello_world_r3.pdf", "source": "public/pdfium/resources", "status": "load_failed", "pages": []},
+  {"path": "encrypted_hello_world_r3_bad_okey.pdf", "source": "public/pdfium/resources", "status": "load_failed", "pages": []},
+  {"path": "encrypted_hello_world_r5.pdf", "source": "public/pdfium/resources", "status": "load_failed", "pages": []},
+  {"path": "encrypted_hello_world_r6.pdf", "source": "public/pdfium/resources", "status": "load_failed", "pages": []},
+  {"path": "feature_linearized_loading.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 6, "diff_pixels": 1727943, "largest_region": 1727943, "ops": {"color": 6}},
+   {"page": 2, "pixel": "diff", "objects": 2, "diff_pixels": 1728085, "largest_region": 1727698, "ops": {"color": 2}}
+  ]},
+  {"path": "find_text_consecutive.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"color": 1}}
+  ]},
+  {"path": "font_matrix.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 3, "ops": {"color": 3}}
+  ]},
+  {"path": "font_weight.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2}}
+  ]},
+  {"path": "form_object.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"color": 2}}
+  ]},
+  {"path": "form_object_with_image.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"color": 2}}
+  ]},
+  {"path": "form_object_with_path.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"color": 2}}
+  ]},
+  {"path": "form_object_with_text.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"color": 2}}
+  ]},
+  {"path": "freetext_annotation_without_da.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "get_page_aaction.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}},
+   {"page": 2, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "goto_action.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "gotoe_action.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "hebrew_mirrored.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2}}
+  ]},
+  {"path": "hello_world.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2}}
+  ]},
+  {"path": "hello_world_2_pages.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2}},
+   {"page": 2, "pixel": "pass", "objects": 2, "ops": {"color": 2}}
+  ]},
+  {"path": "hello_world_2_pages_custom_object.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2}},
+   {"page": 2, "pixel": "pass", "objects": 2, "ops": {"color": 2}}
+  ]},
+  {"path": "hello_world_2_pages_shared_resources_dict.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2}},
+   {"page": 2, "pixel": "pass", "objects": 2, "ops": {"color": 2}}
+  ]},
+  {"path": "hello_world_2_pages_split_streams.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2}},
+   {"page": 2, "pixel": "diff", "objects": 2, "diff_pixels": 1303, "largest_region": 757, "ops": {"color": 2, "text": 1}}
+  ]},
+  {"path": "hello_world_brotli.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0}
+  ]},
+  {"path": "hello_world_brotli_with_length1.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0}
+  ]},
+  {"path": "hello_world_compressed_stream.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2}}
+  ]},
+  {"path": "hello_world_pieceinfo.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2}}
+  ]},
+  {"path": "hello_world_split_streams.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 3, "ops": {"color": 3}}
+  ]},
+  {"path": "hello_world_with_invisible_spaces.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 5, "ops": {"color": 5}}
+  ]},
+  {"path": "image_clipped.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {}}
+  ]},
+  {"path": "ink_annot.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "jpeg_reduced_size.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {}}
+  ]},
+  {"path": "jpeg_reduced_size_with_smask.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {}}
+  ]},
+  {"path": "jpeg_unaligned_no_reduce.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {}}
+  ]},
+  {"path": "jpx_lzw.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {}}
+  ]},
+  {"path": "js.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "latin_extended.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 257, "ops": {"clip": 257}}
+  ]},
+  {"path": "launch_action.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "line_annot.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "linearized.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}},
+   {"page": 2, "pixel": "pass", "objects": 0, "ops": {}},
+   {"page": 3, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "linearized_bug_1055.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}},
+   {"page": 2, "pixel": "pass", "objects": 0, "ops": {}},
+   {"page": 3, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "links_highlights_annots.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 3, "ops": {"color": 3}}
+  ]},
+  {"path": "listbox_form.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {}}
+  ]},
+  {"path": "many_rectangles.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 600, "ops": {"color": 600}}
+  ]},
+  {"path": "many_rectangles_brotli.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0}
+  ]},
+  {"path": "marked_content_id.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"clip": 2}}
+  ]},
+  {"path": "matte.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 4, "ops": {}}
+  ]},
+  {"path": "multiple_form_types.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {}}
+  ]},
+  {"path": "multiple_graphics_states.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 8, "ops": {"color": 8}}
+  ]},
+  {"path": "named_action.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "named_dests.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"color": 1}},
+   {"page": 2, "pixel": "pass", "objects": 1, "ops": {"color": 1}}
+  ]},
+  {"path": "named_dests_old_style.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1},
+   {"page": 2, "pixel": "error", "objects": 0}
+  ]},
+  {"path": "named_dests_old_style_indirect.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}},
+   {"page": 2, "pixel": "pass", "objects": 0, "ops": {}},
+   {"page": 3, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "no_page_count.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1},
+   {"page": 2, "pixel": "pass", "objects": 1},
+   {"page": 3, "pixel": "pass", "objects": 1},
+   {"page": 4, "pixel": "pass", "objects": 1},
+   {"page": 5, "pixel": "pass", "objects": 1},
+   {"page": 6, "pixel": "pass", "objects": 1}
+  ]},
+  {"path": "non_hex_file_id.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "nonesuch_action.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "page_labels.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"clip": 2}},
+   {"page": 2, "pixel": "pass", "objects": 0, "ops": {}},
+   {"page": 3, "pixel": "pass", "objects": 0, "ops": {}},
+   {"page": 4, "pixel": "pass", "objects": 0, "ops": {}},
+   {"page": 5, "pixel": "pass", "objects": 0, "ops": {}},
+   {"page": 6, "pixel": "pass", "objects": 0, "ops": {}},
+   {"page": 7, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "page_tree_empty_node.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}},
+   {"page": 2, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "parser_rebuildxref_correct.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2}}
+  ]},
+  {"path": "parser_rebuildxref_error_notrailer.pdf", "source": "public/pdfium/resources", "status": "load_failed", "pages": []},
+  {"path": "pattern_fill.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 1, "diff_pixels": 20736, "largest_region": 20736, "ops": {"color": 1}}
+  ]},
+  {"path": "pattern_fill_uncolored.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 1, "diff_pixels": 20736, "largest_region": 20736, "ops": {"color": 1}}
+  ]},
+  {"path": "pattern_stroke.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 1, "diff_pixels": 25600, "largest_region": 25600, "ops": {"color": 1}}
+  ]},
+  {"path": "pattern_stroke_uncolored.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 1, "diff_pixels": 25600, "largest_region": 25600, "ops": {"color": 1}}
+  ]},
+  {"path": "pdf20_minimal.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "polygon_annot.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "raw_type_text.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "rectangles.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 8, "ops": {"color": 8}}
+  ]},
+  {"path": "rectangles_brotli.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0}
+  ]},
+  {"path": "rectangles_double_flipped.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 8, "ops": {"color": 8}}
+  ]},
+  {"path": "rectangles_multi_page_xfa.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2}},
+   {"page": 2, "pixel": "pass", "objects": 2, "ops": {"color": 2}},
+   {"page": 3, "pixel": "pass", "objects": 2, "ops": {"color": 2}},
+   {"page": 4, "pixel": "pass", "objects": 2, "ops": {"color": 2}},
+   {"page": 5, "pixel": "pass", "objects": 2, "ops": {"color": 2}}
+  ]},
+  {"path": "rectangles_multi_pages.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2}},
+   {"page": 2, "pixel": "pass", "objects": 2, "ops": {"color": 2}},
+   {"page": 3, "pixel": "pass", "objects": 2, "ops": {"color": 2}},
+   {"page": 4, "pixel": "pass", "objects": 2, "ops": {"color": 2}},
+   {"page": 5, "pixel": "pass", "objects": 2, "ops": {"color": 2}}
+  ]},
+  {"path": "rectangles_object_zero.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 8, "ops": {"color": 8}}
+  ]},
+  {"path": "rectangles_with_leaky_ctm.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 8, "ops": {"color": 8}}
+  ]},
+  {"path": "redact_annot.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "redirect.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "repeat_viewer_ref.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": []},
+  {"path": "rotated_image.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {}}
+  ]},
+  {"path": "rotated_text.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 4, "ops": {"color": 4}}
+  ]},
+  {"path": "rotated_text_90.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 4, "ops": {"color": 4}}
+  ]},
+  {"path": "shared_form_xobject_matrix.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "signature_no_sub_filter.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 8, "ops": {"color": 8}}
+  ]},
+  {"path": "signature_reason.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 8, "ops": {"color": 8}}
+  ]},
+  {"path": "simple_thumbnail.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}},
+   {"page": 2, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "simple_xfa.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "split_streams.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 19, "ops": {}}
+  ]},
+  {"path": "tagged_actual_text.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2}}
+  ]},
+  {"path": "tagged_alt_text.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2}}
+  ]},
+  {"path": "tagged_expansion.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"color": 1}}
+  ]},
+  {"path": "tagged_marked_content.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 4, "ops": {"color": 4}}
+  ]},
+  {"path": "tagged_mcr_multipage.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"color": 1}},
+   {"page": 2, "pixel": "pass", "objects": 1, "ops": {"color": 1}}
+  ]},
+  {"path": "tagged_mcr_objr.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2}}
+  ]},
+  {"path": "tagged_nested.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"color": 1}}
+  ]},
+  {"path": "tagged_table.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2}}
+  ]},
+  {"path": "tagged_table_bad_elem.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2}}
+  ]},
+  {"path": "tagged_table_bad_parent.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2}}
+  ]},
+  {"path": "text_color.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {}}
+  ]},
+  {"path": "text_font.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"clip": 1}}
+  ]},
+  {"path": "text_form.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {}}
+  ]},
+  {"path": "text_form_color.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "text_form_multiline.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {}}
+  ]},
+  {"path": "text_form_multiple.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {}}
+  ]},
+  {"path": "text_form_negative_fontsize.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {}}
+  ]},
+  {"path": "text_in_page_marked.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 19, "ops": {}}
+  ]},
+  {"path": "text_in_page_marked_indirect.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 19, "ops": {}}
+  ]},
+  {"path": "text_large_ascent_descent.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2}}
+  ]},
+  {"path": "text_render_mode.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2}}
+  ]},
+  {"path": "thumbnail_with_empty_stream.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "thumbnail_with_no_filters.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "trailer_as_hexstring.pdf", "source": "public/pdfium/resources", "status": "load_failed", "pages": []},
+  {"path": "trailer_end_trailing_space.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2}}
+  ]},
+  {"path": "trailer_unterminated.pdf", "source": "public/pdfium/resources", "status": "load_failed", "pages": []},
+  {"path": "two_signatures.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 8, "ops": {"color": 8}}
+  ]},
+  {"path": "unsupported_feature.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0},
+   {"page": 2, "pixel": "error", "objects": 0},
+   {"page": 3, "pixel": "error", "objects": 0}
+  ]},
+  {"path": "uri_action.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "uri_action_nonascii.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "use_outlines.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2}}
+  ]},
+  {"path": "utf-8.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "version_in_catalog.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "vertical_text.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 3, "ops": {"color": 3}}
+  ]},
+  {"path": "viewer_pref_types.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "viewer_ref.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"color": 1}},
+   {"page": 2, "pixel": "pass", "objects": 1, "ops": {"color": 1}},
+   {"page": 3, "pixel": "pass", "objects": 1, "ops": {"color": 1}},
+   {"page": 4, "pixel": "pass", "objects": 1, "ops": {"color": 1}},
+   {"page": 5, "pixel": "pass", "objects": 1, "ops": {"color": 1}}
+  ]},
+  {"path": "weblinks.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 7, "ops": {"color": 7}}
+  ]},
+  {"path": "weblinks_across_lines.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 11, "ops": {"color": 11}}
+  ]},
+  {"path": "whitespace.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"color": 1}}
+  ]},
+  {"path": "xref_free_objects.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "zero_length_stream.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2}}
+  ]},
+  {"path": "xfa/email_recommended.pdf", "source": "public/pdfium/xfa", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 13, "ops": {}}
+  ]},
+  {"path": "xfa/xfa_break_before_after.pdf", "source": "public/pdfium/xfa", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "xfa/xfa_combobox.pdf", "source": "public/pdfium/xfa", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "xfa/xfa_date_time_edit.pdf", "source": "public/pdfium/xfa", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "xfa/xfa_image_edit.pdf", "source": "public/pdfium/xfa", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "xfa/xfa_multiline_textfield.pdf", "source": "public/pdfium/xfa", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
+  ]}
+ ]
+}

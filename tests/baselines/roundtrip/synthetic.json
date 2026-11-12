@@ -1,0 +1,213 @@
+{
+ "kind": "magpdf-roundtrip-baseline",
+ "format": 1,
+ "set": "synthetic",
+ "meta": {
+  "cli_sha256": "70da696397a994c78aff97ebe3416e07bd6fb9ff9c257bcc62bc4df5796c6f00",
+  "cli_version": "0.1.0",
+  "commit": "06a2fadc120102b576f16d2da145d9eddac10f94",
+  "corpus": {
+   "bytes": 105410,
+   "files": 58,
+   "sha256": "9aee5a93b0a1c59bc6d0694094a2f07582ecfc89ffb750d2810a946abb04fb4d"
+  },
+  "generated": "2026-11-12T10:53:13+08:00",
+  "has_ops": true,
+  "machine": "JACK",
+  "pdfium_dll_sha256": "71a3e63e6ab8f5746a0fc9de9bc3d0c0dc07eb60990dfd37d9db7fc891821943",
+  "pdfium_version": "159.0.8138.0",
+  "root_source": "synthetic",
+  "scale": 2.0,
+  "source_prefix": "",
+  "thresholds": {
+   "channel_tolerance": 24,
+   "max_diff_ratio": 0.0001,
+   "max_region_pixels": 16
+  }
+ },
+ "files": [
+  {"path": "color-calrgb-calgray.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 6, "diff_pixels": 79200, "largest_region": 16800, "ops": {"color": 6}}
+  ]},
+  {"path": "color-devicecmyk.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 10, "diff_pixels": 66599, "largest_region": 10816, "ops": {"color": 11}}
+  ]},
+  {"path": "color-devicegray.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 8, "ops": {"color": 9}}
+  ]},
+  {"path": "color-devicen.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 6, "diff_pixels": 73440, "largest_region": 16800, "ops": {"color": 6}}
+  ]},
+  {"path": "color-iccbased-embedded.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 6, "diff_pixels": 59200, "largest_region": 22400, "ops": {"color": 5}}
+  ]},
+  {"path": "color-iccbased-fallback.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 4, "diff_pixels": 67200, "largest_region": 22400, "ops": {"color": 4}}
+  ]},
+  {"path": "color-indexed.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 7, "diff_pixels": 56000, "largest_region": 14000, "ops": {"color": 6}}
+  ]},
+  {"path": "color-lab.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 6, "diff_pixels": 74640, "largest_region": 16800, "ops": {"color": 6}}
+  ]},
+  {"path": "color-separation.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 9, "diff_pixels": 70682, "largest_region": 16800, "ops": {"color": 9}}
+  ]},
+  {"path": "freight-bl-composite.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 44, "diff_pixels": 9316, "largest_region": 7375, "ops": {"color": 44}}
+  ]},
+  {"path": "freight-label-composite.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 27, "diff_pixels": 12782, "largest_region": 9216, "ops": {"color": 26}}
+  ]},
+  {"path": "gs-alpha.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 6, "ops": {"color": 3}}
+  ]},
+  {"path": "gs-blend-modes.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 13, "ops": {"color": 2}}
+  ]},
+  {"path": "gs-line-params.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 6, "diff_pixels": 58, "largest_region": 58, "ops": {"color": 2}}
+  ]},
+  {"path": "gs-overprint.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 5, "diff_pixels": 127200, "largest_region": 65600, "ops": {"color": 5, "gs": 3}}
+  ]},
+  {"path": "gs-smask-luminosity.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 4, "diff_pixels": 103180, "largest_region": 93800, "ops": {"color": 1, "gs": 2}}
+  ]},
+  {"path": "gs-text-knockout.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 4, "diff_pixels": 29996, "largest_region": 5094, "ops": {"color": 2, "text": 2}}
+  ]},
+  {"path": "gs-transparency-group.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 4, "ops": {"color": 3}}
+  ]},
+  {"path": "pattern-shading-fill.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 4, "diff_pixels": 121580, "largest_region": 52800, "ops": {"color": 4}}
+  ]},
+  {"path": "pattern-tiling.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 4, "diff_pixels": 118476, "largest_region": 57600, "ops": {"color": 4}}
+  ]},
+  {"path": "shading-axial.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 3, "diff_pixels": 133016, "largest_region": 67200, "ops": {"color": 1, "events": 2}}
+  ]},
+  {"path": "shading-functions.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 4, "diff_pixels": 140400, "largest_region": 46800, "ops": {"color": 1, "events": 3}}
+  ]},
+  {"path": "shading-mesh.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 3, "diff_pixels": 134971, "largest_region": 67771, "ops": {"color": 1, "events": 2}}
+  ]},
+  {"path": "shading-radial.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 3, "diff_pixels": 111158, "largest_region": 66907, "ops": {"color": 1, "events": 2}}
+  ]},
+  {"path": "shading-stitching-background.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 3, "diff_pixels": 86080, "largest_region": 66720, "ops": {"color": 2, "events": 1}}
+  ]},
+  {"path": "struct-annots-appearance.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 3, "ops": {"color": 3}}
+  ]},
+  {"path": "struct-cm-nested-transforms.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 7, "ops": {"color": 3}}
+  ]},
+  {"path": "struct-empty-pages.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 0, "ops": {}},
+   {"page": 2, "pixel": "pass", "objects": 0, "ops": {}},
+   {"page": 3, "pixel": "pass", "objects": 0, "ops": {}},
+   {"page": 4, "pixel": "pass", "objects": 0, "ops": {}}
+  ]},
+  {"path": "struct-form-xobject-nested.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 3, "ops": {"color": 5}}
+  ]},
+  {"path": "struct-form-xobject-reused.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 4, "ops": {"color": 7}}
+  ]},
+  {"path": "struct-image-xobject-masks.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 7, "ops": {"color": 2}}
+  ]},
+  {"path": "struct-incremental-update.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 3, "ops": {"color": 2}}
+  ]},
+  {"path": "struct-inline-image.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 7, "diff_pixels": 48662, "largest_region": 9600, "ops": {"color": 1, "events": 6}}
+  ]},
+  {"path": "struct-many-objects-clip.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 1501, "ops": {"color": 1, "clip": 1500}}
+  ]},
+  {"path": "struct-marked-content.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 7, "ops": {"color": 5}}
+  ]},
+  {"path": "struct-mediabox-cropbox.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 1}},
+   {"page": 2, "pixel": "pass", "objects": 2, "ops": {"color": 1}},
+   {"page": 3, "pixel": "pass", "objects": 2, "ops": {"color": 1}},
+   {"page": 4, "pixel": "pass", "objects": 2, "ops": {"color": 1}}
+  ]},
+  {"path": "struct-missing-resources.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 4, "ops": {"color": 2}}
+  ]},
+  {"path": "struct-multi-stream-bt.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 5, "ops": {"color": 2}}
+  ]},
+  {"path": "struct-multi-stream-q.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 4, "ops": {"color": 1}}
+  ]},
+  {"path": "struct-ocg-layers.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 6, "ops": {"color": 1}}
+  ]},
+  {"path": "struct-page-rotate.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 1}},
+   {"page": 2, "pixel": "pass", "objects": 2, "ops": {"color": 1}},
+   {"page": 3, "pixel": "pass", "objects": 2, "ops": {"color": 1}}
+  ]},
+  {"path": "struct-page-tree-inherited.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 1}},
+   {"page": 2, "pixel": "pass", "objects": 2, "ops": {"color": 1}}
+  ]},
+  {"path": "struct-stream-length-wrong.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 3, "ops": {"color": 2}}
+  ]},
+  {"path": "struct-xref-bad-offsets.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 3, "ops": {"color": 2}}
+  ]},
+  {"path": "struct-xref-missing.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 3, "ops": {"color": 2}}
+  ]},
+  {"path": "struct-xref-stream-objstm.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 3, "ops": {"color": 2}}
+  ]},
+  {"path": "struct-xref-stream-plain.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 3, "ops": {"color": 2}}
+  ]},
+  {"path": "text-cid-cjk-nonembedded.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 5, "diff_pixels": 4890, "largest_region": 548, "ops": {"color": 3, "text": 1}}
+  ]},
+  {"path": "text-cid-truetype-identity.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 3, "ops": {"color": 1}}
+  ]},
+  {"path": "text-clip-modes.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 12, "diff_pixels": 128469, "largest_region": 44883, "ops": {"color": 3, "clip": 4, "events": 1}}
+  ]},
+  {"path": "text-positioning-ops.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 10, "diff_pixels": 3574, "largest_region": 485, "ops": {"color": 10, "text": 2}}
+  ]},
+  {"path": "text-render-modes.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 5, "ops": {}}
+  ]},
+  {"path": "text-standard14.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 8, "diff_pixels": 4052, "largest_region": 1563, "ops": {"color": 8}}
+  ]},
+  {"path": "text-tc-tw.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 7, "diff_pixels": 13997, "largest_region": 912, "ops": {"color": 7, "text": 8}}
+  ]},
+  {"path": "text-tj-kerning.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 6, "ops": {"color": 6}}
+  ]},
+  {"path": "text-truetype-embedded.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 3, "ops": {"color": 1}}
+  ]},
+  {"path": "text-type3-multistream.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 5, "diff_pixels": 12184, "largest_region": 3976, "ops": {"color": 1, "events": 1}}
+  ]},
+  {"path": "text-type3.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 5, "diff_pixels": 12184, "largest_region": 3976, "ops": {"color": 1, "events": 1}}
+  ]}
+ ]
+}
