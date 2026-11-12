@@ -10,5 +10,7 @@ Cargo.lock
 models/manifest.json
 tests/corpus/synthetic/manifest.json
 tests/corpus/synthetic-text/samples/manifest.json
+# 往返测试的基线：报告工具写的，一页一行，git diff 才看得出哪几页变了（tests/baselines/README.md）
+tests/baselines/
 # 从 Rust 生成的协议类型和常量，cargo test -p magpdf-ipc 时重写
 packages/protocol/src/generated/
