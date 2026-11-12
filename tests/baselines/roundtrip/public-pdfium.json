@@ -3,15 +3,15 @@
  "format": 1,
  "set": "public-pdfium",
  "meta": {
-  "cli_sha256": "70da696397a994c78aff97ebe3416e07bd6fb9ff9c257bcc62bc4df5796c6f00",
+  "cli_sha256": "72aa2520a7701a533349cd0137e217815d844cde74adbee221ce30f15b08f5cd",
   "cli_version": "0.1.0",
-  "commit": "06a2fadc120102b576f16d2da145d9eddac10f94",
+  "commit": "c193e81842f148445e74163acc17a76cd475244e",
   "corpus": {
    "bytes": 2848890,
    "files": 346,
    "sha256": "0cfbd442a229d5805df4739b77d0faad60f8c27e349fd96c8ad7e82a041b9657"
   },
-  "generated": "2026-11-12T10:53:13+08:00",
+  "generated": "2026-11-12T16:38:30+08:00",
   "has_ops": true,
   "machine": "JACK",
   "pdfium_dll_sha256": "71a3e63e6ab8f5746a0fc9de9bc3d0c0dc07eb60990dfd37d9db7fc891821943",
@@ -148,7 +148,7 @@
    {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
   ]},
   {"path": "about_blank.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
-   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"clip": 1}}
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"gs": 1, "clip": 1}}
   ]},
   {"path": "actual_text_rtl.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
    {"page": 1, "pixel": "pass", "objects": 29, "ops": {"color": 29}}
@@ -157,10 +157,10 @@
    {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
   ]},
   {"path": "annotation_fileattachment.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
-   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"clip": 1}}
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"gs": 1, "clip": 1}}
   ]},
   {"path": "annotation_highlight_long_content.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
-   {"page": 1, "pixel": "pass", "objects": 36, "ops": {}}
+   {"page": 1, "pixel": "pass", "objects": 36, "ops": {"gs": 36}}
   ]},
   {"path": "annotation_highlight_rollover_ap.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
    {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
@@ -169,13 +169,13 @@
    {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2, "clip": 2}}
   ]},
   {"path": "annotation_ink_multiple.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
-   {"page": 1, "pixel": "pass", "objects": 31, "ops": {}}
+   {"page": 1, "pixel": "pass", "objects": 31, "ops": {"gs": 31}}
   ]},
   {"path": "annotation_markup_multiline_no_ap.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
    {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
   ]},
   {"path": "annotation_stamp_with_ap.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
-   {"page": 1, "pixel": "diff", "objects": 32, "diff_pixels": 67266, "largest_region": 1265, "ops": {"color": 32, "text": 25}}
+   {"page": 1, "pixel": "diff", "objects": 32, "diff_pixels": 67266, "largest_region": 1265, "ops": {"color": 32, "text": 25, "gs": 96}}
   ]},
   {"path": "annotiter.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
    {"page": 1, "pixel": "pass", "objects": 0, "ops": {}},
@@ -266,7 +266,7 @@
    {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
   ]},
   {"path": "bug_1302355.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
-   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"color": 2, "gs": 1}}
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"color": 2, "gs": 3}}
   ]},
   {"path": "bug_1302455.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
    {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
@@ -480,7 +480,7 @@
    {"page": 3, "pixel": "pass", "objects": 0, "ops": {}}
   ]},
   {"path": "bug_583.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
-   {"page": 1, "pixel": "diff", "objects": 2, "diff_pixels": 390, "largest_region": 390, "ops": {"events": 1}}
+   {"page": 1, "pixel": "diff", "objects": 2, "diff_pixels": 390, "largest_region": 390, "ops": {"gs": 1, "events": 1}}
   ]},
   {"path": "bug_601362.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
    {"page": 1, "pixel": "pass", "objects": 4, "ops": {"color": 4, "clip": 4}}
@@ -638,7 +638,7 @@
    {"page": 3, "pixel": "error", "objects": 0}
   ]},
   {"path": "embedded_attachments.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
-   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"color": 1, "gs": 1}}
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"color": 1, "gs": 3}}
   ]},
   {"path": "embedded_attachments_invalid_data.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
    {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
@@ -796,7 +796,7 @@
    {"page": 1, "pixel": "pass", "objects": 0}
   ]},
   {"path": "marked_content_id.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
-   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"clip": 2}}
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"gs": 1, "clip": 2}}
   ]},
   {"path": "matte.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
    {"page": 1, "pixel": "pass", "objects": 4, "ops": {}}
@@ -838,7 +838,7 @@
    {"page": 1, "pixel": "pass", "objects": 0, "ops": {}}
   ]},
   {"path": "page_labels.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
-   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"clip": 2}},
+   {"page": 1, "pixel": "pass", "objects": 2, "ops": {"gs": 2, "clip": 2}},
    {"page": 2, "pixel": "pass", "objects": 0, "ops": {}},
    {"page": 3, "pixel": "pass", "objects": 0, "ops": {}},
    {"page": 4, "pixel": "pass", "objects": 0, "ops": {}},
@@ -952,8 +952,8 @@
    {"page": 1, "pixel": "pass", "objects": 4, "ops": {"color": 4}}
   ]},
   {"path": "tagged_mcr_multipage.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
-   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"color": 1}},
-   {"page": 2, "pixel": "pass", "objects": 1, "ops": {"color": 1}}
+   {"page": 1, "pixel": "pass", "objects": 1, "ops": {"color": 1, "gs": 1}},
+   {"page": 2, "pixel": "pass", "objects": 1, "ops": {"color": 1, "gs": 1}}
   ]},
   {"path": "tagged_mcr_objr.pdf", "source": "public/pdfium/resources", "status": "ok", "pages": [
    {"page": 1, "pixel": "pass", "objects": 2, "ops": {"color": 2}}

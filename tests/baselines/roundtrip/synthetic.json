@@ -3,15 +3,15 @@
  "format": 1,
  "set": "synthetic",
  "meta": {
-  "cli_sha256": "70da696397a994c78aff97ebe3416e07bd6fb9ff9c257bcc62bc4df5796c6f00",
+  "cli_sha256": "72aa2520a7701a533349cd0137e217815d844cde74adbee221ce30f15b08f5cd",
   "cli_version": "0.1.0",
-  "commit": "06a2fadc120102b576f16d2da145d9eddac10f94",
+  "commit": "c193e81842f148445e74163acc17a76cd475244e",
   "corpus": {
-   "bytes": 105410,
-   "files": 58,
-   "sha256": "9aee5a93b0a1c59bc6d0694094a2f07582ecfc89ffb750d2810a946abb04fb4d"
+   "bytes": 109390,
+   "files": 60,
+   "sha256": "0680a3e4e4c3cbdcd48389c3806da940dbc89f08a008bb67855ff713499f83ed"
   },
-  "generated": "2026-11-12T10:53:13+08:00",
+  "generated": "2026-11-12T16:38:30+08:00",
   "has_ops": true,
   "machine": "JACK",
   "pdfium_dll_sha256": "71a3e63e6ab8f5746a0fc9de9bc3d0c0dc07eb60990dfd37d9db7fc891821943",
@@ -66,16 +66,22 @@
    {"page": 1, "pixel": "pass", "objects": 13, "ops": {"color": 2}}
   ]},
   {"path": "gs-line-params.pdf", "source": "synthetic", "status": "ok", "pages": [
-   {"page": 1, "pixel": "diff", "objects": 6, "diff_pixels": 58, "largest_region": 58, "ops": {"color": 2}}
+   {"page": 1, "pixel": "diff", "objects": 6, "diff_pixels": 58, "largest_region": 58, "ops": {"color": 2, "gs": 3}}
   ]},
   {"path": "gs-overprint.pdf", "source": "synthetic", "status": "ok", "pages": [
    {"page": 1, "pixel": "diff", "objects": 5, "diff_pixels": 127200, "largest_region": 65600, "ops": {"color": 5, "gs": 3}}
   ]},
+  {"path": "gs-smask-ctm.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 6, "diff_pixels": 37108, "largest_region": 12960, "ops": {"color": 2, "gs": 4}}
+  ]},
   {"path": "gs-smask-luminosity.pdf", "source": "synthetic", "status": "ok", "pages": [
    {"page": 1, "pixel": "diff", "objects": 4, "diff_pixels": 103180, "largest_region": 93800, "ops": {"color": 1, "gs": 2}}
   ]},
+  {"path": "gs-stacked-other-keys.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "diff", "objects": 11, "diff_pixels": 14848, "largest_region": 12800, "ops": {"color": 1, "gs": 31}}
+  ]},
   {"path": "gs-text-knockout.pdf", "source": "synthetic", "status": "ok", "pages": [
-   {"page": 1, "pixel": "diff", "objects": 4, "diff_pixels": 29996, "largest_region": 5094, "ops": {"color": 2, "text": 2}}
+   {"page": 1, "pixel": "diff", "objects": 4, "diff_pixels": 29996, "largest_region": 5094, "ops": {"color": 2, "text": 2, "gs": 1}}
   ]},
   {"path": "gs-transparency-group.pdf", "source": "synthetic", "status": "ok", "pages": [
    {"page": 1, "pixel": "pass", "objects": 4, "ops": {"color": 3}}
