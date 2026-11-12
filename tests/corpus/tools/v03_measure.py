@@ -12,6 +12,10 @@
   python -X dev tests/corpus/tools/v03_measure.py --label r3-item1 --out tests/out/v03r3/item1 \
       --baseline tests/out/v03r3/base/summary.json
 
+ops_diff.py 比对的项目变了之后（ops_diff.VERSION 加一），旧的 summary.json 不能再当基数：对旧的输出目录跑
+  python -X dev tests/corpus/tools/v03_measure.py --rescore --out tests/out/v03r3/base
+只重新比对已有的保存结果（往返和保真校验的结果不变），再拿它当基数。
+
 只作测试工具（pikepdf：MPL-2.0，见 tests/requirements-test.txt），不进安装包。
 """
 
@@ -175,14 +179,27 @@ def summarize_ops(ops_json: Path) -> dict[str, Any]:
         for key, value in counts.items():
             grand[key] = grand.get(key, 0) + int(value)
     pages: dict[str, dict[str, Any]] = {}
+    # 每一类差异按参数名（差异描述的第一个词）分开数，报告里用
+    breakdown: dict[str, dict[str, int]] = {}
     for record in data["files"]:
         for page in record.get("pages") or []:
             label = f"{record['path']} p{page['page']}"
             if "error" in page:
                 pages[label] = {"error": page["error"]}
-            elif any(page["counts"].values()):
+                continue
+            if any(page["counts"].values()):
                 pages[label] = {"counts": page["counts"], "summary": page["summary"]}
-    return {"totals": grand, "pages": dict(sorted(pages.items()))}
+            for category in ("missing", "extra", "color", "text", "gs", "clip"):
+                for description, count in (page.get(category) or {}).items():
+                    bucket = breakdown.setdefault(category, {})
+                    name = str(description).split(" ", 1)[0]
+                    bucket[name] = bucket.get(name, 0) + int(count)
+    return {
+        "version": int(data.get("version", 1)),
+        "totals": grand,
+        "breakdown": {k: dict(sorted(v.items())) for k, v in sorted(breakdown.items())},
+        "pages": dict(sorted(pages.items())),
+    }
 
 
 def summarize_fidelity(fidelity_json: Path) -> dict[str, Any]:
@@ -204,26 +221,27 @@ def summarize_fidelity(fidelity_json: Path) -> dict[str, Any]:
     }
 
 
-def measure_set(name: str, source: Path, cli: Path, out: Path, jobs: int) -> dict[str, Any]:
+def measure_set(name: str, source: Path, cli: Path, out: Path, jobs: int, rescore: bool) -> dict[str, Any]:
     roundtrip_json = out / f"{name}.json"
     save_dir = out / f"{name}-saved"
     ops_json = out / f"{name}-ops.json"
-    run(
-        [
-            str(cli),
-            "roundtrip",
-            str(source),
-            "--isolate",
-            "--jobs",
-            str(jobs),
-            "--quiet",
-            "--json",
-            str(roundtrip_json),
-            "--save-dir",
-            str(save_dir),
-        ],
-        out / f"{name}-roundtrip.log",
-    )
+    if not rescore:
+        run(
+            [
+                str(cli),
+                "roundtrip",
+                str(source),
+                "--isolate",
+                "--jobs",
+                str(jobs),
+                "--quiet",
+                "--json",
+                str(roundtrip_json),
+                "--save-dir",
+                str(save_dir),
+            ],
+            out / f"{name}-roundtrip.log",
+        )
     run(
         [
             sys.executable,
@@ -315,6 +333,11 @@ def print_summary(summary: dict[str, Any], base: dict[str, Any] | None) -> None:
         + f" / {fid['pages']} 页"
     )
     for name in ("synthetic", "public"):
+        for category, title in (("gs", "ExtGState"), ("missing", "事件缺失"), ("extra", "事件多出")):
+            bucket = summary[name]["ops"].get("breakdown", {}).get(category)
+            if bucket:
+                print(f"{name} {title}：" + "，".join(f"{k}×{v}" for k, v in bucket.items()))
+    for name in ("synthetic", "public"):
         diff_pages = summary[name]["roundtrip"]["diff_pages"]
         if diff_pages:
             print(f"{name} 有像素差异的页（{len(diff_pages)}）：")
@@ -325,7 +348,12 @@ def print_summary(summary: dict[str, Any], base: dict[str, Any] | None) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="V03 往返、操作符比对、保真校验一起量，并和基数比较")
-    parser.add_argument("--label", required=True, help="这一次测量的名字，写进 summary.json")
+    parser.add_argument("--label", default="", help="这一次测量的名字，写进 summary.json（--rescore 时沿用原来的）")
+    parser.add_argument(
+        "--rescore",
+        action="store_true",
+        help="不重跑往返和保真校验，只用现在的 ops_diff.py 重新比对 --out 里已有的保存结果（比对工具改了之后用）",
+    )
     parser.add_argument("--out", required=True, help="输出目录（放在 tests/out/ 下，不入库）")
     parser.add_argument("--cli", default=str(REPO / "target" / "release" / "magpdf-cli.exe"))
     parser.add_argument("--synthetic", default=str(REPO / "tests" / "corpus" / "synthetic"))
@@ -333,27 +361,52 @@ def main() -> int:
     parser.add_argument("--baseline", help="基数的 summary.json；给了就比较有没有退步")
     parser.add_argument("--jobs", type=int, default=4)
     args = parser.parse_args()
+    if not args.rescore and not args.label:
+        parser.error("需要 --label")
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     cli = Path(args.cli)
-    if not cli.is_file():
-        parser.error(f"找不到 {cli}，先 cargo build --release -p magpdf-cli")
-
-    summary: dict[str, Any] = {"label": args.label, "pdfium": pdfium_build_info()}
-    summary["synthetic"] = measure_set("syn", Path(args.synthetic), cli, out, args.jobs)
-    summary["public"] = measure_set("pub", Path(args.public), cli, out, args.jobs)
-    fidelity_json = out / "syn-fidelity.json"
-    run(
-        [str(cli), "fidelity", str(Path(args.synthetic)), "--json", str(fidelity_json), "--quiet"],
-        out / "syn-fidelity.log",
-    )
-    summary["fidelity"] = summarize_fidelity(fidelity_json)
-
     base: dict[str, Any] | None = None
-    problems: list[str] = []
     if args.baseline:
         base = json.loads(Path(args.baseline).read_text(encoding="utf-8"))
+        base_version = int(base.get("ops_version", 1))
+        if base_version != ops_diff.VERSION:
+            parser.error(
+                f"基数的操作符比对是第 {base_version} 版量的，现在是第 {ops_diff.VERSION} 版，差异数不能直接比："
+                "先对基数的输出目录跑一遍 --rescore"
+            )
+
+    summary: dict[str, Any]
+    if args.rescore:
+        # 往返和保真校验的结果沿用上一次的（PDFium 构建没有变），只用现在的 ops_diff.py 重新比对
+        previous = out / "summary.json"
+        if not previous.is_file():
+            parser.error(f"--rescore 要求 {previous} 已经存在")
+        old = json.loads(previous.read_text(encoding="utf-8"))
+        old_version = int(old.get("ops_version", 1))
+        kept = out / f"summary-ops-v{old_version}.json"
+        if old_version != ops_diff.VERSION and not kept.exists():
+            # 旧版工具量的数留一份，报告里两套数都要能查到
+            kept.write_text(previous.read_text(encoding="utf-8"), encoding="utf-8")
+        summary = {"label": old["label"], "pdfium": old["pdfium"]}
+    else:
+        if not cli.is_file():
+            parser.error(f"找不到 {cli}，先 cargo build --release -p magpdf-cli")
+        summary = {"label": args.label, "pdfium": pdfium_build_info()}
+    summary["ops_version"] = ops_diff.VERSION
+    summary["synthetic"] = measure_set("syn", Path(args.synthetic), cli, out, args.jobs, args.rescore)
+    summary["public"] = measure_set("pub", Path(args.public), cli, out, args.jobs, args.rescore)
+    fidelity_json = out / "syn-fidelity.json"
+    if not args.rescore:
+        run(
+            [str(cli), "fidelity", str(Path(args.synthetic)), "--json", str(fidelity_json), "--quiet"],
+            out / "syn-fidelity.log",
+        )
+    summary["fidelity"] = summarize_fidelity(fidelity_json)
+
+    problems: list[str] = []
+    if base is not None:
         problems = compare(base, summary)
         summary["baseline"] = {"label": base.get("label"), "regressions": problems}
     (out / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")

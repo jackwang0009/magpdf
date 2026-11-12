@@ -5,7 +5,10 @@
 - 颜色：填充/描边的颜色空间（g/G、rg/RG、k/K 推出的设备空间；cs/CS 引用的 ICCBased、Separation、DeviceN、
   Indexed、Lab、Cal*、Pattern 及其底色空间、图案类型）和分量值；
 - 文字状态：Tc、Tw、Tz、TL、Ts、Tr，以及字号 × 水平缩放 × Tm × CTM 的线性部分（用来判断 Tz 是否被等价折算进 Tm）；
-- ExtGState：ca、CA、BM、SMask、OP、op、OPM。
+- 图形状态参数（表里“ExtGState”一栏）：ca、CA、BM、OP、op、OPM、TK；SMask（类型、蒙版组的内容、`gs` 生效时的
+  CTM——软蒙版按那一刻的坐标系摆放）；ExtGState 字典里其余的条目（SA、AIS、SM、TR/TR2、BG/BG2、UCR/UCR2、HT 和
+  不认识的键，按值比较）；平滑度（`i` 或 FL）、渲染意图（`ri` 或 RI）；描边的事件和 Form 另外比较线宽、线端、
+  接头、斜接限制、虚线（`w`/`J`/`j`/`M`/`d` 或 LW/LC/LJ/ML/D）。
 原件与保存结果的事件序列按种类（文字按字节串）对齐后逐项比较，输出每页的差异摘要。
 
 用法：
@@ -52,6 +55,15 @@ STROKE_TEXT_MODES = {1, 2, 5, 6}
 CLIP_TEXT_MODES = {4, 5, 6, 7}
 VALUE_TOLERANCE = 2e-3
 TEXT_TOLERANCE = 1e-3
+# ExtGState 字典里单独跟踪的键；其余的键（除了 Type）按值记进 State.gs_other
+GS_OWN_KEYS = frozenset(
+    "/" + key
+    for key in "Type ca CA BM SMask OP op OPM TK FL RI LW LC LJ ML D Font".split()
+)
+# 比对项目变了就加一：不同版本量出来的差异数不能放在一起比（v03_measure.py 会检查）
+#   1  颜色、文字状态、ca/CA/BM/SMask 的类型/OP/op/OPM、剪裁
+#   2  加上 TK、软蒙版的内容和 CTM、ExtGState 的其余条目、平滑度、渲染意图、线型参数
+VERSION = 2
 
 
 def mul(m1: Matrix, m2: Matrix) -> Matrix:
@@ -121,9 +133,21 @@ class State:
     CA: float = 1.0
     bm: str = "Normal"
     smask: str = "None"
+    # `gs` 设置软蒙版那一刻的 CTM；没有软蒙版时是 None
+    smask_ctm: Matrix | None = None
     OP: bool = False
     op: bool = False
     OPM: int = 0
+    tk: bool = True
+    flatness: float = 1.0
+    intent: str = "RelativeColorimetric"
+    # ExtGState 字典里上面没有单列的条目：键 → 值的描述
+    gs_other: dict[str, str] = field(default_factory=dict)
+    line_width: float = 1.0
+    line_cap: int = 0
+    line_join: int = 0
+    miter_limit: float = 10.0
+    dash: tuple[tuple[float, ...], float] = ((), 0.0)
     # Current clip: path entries (rule, path ops) and text-clip groups.
     clip_path: tuple = ()
     clip_texts: tuple = ()
@@ -138,6 +162,8 @@ class Event:
     text: dict[str, Any] | None
     gs: dict[str, Any]
     clip: dict[str, Any] = field(default_factory=dict)
+    # 线型参数；只有描边的事件和 Form（里面的内容继承这些参数）才记
+    line: dict[str, Any] | None = None
 
 
 class Resources:
@@ -218,11 +244,66 @@ def describe_pattern(name: str, res: Resources) -> str:
     return f"PatternType={ptype}"
 
 
+def describe_value(obj: Any, depth: int = 0) -> str:
+    """一个 PDF 对象的值的描述，不含对象号（保存之后对象号会变）。
+
+    流按解码后的内容取摘要，字符串也只取摘要（描述会写进报告，不能带文档内容）。
+    """
+    if depth > 6:
+        return "…"
+    if isinstance(obj, pikepdf.Stream):
+        try:
+            digest = short_hash(obj.read_bytes())
+        except pikepdf.PdfError:
+            digest = "?"
+        keys = {k: v for k, v in obj.stream_dict.items() if k not in ("/Length", "/Filter", "/DecodeParms")}
+        inner = ",".join(f"{name_of(k)}={describe_value(v, depth + 1)}" for k, v in sorted(keys.items()))
+        return f"stream({inner};{digest})"
+    if isinstance(obj, pikepdf.Dictionary):
+        inner = ",".join(f"{name_of(k)}={describe_value(v, depth + 1)}" for k, v in sorted(obj.items()))
+        return f"<<{inner}>>"
+    if isinstance(obj, pikepdf.Array):
+        return "[" + ",".join(describe_value(v, depth + 1) for v in obj) + "]"
+    if isinstance(obj, pikepdf.Name):
+        return "/" + name_of(obj)
+    if isinstance(obj, bool):
+        return "true" if obj else "false"
+    if isinstance(obj, (int, float, Decimal)):
+        return fmt(float(obj))
+    if isinstance(obj, pikepdf.String):
+        return "(" + short_hash(bytes(obj)) + ")"
+    if obj is None:
+        return "null"
+    return type(obj).__name__
+
+
+def parse_dash(array: Any, phase: Any) -> tuple[tuple[float, ...], float]:
+    """虚线：`[数组] 相位`。数组为空就是实线，相位没有意义，记成 0。"""
+    if not isinstance(array, pikepdf.Array):
+        return ((), 0.0)
+    values = tuple(num(v) for v in array)
+    return (values, num(phase)) if values else ((), 0.0)
+
+
 def describe_smask(obj: Any) -> str:
+    """软蒙版：类型、蒙版组的内容，以及有没有底色和传递函数。"""
     if obj is None or isinstance(obj, pikepdf.Name):
         return "None"
     if isinstance(obj, pikepdf.Dictionary):
-        return name_of(obj.get("/S", "?"))
+        parts = [name_of(obj.get("/S", "?"))]
+        group = obj.get("/G")
+        if isinstance(group, pikepdf.Stream):
+            try:
+                parts.append(short_hash(group.read_bytes()))
+            except pikepdf.PdfError:
+                parts.append("?")
+        else:
+            parts.append("no-group")
+        if "/BC" in obj:
+            parts.append("BC=" + describe_value(obj.get("/BC")))
+        if "/TR" in obj:
+            parts.append("TR=" + short_hash(describe_value(obj.get("/TR")).encode()))
+        return ":".join(parts)
     return "Unknown"
 
 
@@ -260,9 +341,24 @@ def gs_snapshot(st: State) -> dict[str, Any]:
         "CA": round(st.CA, 4),
         "BM": st.bm,
         "SMask": st.smask,
+        "SMask matrix": st.smask_ctm,
         "OP": st.OP,
         "op": st.op,
         "OPM": st.OPM,
+        "TK": st.tk,
+        "FL": st.flatness,
+        "RI": st.intent,
+        "other": dict(st.gs_other),
+    }
+
+
+def line_snapshot(st: State) -> dict[str, Any]:
+    return {
+        "LW": st.line_width,
+        "LC": st.line_cap,
+        "LJ": st.line_join,
+        "ML": st.miter_limit,
+        "D": [list(st.dash[0]), st.dash[1]],
     }
 
 
@@ -331,6 +427,7 @@ class Interpreter:
                 text=text,
                 gs=gs_snapshot(st),
                 clip=clip_snapshot(st),
+                line=line_snapshot(st) if uses_stroke else None,
             )
         )
 
@@ -478,6 +575,7 @@ def _apply(op: str, operands: list[Any], st: State, res: Resources) -> bool:
                 st.bm = name_of(bm[0] if isinstance(bm, pikepdf.Array) and len(bm) else bm)
             if "/SMask" in gsd:
                 st.smask = describe_smask(gsd.get("/SMask"))
+                st.smask_ctm = st.ctm if st.smask != "None" else None
             if "/OP" in gsd:
                 st.OP = bool(gsd.get("/OP"))
                 if "/op" not in gsd:
@@ -486,11 +584,53 @@ def _apply(op: str, operands: list[Any], st: State, res: Resources) -> bool:
                 st.op = bool(gsd.get("/op"))
             if "/OPM" in gsd:
                 st.OPM = int(num(gsd.get("/OPM")))
+            if "/TK" in gsd:
+                st.tk = bool(gsd.get("/TK"))
+            if "/FL" in gsd:
+                st.flatness = num(gsd.get("/FL"))
+            if "/RI" in gsd:
+                st.intent = name_of(gsd.get("/RI"))
+            if "/LW" in gsd:
+                st.line_width = num(gsd.get("/LW"))
+            if "/LC" in gsd:
+                st.line_cap = int(num(gsd.get("/LC")))
+            if "/LJ" in gsd:
+                st.line_join = int(num(gsd.get("/LJ")))
+            if "/ML" in gsd:
+                st.miter_limit = num(gsd.get("/ML"))
+            if "/D" in gsd:
+                dash = gsd.get("/D")
+                if isinstance(dash, pikepdf.Array) and len(dash) == 2:
+                    st.dash = parse_dash(dash[0], dash[1])
             if "/Font" in gsd:
                 font = gsd.get("/Font")
                 if isinstance(font, pikepdf.Array) and len(font) == 2:
                     st.font = describe_font(font[0])
                     st.font_size = num(font[1])
+            for key, value in gsd.items():
+                if key not in GS_OWN_KEYS:
+                    st.gs_other[name_of(key)] = describe_value(value)
+        return True
+    if op == "w" and operands:
+        st.line_width = num(operands[0])
+        return True
+    if op == "J" and operands:
+        st.line_cap = int(num(operands[0]))
+        return True
+    if op == "j" and operands:
+        st.line_join = int(num(operands[0]))
+        return True
+    if op == "M" and operands:
+        st.miter_limit = num(operands[0])
+        return True
+    if op == "d" and len(operands) == 2:
+        st.dash = parse_dash(operands[0], operands[1])
+        return True
+    if op == "i" and operands:
+        st.flatness = num(operands[0])
+        return True
+    if op == "ri" and operands:
+        st.intent = name_of(operands[0])
         return True
     if op == "Tc" and operands:
         st.tc = num(operands[0])
@@ -604,6 +744,16 @@ def compare_events(a: list[Event], b: list[Event]) -> PageDiff:
     return diff
 
 
+def _brief(text: str | None, limit: int = 32) -> str:
+    if text is None:
+        return "-"
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _brief_dash(dash: list[Any]) -> str:
+    return "[" + " ".join(fmt(v) for v in dash[0]) + "] " + fmt(dash[1])
+
+
 def compare_pair(ea: Event, eb: Event, diff: PageDiff) -> None:
     for channel, ca, cb in (("fill", ea.fill, eb.fill), ("stroke", ea.stroke, eb.stroke)):
         if ca is None or cb is None:
@@ -641,8 +791,29 @@ def compare_pair(ea: Event, eb: Event, diff: PageDiff) -> None:
                 diff.folded[param] += 1
     for key, va in ea.gs.items():
         vb = eb.gs[key]
-        if va != vb:
+        if key == "other":
+            for name in sorted(set(va) | set(vb)):
+                if va.get(name) != vb.get(name):
+                    diff.gs[f"{name} {_brief(va.get(name))}→{_brief(vb.get(name))}"] += 1
+        elif key == "SMask matrix":
+            # 软蒙版本身不一样时上面的 SMask 一项已经记了，这里只看两边都有蒙版时摆放的坐标系
+            if va is not None and vb is not None and not all(close(x, y) for x, y in zip(va, vb, strict=True)):
+                diff.gs["SMask-matrix"] += 1
+        elif key == "FL":
+            if not close(va, vb):
+                diff.gs[f"FL {fmt(va)}→{fmt(vb)}"] += 1
+        elif va != vb:
             diff.gs[f"{key} {va}→{vb}"] += 1
+    if ea.line is not None and eb.line is not None:
+        la, lb = ea.line, eb.line
+        for key in ("LW", "ML"):
+            if not close(la[key], lb[key]):
+                diff.gs[f"{key} {fmt(la[key])}→{fmt(lb[key])}"] += 1
+        for key in ("LC", "LJ"):
+            if la[key] != lb[key]:
+                diff.gs[f"{key} {la[key]}→{lb[key]}"] += 1
+        if not _clip_values_equal(la["D"], lb["D"]):
+            diff.gs[f"D {_brief_dash(la['D'])}→{_brief_dash(lb['D'])}"] += 1
     if not _clip_values_equal(ea.clip.get("path", []), eb.clip.get("path", [])):
         diff.clip["path"] += 1
     if not _clip_values_equal(ea.clip.get("text", []), eb.clip.get("text", [])):
@@ -807,6 +978,7 @@ def main(argv: Iterable[str] | None = None) -> int:
         result = run_pair(args)
     else:
         parser.error("需要 --roundtrip 与 --save-dir，或 original saved 两个文件")
+    result["version"] = VERSION
     result["totals"] = aggregate(result)
     if args.json:
         out = Path(args.json)
