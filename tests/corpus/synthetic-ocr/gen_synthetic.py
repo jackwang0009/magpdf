@@ -32,10 +32,11 @@
   out/langs.json  图像主干名 → 页面语言
   out/meta.json   生成参数；每个底页的模板、字体、行距，每条标注的行类别、字体、字号、是否被印章压住；
                   每张图属于哪个底页、哪个变体
-  out/speed/      量速度用的三页（中文合同、英文提单、30 行货物的英文装箱单），noise、300 dpi，
-                  各有一张 PNG 和一份 PDF（整页一张灰度 JPEG，当作扫描仪出的文件）；另有 Label.txt
+  out/speed/      量速度用的三页（中文合同、英文提单、30 行货物的英文装箱单），都带噪声。每页有
+                  300 dpi 的 PNG 和 PDF（整页一张灰度 JPEG，当作扫描仪出的文件）、200 dpi 的 PNG、
+                  仿手机拍照的 1200 万像素 JPEG；另有 Label.txt
 
-噪声用给定种子的伪随机数生成，同一版 Pillow、同一套字体下每次生成的图逐字节相同。
+噪声用给定种子的伪随机数生成，同一版 Pillow、同一套字体下每次生成的图和 PDF 逐字节相同。
 
 用法：python gen_synthetic.py [--out out] [--pages-per-lang 30] [--seed 7] [--sets scan300 scan200 ...]
 依赖：Pillow（tests/requirements-test.txt）。字体用 Windows 自带的。
@@ -47,6 +48,7 @@ import json
 import math
 import os
 import random
+import time
 from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
@@ -1097,11 +1099,18 @@ def render_page(args: tuple[str, int, str, int, str | None, int | None, list[str
         add("images", f"{spec.name}_photo_3mp", "jpg", small, lambda x, y: [v / 2 for v in apply_homography(forward, x / 2, y / 2)], "photo", "3mp", quality=60)
 
     if clean300 is not None and "speed" in sets:
-        # 量速度用的页：noise、300 dpi，一张 PNG，一份“扫描仪出的 PDF”（整页一张灰度 JPEG）。
+        # 量速度用的页，都带噪声。300 dpi：一张 PNG，一份“扫描仪出的 PDF”（整页一张灰度 JPEG）。
+        # 同一页另出 200 dpi 的 PNG 和仿手机拍照的 1200 万像素 JPEG，看输入大小对耗时的影响。
+        name = f"speed_{lang}_{spec.doc}{'_dense' if item_rows else ''}"
         img = degrade_scan(clean300, variant_rng("noise:300"))
-        stem = f"speed_{lang}_{spec.doc}{'_dense' if item_rows else ''}_noise_300"
-        add("speed", stem, "png", img, scaled(2), "noise", "300", compress_level=3)
-        img.save(out / "speed" / f"{stem}.pdf", "PDF", resolution=300.0, quality=85)
+        add("speed", f"{name}_noise_300", "png", img, scaled(2), "noise", "300", compress_level=3)
+        # 创建时间写死，免得同样的内容每次生成的 PDF 不一样。
+        epoch = time.gmtime(0)
+        img.save(out / "speed" / f"{name}_noise_300.pdf", "PDF", resolution=300.0, quality=85, creationDate=epoch, modDate=epoch)
+        img200 = degrade_scan(master.reduce(3), variant_rng("noise:200"))
+        add("speed", f"{name}_noise_200", "png", img200, scaled(3), "noise", "200", compress_level=3)
+        shot, forward = photo_variant(clean300, variant_rng("photo"))
+        add("speed", f"{name}_photo_12mp", "jpg", shot, lambda x, y: apply_homography(forward, x / 2, y / 2), "photo", "12mp", quality=75)
 
     page_info: dict[str, object] = {
         "lang": lang,
