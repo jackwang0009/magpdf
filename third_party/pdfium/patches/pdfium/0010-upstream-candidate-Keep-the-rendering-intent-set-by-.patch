@@ -1,0 +1,240 @@
+From 0b8cb812a0e211c8de9cd34d81329aaf73a304d5 Mon Sep 17 00:00:00 2001
+From: jackwang0009 <93422958+jackwang0009@users.noreply.github.com>
+Date: Thu, 12 Nov 2026 13:10:31 +0800
+Subject: [PATCH] [upstream-candidate] Keep the rendering intent set by the ri
+ operator
+
+CPDF_StreamContentParser::Handle_SetRenderIntent() was empty, so the
+rendering intent an `ri` operator set never reached the page objects,
+and the operator was gone once the stream was regenerated. The intent
+of an ExtGState /RI entry was stored in the general state, but there
+was no way to read it back.
+
+- The parser stores the operand of `ri` in the general state, the same
+  place the /RI entry of a graphics state parameter dictionary goes to.
+- CPDF_GeneralState::GetRenderIntent() returns the name of the stored
+  intent. A name that is not one of the four rendering intents is
+  stored as the default one, RelativeColorimetric, as before.
+- The generator writes `/Name ri` after the parsed dictionaries when
+  the intent of the object is not the one those dictionaries leave, so
+  the operator keeps the last word over an /RI entry, and nothing is
+  written for the default intent or for an intent a dictionary sets.
+
+PDFium does not use the rendering intent when it renders, so this does
+not change any rendering.
+
+Tests: CPDFPageContentGeneratorTest.ProcessRenderingIntent.
+pdfium_unittests and pdfium_embeddertests: no new failures.
+
+Verification (ops_diff.py): differences in graphics state parameters
+2 -> 0 on the synthetic corpus (gs-stacked-other-keys) and 1 -> 0 on
+the public test files (marked_content_id.pdf). No-diff pages 65/69 ->
+65/69 synthetic, 384/388 -> 384/388 public.
+
+Co-authored-by: Cursor <cursoragent@cursor.com>
+---
+ .../edit/cpdf_pagecontentgenerator.cpp        | 15 ++++++--
+ core/fpdfapi/edit/cpdf_pagecontentgenerator.h |  7 +++-
+ .../cpdf_pagecontentgenerator_unittest.cpp    | 37 +++++++++++++++++++
+ core/fpdfapi/page/cpdf_generalstate.cpp       | 19 ++++++++++
+ core/fpdfapi/page/cpdf_generalstate.h         |  3 ++
+ .../fpdfapi/page/cpdf_streamcontentparser.cpp |  4 +-
+ 6 files changed, 79 insertions(+), 6 deletions(-)
+
+diff --git a/core/fpdfapi/edit/cpdf_pagecontentgenerator.cpp b/core/fpdfapi/edit/cpdf_pagecontentgenerator.cpp
+index fd8ef04d84..ca3e26b71f 100644
+--- a/core/fpdfapi/edit/cpdf_pagecontentgenerator.cpp
++++ b/core/fpdfapi/edit/cpdf_pagecontentgenerator.cpp
+@@ -1889,6 +1889,10 @@ void CPDF_PageContentGenerator::WriteGraphicsState(fxcrt::ostringstream* buf,
+   if (flatness != kDefaultFlatness || parsed.sets_flatness) {
+     WriteFloat(*buf, flatness) << " i ";
+   }
++  ByteString render_intent = general_state.GetRenderIntent();
++  if (render_intent != parsed.render_intent) {
++    *buf << "/" << PDF_NameEncode(render_intent) << " ri ";
++  }
+ 
+   if (include_clip_path) {
+     WriteClipPath(buf, pPageObj->clip_path());
+@@ -1962,7 +1966,11 @@ CPDF_PageContentGenerator::ParsedExtGStates
+ CPDF_PageContentGenerator::WriteParsedExtGStates(
+     fxcrt::ostringstream* buf,
+     const CPDF_PageObject* pPageObj) const {
++  // Follows what the dictionaries do to the parameters that can be set in
++  // other ways as well, the same way CPDF_AllStates::ProcessExtGS() does.
++  CPDF_GeneralState applied;
+   ParsedExtGStates result;
++  result.render_intent = applied.GetRenderIntent();
+   const CPDF_GeneralState& general_state = pPageObj->general_state();
+   pdfium::span<const RetainPtr<CPDF_Dictionary>> dicts =
+       general_state.GetGraphicsResourceDicts();
+@@ -1982,9 +1990,6 @@ CPDF_PageContentGenerator::WriteParsedExtGStates(
+     soft_mask_matrix = *general_state.GetSMaskMatrix();
+   }
+ 
+-  // Follows what the dictionaries do to the parameters that can be changed
+-  // after parsing, the same way CPDF_AllStates::ProcessExtGS() does.
+-  CPDF_GeneralState applied;
+   for (size_t i = 0; i < dicts.size(); ++i) {
+     const RetainPtr<CPDF_Dictionary>& dict = dicts[i];
+     ByteString name = GetResourceName("ExtGState", dict, stored_names[i]);
+@@ -2013,6 +2018,9 @@ CPDF_PageContentGenerator::WriteParsedExtGStates(
+       applied.SetBlendMode(array ? array->GetByteStringAt(0)
+                                  : mode->GetString());
+     }
++    if (RetainPtr<const CPDF_Object> intent = dict->GetDirectObjectFor("RI")) {
++      applied.SetRenderIntent(intent->GetString());
++    }
+     result.sets_line_width |= dict->KeyExist("LW");
+     result.sets_line_cap |= dict->KeyExist("LC");
+     result.sets_line_join |= dict->KeyExist("LJ");
+@@ -2023,6 +2031,7 @@ CPDF_PageContentGenerator::WriteParsedExtGStates(
+   result.fill_alpha = applied.GetFillAlpha();
+   result.stroke_alpha = applied.GetStrokeAlpha();
+   result.blend_type = applied.GetBlendType();
++  result.render_intent = applied.GetRenderIntent();
+   return result;
+ }
+ 
+diff --git a/core/fpdfapi/edit/cpdf_pagecontentgenerator.h b/core/fpdfapi/edit/cpdf_pagecontentgenerator.h
+index 6297c8ed74..7d9b685ca8 100644
+--- a/core/fpdfapi/edit/cpdf_pagecontentgenerator.h
++++ b/core/fpdfapi/edit/cpdf_pagecontentgenerator.h
+@@ -129,8 +129,9 @@ class CPDF_PageContentGenerator {
+   void WriteClipPath(fxcrt::ostringstream* buf,
+                      const CPDF_ClipPath& clip_path);
+   // Writes the graphics state of `pPageObj` (ExtGState, color, line width/
+-  // cap/join/miter limit/dash, flatness, clip path) without the enclosing
+-  // `q`. ProcessGraphics() is `q` + WriteGraphicsState().
++  // cap/join/miter limit/dash, flatness, rendering intent, clip path)
++  // without the enclosing `q`. ProcessGraphics() is `q` +
++  // WriteGraphicsState().
+   void WriteGraphicsState(fxcrt::ostringstream* buf,
+                           CPDF_PageObject* pPageObj,
+                           bool include_clip_path);
+@@ -143,6 +144,8 @@ class CPDF_PageContentGenerator {
+     float fill_alpha = 1.0f;
+     float stroke_alpha = 1.0f;
+     BlendMode blend_type = BlendMode::kNormal;
++    // The rendering intent the dictionaries leave.
++    ByteString render_intent;
+     // Whether one of the dictionaries sets a parameter that also has an
+     // operator of its own.
+     bool sets_line_width = false;
+diff --git a/core/fpdfapi/edit/cpdf_pagecontentgenerator_unittest.cpp b/core/fpdfapi/edit/cpdf_pagecontentgenerator_unittest.cpp
+index 1d50f5ad3f..cf685ce3c8 100644
+--- a/core/fpdfapi/edit/cpdf_pagecontentgenerator_unittest.cpp
++++ b/core/fpdfapi/edit/cpdf_pagecontentgenerator_unittest.cpp
+@@ -1462,6 +1462,43 @@ TEST_F(CPDFPageContentGeneratorTest, ProcessMiterLimitAndFlatness) {
+   EXPECT_EQ("q 0 g 0 G 8 w 20 20 m 60 70 l 100 20 l S Q\n", generate(1));
+ }
+ 
++TEST_F(CPDFPageContentGeneratorTest, ProcessRenderingIntent) {
++  auto doc = std::make_unique<CPDF_TestDocument>();
++  doc->CreateNewDoc();
++  auto resources = doc->New<CPDF_Dictionary>();
++  auto ext_gstates = resources->SetNewFor<CPDF_Dictionary>("ExtGState");
++  auto intent_gs = ext_gstates->SetNewFor<CPDF_Dictionary>("GSri");
++  intent_gs->SetNewFor<CPDF_Name>("RI", "Perceptual");
++
++  // In order: the operator; the operator after a dictionary that sets the
++  // rendering intent; that dictionary alone; the operator with the default
++  // rendering intent, and with a name that is not a rendering intent.
++  RetainPtr<CPDF_Page> page =
++      CreateParsedPage(doc.get(), resources,
++                       "q /Saturation ri 0 0 10 10 re f Q\n"
++                       "q /GSri gs /AbsoluteColorimetric ri 0 0 10 10 re f Q\n"
++                       "q /GSri gs 0 0 10 10 re f Q\n"
++                       "q /RelativeColorimetric ri 0 0 10 10 re f Q\n"
++                       "q /NoSuchIntent ri 0 0 10 10 re f Q\n");
++  ASSERT_EQ(5u, page->GetPageObjectCount());
++
++  CPDF_PageContentGenerator generator(page.Get());
++  auto generate = [&](size_t index) {
++    fxcrt::ostringstream buf;
++    TestProcessPageObject(&generator, &buf, page->GetPageObjectByIndex(index));
++    return ByteString(buf);
++  };
++  EXPECT_EQ("q 0 g 0 G /Saturation ri 0 0 10 10 re f Q\n", generate(0));
++  // The operator comes after the dictionary, as it did.
++  EXPECT_EQ("q /GSri gs 0 g 0 G /AbsoluteColorimetric ri 0 0 10 10 re f Q\n",
++            generate(1));
++  // The dictionary says it all.
++  EXPECT_EQ("q /GSri gs 0 g 0 G 0 0 10 10 re f Q\n", generate(2));
++  // The default rendering intent is not written, under either name.
++  EXPECT_EQ("q 0 g 0 G 0 0 10 10 re f Q\n", generate(3));
++  EXPECT_EQ("q 0 g 0 G 0 0 10 10 re f Q\n", generate(4));
++}
++
+ TEST_F(CPDFPageContentGeneratorTest, ProcessEmptyForm) {
+   auto doc = std::make_unique<CPDF_TestDocument>();
+   doc->CreateNewDoc();
+diff --git a/core/fpdfapi/page/cpdf_generalstate.cpp b/core/fpdfapi/page/cpdf_generalstate.cpp
+index 550680eb32..de6f37d232 100644
+--- a/core/fpdfapi/page/cpdf_generalstate.cpp
++++ b/core/fpdfapi/page/cpdf_generalstate.cpp
+@@ -36,6 +36,20 @@ int RI_StringToId(const ByteString& ri) {
+   return 0;
+ }
+ 
++// The inverse of RI_StringToId().
++ByteString RI_IdToString(int id) {
++  switch (id) {
++    case 1:
++      return "AbsoluteColorimetric";
++    case 2:
++      return "Saturation";
++    case 3:
++      return "Perceptual";
++    default:
++      return "RelativeColorimetric";
++  }
++}
++
+ BlendMode GetBlendTypeInternal(const ByteString& mode) {
+   switch (mode.GetID()) {
+     case FXBSTR_ID('N', 'o', 'r', 'm'):
+@@ -122,6 +136,11 @@ CPDF_GeneralState::CPDF_GeneralState(const CPDF_GeneralState& that) = default;
+ 
+ CPDF_GeneralState::~CPDF_GeneralState() = default;
+ 
++ByteString CPDF_GeneralState::GetRenderIntent() const {
++  const StateData* data = ref_.GetObject();
++  return RI_IdToString(data ? data->render_intent_ : 0);
++}
++
+ void CPDF_GeneralState::SetRenderIntent(const ByteString& ri) {
+   ref_.GetPrivateCopy()->render_intent_ = RI_StringToId(ri);
+ }
+diff --git a/core/fpdfapi/page/cpdf_generalstate.h b/core/fpdfapi/page/cpdf_generalstate.h
+index 385fa52d86..b1d80de6e5 100644
+--- a/core/fpdfapi/page/cpdf_generalstate.h
++++ b/core/fpdfapi/page/cpdf_generalstate.h
+@@ -30,6 +30,9 @@ class CPDF_GeneralState {
+   void Emplace() { ref_.Emplace(); }
+   bool HasRef() const { return !!ref_; }
+ 
++  // The name of the rendering intent. Names that are not rendering intents
++  // stand for the default one, RelativeColorimetric.
++  ByteString GetRenderIntent() const;
+   void SetRenderIntent(const ByteString& ri);
+ 
+   ByteString GetBlendMode() const;
+diff --git a/core/fpdfapi/page/cpdf_streamcontentparser.cpp b/core/fpdfapi/page/cpdf_streamcontentparser.cpp
+index 899e52afd2..1b91b53789 100644
+--- a/core/fpdfapi/page/cpdf_streamcontentparser.cpp
++++ b/core/fpdfapi/page/cpdf_streamcontentparser.cpp
+@@ -1110,7 +1110,9 @@ void CPDF_StreamContentParser::Handle_SetRGBColor_Stroke() {
+       GetNumbers(3), "DeviceRGB");
+ }
+ 
+-void CPDF_StreamContentParser::Handle_SetRenderIntent() {}
++void CPDF_StreamContentParser::Handle_SetRenderIntent() {
++  cur_states_->mutable_general_state().SetRenderIntent(GetString(0));
++}
+ 
+ void CPDF_StreamContentParser::Handle_CloseStrokePath() {
+   Handle_ClosePath();
+-- 
+2.51.2.windows.1
+
