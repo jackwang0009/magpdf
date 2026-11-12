@@ -273,6 +273,13 @@ pub struct OutputStats {
     pub bytes_delta: i64,
     /// 多页共用、因此复制了一份再改的内容流条数。
     pub deshared_streams: usize,
+    /// 页对象不归这一页独有（同一个页对象占了几个页号，或者页字典直接写在 /Kids 里）、
+    /// 因此另起了页对象的页数。
+    #[serde(default)]
+    pub pages_split: usize,
+    /// 为了把另起的页对象挂回去而复制的页树节点数。
+    #[serde(default)]
+    pub tree_nodes_split: usize,
     /// 保存后核对不过的页，每页一条，写明原因。
     pub verify_failures: Vec<String>,
 }

@@ -59,6 +59,8 @@ struct PageWork {
     geometry: Option<PageGeometry>,
     objects: usize,
     kinds: Vec<ObjectKind>,
+    /// PDFium 报的各对象的外接矩形（修改之前）。
+    bounds: Vec<Option<map::Rect>>,
     info: Option<PageInfo>,
     map: Option<PageMap>,
     reasons: Vec<String>,
@@ -219,7 +221,7 @@ pub fn run_file(
             }
             continue;
         }
-        match plan_page(map, &edit_set(&w.edits)) {
+        match plan_page(map, &edit_set(&w.edits, &w.bounds)) {
             Ok(rewrite) => {
                 if rewrite.changed {
                     w.planned = Some(Planned {
@@ -233,6 +235,8 @@ pub fn run_file(
     }
 
     let mut deshared_streams = 0usize;
+    let mut pages_split = 0usize;
+    let mut tree_nodes_split = 0usize;
     let mut stage_a: Option<Vec<u8>> = None;
     if let Some(pdf) = &pdf {
         let updates: Vec<PageUpdate> = work
@@ -248,6 +252,8 @@ pub fn run_file(
             match save_incremental(pdf, &infos, &updates, true) {
                 Ok(saved) => {
                     deshared_streams = saved.deshared_streams;
+                    pages_split = saved.pages_split;
+                    tree_nodes_split = saved.tree_nodes_split;
                     // 写不进去的页一个字节都没动，退回生成器。
                     for (index, why) in saved.rejected {
                         if let Some(w) = work.get_mut(index) {
@@ -396,6 +402,8 @@ pub fn run_file(
             full_rewrite_bytes,
             bytes_delta: saved.len() as i64 - original_len as i64,
             deshared_streams,
+            pages_split,
+            tree_nodes_split,
             verify_failures,
         }),
         page_records,
@@ -410,6 +418,7 @@ fn probe_page(doc: &Document<'_>, index: usize) -> PageWork {
         geometry: None,
         objects: 0,
         kinds: Vec::new(),
+        bounds: Vec::new(),
         info: None,
         map: None,
         reasons: Vec::new(),
@@ -433,6 +442,17 @@ fn probe_page(doc: &Document<'_>, index: usize) -> PageWork {
                 bounds: page.bounding_box(),
             });
             w.kinds = page.objects().map(|o| o.kind()).collect();
+            w.bounds = page
+                .objects()
+                .map(|o| {
+                    o.bounds().map(|r| map::Rect {
+                        left: f64::from(r.left.min(r.right)),
+                        bottom: f64::from(r.bottom.min(r.top)),
+                        right: f64::from(r.left.max(r.right)),
+                        top: f64::from(r.bottom.max(r.top)),
+                    })
+                })
+                .collect();
             w.objects = page.object_count();
         }
         Err(e) => w.error = Some(format!("PDFium 加载页面失败：{e}")),
@@ -520,13 +540,16 @@ fn same_kind(ours: ObjKind, theirs: ObjectKind) -> bool {
     )
 }
 
-fn edit_set(edits: &[(usize, EditKind)]) -> EditSet {
+/// 把抽到的修改交给改写层。`bounds` 是 PDFium 报的各对象的外接矩形：移动剪切里的对象时改写层
+/// 要靠它判断 PDFium 是不是已经把那条剪切去掉了。
+fn edit_set(edits: &[(usize, EditKind)], bounds: &[Option<map::Rect>]) -> EditSet {
     let mut set = EditSet::default();
     for (index, kind) in edits {
         let target = match kind {
             EditKind::Move => EditTarget::Move {
                 dx: f64::from(MOVE_DX),
                 dy: f64::from(MOVE_DY),
+                bounds: bounds.get(*index).copied().flatten(),
             },
             EditKind::Recolor => EditTarget::Recolor {
                 r: f64::from(RECOLOR_RGB[0]) / 255.0,
@@ -1093,6 +1116,7 @@ mod tests {
             geometry: None,
             objects: 3,
             kinds: vec![ObjectKind::Path, ObjectKind::Text, ObjectKind::Image],
+            bounds: vec![None; 3],
             info: None,
             map: None,
             reasons: vec!["对象数不一致".to_owned()],

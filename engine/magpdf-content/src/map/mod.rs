@@ -65,6 +65,39 @@ impl Matrix {
     }
 }
 
+/// 轴对齐的矩形（页面空间），`left <= right`、`bottom <= top`。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Rect {
+    pub left: f64,
+    pub bottom: f64,
+    pub right: f64,
+    pub top: f64,
+}
+
+impl Rect {
+    /// `other` 是不是整个落在这个矩形里。四条边各放宽 `slack`。
+    pub fn contains(&self, other: &Self, slack: f64) -> bool {
+        other.left >= self.left - slack
+            && other.right <= self.right + slack
+            && other.bottom >= self.bottom - slack
+            && other.top <= self.top + slack
+    }
+
+    /// 平移之后的矩形。
+    pub fn translated(&self, dx: f64, dy: f64) -> Self {
+        Self {
+            left: self.left + dx,
+            bottom: self.bottom + dy,
+            right: self.right + dx,
+            top: self.top + dy,
+        }
+    }
+}
+
+/// 判断“矩形包不包得住”时放宽的量（点）。PDFium 用单精度数直接比较，这边的坐标是另算出来的，
+/// 差在末位上；放宽之后只会把“也许包得住”多算进来，见 [`MappedObject::droppable_clip`]。
+pub const CLIP_SLACK: f64 = 0.01;
+
 /// 对象类别，与 `FPDF_PAGEOBJ_*` 一一对应。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ObjKind {
@@ -145,7 +178,7 @@ pub struct TextDetail {
     pub at_line_start: bool,
     /// 后面还有文字接着这一次显示的笔位置往下写（中间没有重新定位）。
     pub continued: bool,
-    /// 在 `BT … ET` 之内。
+    /// 在 `BT … ET` 之内。PDFium 不管这个（文字操作符写在外面也照样执行），这里只是如实记下。
     pub in_text_block: bool,
     /// 当时的文字矩阵（`Tm` 设的，不含 `Td` 的位移）。
     pub tm: Matrix,
@@ -198,6 +231,14 @@ pub struct MappedObject {
     /// 当时的变换矩阵。
     pub ctm: Matrix,
     pub fill: FillHistory,
+    /// PDFium 解析完一页之后会逐个检查对象的剪切（`CPDF_ContentParser::CheckClip`）：剪切只有一条
+    /// 路径、那条路径是矩形、又包得住对象的外接矩形时，把这个对象的剪切去掉。之后在内存里移动这个
+    /// 对象，它就不受那条剪切管了；而写在内容流里的对象怎么移动都还在剪切里面。
+    ///
+    /// 这里是“可能因此被去掉”的那条剪切的范围（页面空间）。`None` 表示肯定不会被去掉：没有剪切、
+    /// 剪切不止一条路径、路径带曲线，或者对象是渐变（PDFium 不检查渐变）。“是不是矩形”“是不是只剩
+    /// 一条”都往宽里算，不会漏；到底去没去掉，还要拿 PDFium 报的外接矩形来比。
+    pub droppable_clip: Option<Rect>,
     pub detail: Detail,
 }
 

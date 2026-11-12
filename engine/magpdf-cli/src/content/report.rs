@@ -85,6 +85,10 @@ pub struct SourceStats {
     /// 保存后核对不过的条数（读回的内容流不对，或者像素有差异）。
     pub verify_failures: usize,
     pub deshared_streams: usize,
+    /// 另起了页对象的页数（页对象不归这一页独有）。
+    pub pages_split: usize,
+    /// 为此复制的页树节点数。
+    pub tree_nodes_split: usize,
     pub saved_bytes: u64,
     pub incremental_bytes: u64,
     pub fallback_bytes: u64,
@@ -116,6 +120,8 @@ impl SourceStats {
             self.fallback_bytes += out.fallback_bytes;
             self.full_rewrite_bytes += out.full_rewrite_bytes;
             self.deshared_streams += out.deshared_streams;
+            self.pages_split += out.pages_split;
+            self.tree_nodes_split += out.tree_nodes_split;
             self.verify_failures += out.verify_failures.len();
         }
         for page in &file.page_records {

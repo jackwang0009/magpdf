@@ -29,8 +29,8 @@ use std::ops::Range;
 
 use super::resources::{FontLookup, Resources, XObjectKind};
 use super::{
-    Detail, FillHistory, FillRule, ImageDetail, MappedObject, Matrix, ObjKind, PathDetail,
-    ShadingGroup, ShowKind, TextDetail, Unmatched,
+    CLIP_SLACK, Detail, FillHistory, FillRule, ImageDetail, MappedObject, Matrix, ObjKind,
+    PathDetail, Rect, ShadingGroup, ShowKind, TextDetail, Unmatched,
 };
 use crate::content::inline::{InlineOutcome, dict_int, handle_begin_image};
 use crate::content::parser::{Element, Number, Obj, StreamParser, name_decode};
@@ -95,6 +95,42 @@ struct PathState {
     clips_in_span: usize,
 }
 
+/// PDFium 的剪切路径列表里和 `CheckClip` 有关的那一点信息（见 [`MappedObject::droppable_clip`]）。
+///
+/// 出处：`cpdf_clippath.cpp` 的 `AppendPathWithAutoMerge`、`cpdf_contentparser.cpp` 的 `CheckClip`。
+/// PDFium 往列表里加路径时会“自动合并”：列表里最后一条是矩形、又包得住新路径的包围盒时，先把那
+/// 一条去掉。所以列表可能只剩最后加的那一条，`CheckClip` 只对这种情况动手。
+///
+/// “是不是矩形”PDFium 是在 `cfx_path.cpp` 里判断的（4 或 5 个点，全是直线，相邻两点同横或同纵，
+/// 点多的还要先归一化），这里不重现，只取一个不会漏的条件：至少 4 个点、除了起点全是直线。
+#[derive(Debug, Clone, Copy, Default)]
+struct ClipTrack {
+    /// 最后加进来的那条路径：包围盒（页面空间），可不可能被当成矩形。
+    last: Option<(Rect, bool)>,
+    /// 列表里可能只剩 `last` 这一条。
+    maybe_single: bool,
+}
+
+impl ClipTrack {
+    fn append(&mut self, bbox: Rect, maybe_rect: bool) {
+        self.maybe_single = match self.last {
+            None => true,
+            Some((last, last_maybe_rect)) => {
+                self.maybe_single && last_maybe_rect && last.contains(&bbox, CLIP_SLACK)
+            }
+        };
+        self.last = Some((bbox, maybe_rect));
+    }
+
+    /// `CheckClip` 可能去掉的那条剪切。
+    fn droppable(&self) -> Option<Rect> {
+        match self.last {
+            Some((bbox, true)) if self.maybe_single => Some(bbox),
+            _ => None,
+        }
+    }
+}
+
 /// 随 `q`/`Q` 保存恢复的状态。
 #[derive(Debug, Clone)]
 struct State {
@@ -109,6 +145,9 @@ struct State {
     clips: usize,
     /// 生效的剪切里有文字剪切。
     text_clip: bool,
+    /// 剪切路径列表的近似。文字剪切不算在里面：有文字剪切时 PDFium 不会去掉剪切，但文字剪切
+    /// 超过 1024 个时 PDFium 会整批丢掉，这里不跟着数，一律当作可能去掉。
+    clip_paths: ClipTrack,
     fill: FillHistory,
     at_line_start: bool,
     /// 上一个定位操作符之后最近一次产生了对象的显示。
@@ -126,6 +165,7 @@ impl Default for State {
             line_cap: 0,
             clips: 0,
             text_clip: false,
+            clip_paths: ClipTrack::default(),
             fill: FillHistory {
                 ops: Vec::new(),
                 from_default: true,
@@ -196,6 +236,26 @@ fn is_path_end(op: &[u8]) -> bool {
         op,
         b"B" | b"B*" | b"b" | b"b*" | b"f" | b"F" | b"f*" | b"S" | b"s" | b"n"
     )
+}
+
+/// 点列乘上矩阵之后的包围盒（`CFX_Path::GetBoundingBox`：控制点也算）。`points` 不为空。
+fn bounding_box(points: &[PathPoint], ctm: &Matrix) -> Rect {
+    let mut rect = Rect {
+        left: f64::INFINITY,
+        bottom: f64::INFINITY,
+        right: f64::NEG_INFINITY,
+        top: f64::NEG_INFINITY,
+    };
+    for point in points {
+        let (x, y) = (f64::from(point.x), f64::from(point.y));
+        let px = ctm.a * x + ctm.c * y + ctm.e;
+        let py = ctm.b * x + ctm.d * y + ctm.f;
+        rect.left = rect.left.min(px);
+        rect.right = rect.right.max(px);
+        rect.bottom = rect.bottom.min(py);
+        rect.top = rect.top.max(py);
+    }
+    rect
 }
 
 impl Interp<'_> {
@@ -698,8 +758,15 @@ impl Interp<'_> {
         }
         if points.len() == 1 {
             if clip.is_some() {
-                // 加一个空矩形剪切。
+                // 加一个空矩形剪切（`AppendRect(0, 0, 0, 0)`，不乘矩阵）。
                 self.state.clips += 1;
+                let empty = Rect {
+                    left: 0.0,
+                    bottom: 0.0,
+                    right: 0.0,
+                    top: 0.0,
+                };
+                self.state.clip_paths.append(empty, true);
                 return;
             }
             let point = points[0];
@@ -733,7 +800,13 @@ impl Interp<'_> {
             self.push_object_with(ObjKind::Path, span, op, operands, detail);
         }
         if clip.is_some() {
+            // 对象（如果有）用的是加这条剪切之前的状态；剪切路径是点列乘上此刻的矩阵。
             self.state.clips += 1;
+            let maybe_rect =
+                points.len() >= 4 && points[1..].iter().all(|p| p.kind == PointKind::Line);
+            self.state
+                .clip_paths
+                .append(bounding_box(&points, &self.state.ctm), maybe_rect);
         }
     }
 
@@ -893,6 +966,12 @@ impl Interp<'_> {
             frame.has_objects = true;
         }
         let index = self.objects.len();
+        // `CheckClip` 跳过渐变。
+        let droppable_clip = if kind == ObjKind::Shading {
+            None
+        } else {
+            self.state.clip_paths.droppable()
+        };
         self.objects.push(MappedObject {
             kind,
             span,
@@ -900,6 +979,7 @@ impl Interp<'_> {
             op_operands,
             ctm: self.state.ctm,
             fill: self.state.fill.clone(),
+            droppable_clip,
             detail,
         });
         index
@@ -1392,6 +1472,83 @@ mod tests {
         // 组关闭之后的对象不影响它。
         let out = run(b"q 0 0 9 9 re W n /Sh0 sh Q 0 0 1 1 re f");
         assert!(matches!(out.objects[0].detail, Detail::Shading(Some(_))));
+    }
+
+    #[test]
+    fn clips_pdfium_may_drop() {
+        let clip_of = |data: &[u8], index: usize| run(data).objects[index].droppable_clip;
+        let rect = |left: f64, bottom: f64, right: f64, top: f64| {
+            Some(Rect {
+                left,
+                bottom,
+                right,
+                top,
+            })
+        };
+        // 没有剪切。
+        assert_eq!(clip_of(b"/Im0 Do", 0), None);
+        // 一条矩形剪切；范围乘过当时的矩阵。
+        assert_eq!(
+            clip_of(b"0 0 100 50 re W n /Im0 Do", 0),
+            rect(0.0, 0.0, 100.0, 50.0)
+        );
+        assert_eq!(
+            clip_of(b"2 0 0 2 10 10 cm 0 0 100 50 re W n /Im0 Do", 0),
+            rect(10.0, 10.0, 210.0, 110.0)
+        );
+        // 负的宽高、翻转的矩阵：范围照样是规整的。
+        assert_eq!(
+            clip_of(b"1 0 0 -1 0 100 cm 10 10 20 -5 re W n /Im0 Do", 0),
+            rect(10.0, 90.0, 30.0, 95.0)
+        );
+        // 用 m/l/h 画的矩形也算；三角形（闭合之后 4 个点，全是直线）宁可多报。
+        assert_eq!(
+            clip_of(b"0 0 m 10 0 l 10 10 l 0 10 l h W n /Im0 Do", 0),
+            rect(0.0, 0.0, 10.0, 10.0)
+        );
+        assert_eq!(
+            clip_of(b"0 0 m 10 0 l 5 5 l h W n /Im0 Do", 0),
+            rect(0.0, 0.0, 10.0, 5.0)
+        );
+        // 不到 4 个点、带曲线：肯定不是矩形。
+        assert_eq!(clip_of(b"0 0 m 10 0 l 5 5 l W n /Im0 Do", 0), None);
+        assert_eq!(
+            clip_of(b"0 0 m 10 0 l 10 10 l 5 15 0 10 0 5 c h W n /Im0 Do", 0),
+            None
+        );
+        // 后一条在前一条里面：前一条被合并掉，只剩后一条。
+        assert_eq!(
+            clip_of(b"0 0 100 100 re W n 10 10 50 50 re W n /Im0 Do", 0),
+            rect(10.0, 10.0, 60.0, 60.0)
+        );
+        // 后一条伸出前一条：两条都在，不会被去掉。
+        assert_eq!(
+            clip_of(b"0 0 100 100 re W n 50 50 100 100 re W n /Im0 Do", 0),
+            None
+        );
+        // 前一条带曲线（合并不掉），后一条是矩形：两条都在。
+        assert_eq!(
+            clip_of(
+                b"0 0 m 99 0 l 99 99 l 50 150 0 99 0 50 c h W n 10 10 20 20 re W n /Im0 Do",
+                0
+            ),
+            None
+        );
+        // 路径自己挂着 W：它用的是加这条剪切之前的状态，后面的对象才受它管。
+        let out = run(b"0 0 10 10 re W f /Im0 Do");
+        assert_eq!(out.objects[0].droppable_clip, None);
+        assert_eq!(out.objects[1].droppable_clip, rect(0.0, 0.0, 10.0, 10.0));
+        // Q 恢复剪切。
+        let out = run(b"q 0 0 10 10 re W n /Im0 Do Q /Im0 Do");
+        assert_eq!(out.objects[0].droppable_clip, rect(0.0, 0.0, 10.0, 10.0));
+        assert_eq!(out.objects[1].droppable_clip, None);
+        // 渐变不检查。
+        assert_eq!(clip_of(b"0 0 10 10 re W n /Sh0 sh", 0), None);
+        // 只有一个点的路径挂着 W：加的是一个空矩形。
+        assert_eq!(clip_of(b"5 5 m W n /Im0 Do", 0), rect(0.0, 0.0, 0.0, 0.0));
+        // 文字、表单、路径都带着这条信息。
+        let out = run(b"0 0 50 50 re W n BT /F1 9 Tf (a) Tj ET /Fm0 Do 1 1 2 2 re f");
+        assert!(out.objects.iter().all(|o| o.droppable_clip.is_some()));
     }
 
     #[test]

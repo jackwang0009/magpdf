@@ -11,6 +11,9 @@
 //! - 移动路径、图像、表单：`q 1 0 0 1 mx my cm … Q` 包住对象自己的字节，位移换算到当时的坐标系里；
 //!   已经建立的剪切不受 `cm` 影响，留在原地（PDFium 移动这几类对象时也不动剪切）。路径自己又挂着
 //!   `W` 时，先画一份移动过的副本（不带 `W`），原来的路径改成 `n`，只留下剪切。
+//! - 移动（渐变之外的）任何对象之前先看剪切：PDFium 解析时会把“只有一条、是矩形、包得住对象”的
+//!   剪切从对象上去掉，这样的对象在内存里移动之后不受剪切，写在内容流里却还受；移动之后仍在剪切
+//!   之内才写得出等价的结果，伸出去的拒绝。
 //! - 移动渐变：PDFium 连它的剪切一起移动，所以在它所在的 `q … Q` 组开头插一个 `cm`；组里有别的
 //!   对象、或者剪切是组外面建立的，就做不到。
 //! - 移动文字：`vx vy Td` 挪过去、显示、`-vx -vy Td` 挪回来。`Td` 会把笔放回行首，所以只有本来就在
@@ -23,14 +26,22 @@
 use std::collections::BTreeMap;
 use std::ops::Range;
 
-use crate::map::{Detail, MappedObject, ObjKind, PageMap, ShowKind, TextDetail};
+use crate::map::{CLIP_SLACK, Detail, MappedObject, ObjKind, PageMap, Rect, ShowKind, TextDetail};
 use crate::pdf::writer::format_real;
 
 /// 一次修改。
 #[derive(Debug, Clone, PartialEq)]
 pub enum EditTarget {
     /// 平移 `(dx, dy)`（页面空间）。
-    Move { dx: f64, dy: f64 },
+    ///
+    /// `bounds` 是移动之前 PDFium 报的对象外接矩形（`FPDFPageObj_GetBounds`）。对象外面只有一条
+    /// 矩形剪切时要靠它判断 PDFium 是不是已经把那条剪切去掉了（见
+    /// [`MappedObject::droppable_clip`]）；没给的话，这样的对象一律不移动。
+    Move {
+        dx: f64,
+        dy: f64,
+        bounds: Option<Rect>,
+    },
     /// 改填充色（DeviceRGB，0–1）。
     Recolor { r: f64, g: f64, b: f64 },
     /// 删除。
@@ -135,7 +146,10 @@ pub fn plan_page(map: &PageMap, edits: &EditSet) -> Result<PageRewrite, RewriteE
             return Err(RewriteError::NoSuchObject(*index, map.objects.len()));
         };
         match edit {
-            EditTarget::Move { dx, dy } => plan_move(&mut planner, *index, obj, *dx, *dy)?,
+            EditTarget::Move { dx, dy, bounds } => {
+                check_dropped_clip(*index, obj, *dx, *dy, bounds.as_ref())?;
+                plan_move(&mut planner, *index, obj, *dx, *dy)?;
+            }
             EditTarget::Recolor { r, g, b } => {
                 plan_recolor(&mut planner, *index, obj, [*r, *g, *b])?
             }
@@ -240,6 +254,40 @@ fn hide_in_place(
     Ok(())
 }
 
+/// PDFium 解析时可能已经把这个对象外面那条矩形剪切去掉了（剪切包得住对象时就去掉）。去掉之后
+/// 在内存里移动对象，它不受剪切；写在内容流里的对象移动之后却还在剪切里面。只有移动之后仍然整个
+/// 落在剪切之内，两边的画面才一样（重新打开时 PDFium 又会把剪切去掉）；否则写不出等价的结果。
+fn check_dropped_clip(
+    index: usize,
+    obj: &MappedObject,
+    dx: f64,
+    dy: f64,
+    bounds: Option<&Rect>,
+) -> Result<(), RewriteError> {
+    let Some(clip) = &obj.droppable_clip else {
+        return Ok(());
+    };
+    let Some(bounds) = bounds else {
+        return Err(unsupported(
+            index,
+            obj,
+            "对象外面只有一条矩形剪切，PDFium 可能已经把它去掉了；没给对象的外接矩形，判断不了",
+        ));
+    };
+    // 剪切本来就包不住对象：PDFium 没有去掉它，对象在内存里和在文件里一样受剪切。
+    if !clip.contains(bounds, CLIP_SLACK) {
+        return Ok(());
+    }
+    if clip.contains(&bounds.translated(dx, dy), CLIP_SLACK) {
+        return Ok(());
+    }
+    Err(unsupported(
+        index,
+        obj,
+        "对象外面那条矩形剪切 PDFium 解析时已经去掉了，移动之后对象伸出剪切，写在文件里会被剪掉",
+    ))
+}
+
 fn plan_move(
     p: &mut Planner<'_>,
     index: usize,
@@ -322,9 +370,7 @@ fn plan_move_text(
             "剪切模式的文字，移动会改变后面对象的剪切",
         ));
     }
-    if !text.in_text_block {
-        return Err(unsupported(index, obj, "文字不在 BT … ET 之内"));
-    }
+    // 文字写在 `BT … ET` 外面也一样移动：PDFium 不管有没有 `BT`，文字操作符照样执行。
     if !text.at_line_start {
         return Err(unsupported(
             index,
@@ -489,7 +535,26 @@ mod tests {
         }
     }
 
-    const MOVE: EditTarget = EditTarget::Move { dx: 10.0, dy: 20.0 };
+    const MOVE: EditTarget = EditTarget::Move {
+        dx: 10.0,
+        dy: 20.0,
+        bounds: None,
+    };
+
+    /// 移动 (10, 20)，带上 PDFium 报的外接矩形。
+    fn move_with_bounds(left: f64, bottom: f64, right: f64, top: f64) -> EditTarget {
+        EditTarget::Move {
+            dx: 10.0,
+            dy: 20.0,
+            bounds: Some(Rect {
+                left,
+                bottom,
+                right,
+                top,
+            }),
+        }
+    }
+
     const RED: EditTarget = EditTarget::Recolor {
         r: 1.0,
         g: 0.0,
@@ -563,6 +628,47 @@ mod tests {
         );
         // 构造和绘制之间夹着别的操作符：拒绝。
         assert!(refused(b"0 0 10 10 re 1 0 0 rg f", 0, MOVE).contains("夹着"));
+    }
+
+    #[test]
+    fn move_inside_a_clip_pdfium_may_have_dropped() {
+        // 剪切是一个包得住对象的矩形：PDFium 解析时把它从对象上去掉了。
+        let data = b"q 0 0 100 100 re W n 10 10 20 20 re f Q";
+        // 移动之后还在剪切里面：照常移动。
+        assert_eq!(
+            rewrite(data, 0, move_with_bounds(10.0, 10.0, 30.0, 30.0)),
+            "q 0 0 100 100 re W n q 1 0 0 1 10 20 cm 10 10 20 20 re f Q Q"
+        );
+        // 移动之后伸出剪切：内存里的对象不受剪切，文件里的会被剪掉，拒绝。
+        assert!(refused(data, 0, move_with_bounds(70.0, 70.0, 95.0, 95.0)).contains("伸出剪切"));
+        // 刚好顶到边上（图像外面套一个和它一样大的剪切，是很常见的写法）。
+        let image = b"q 10 10 50 50 re W n q 50 0 0 50 10 10 cm /Im0 Do Q Q";
+        assert!(refused(image, 0, move_with_bounds(10.0, 10.0, 60.0, 60.0)).contains("伸出剪切"));
+        // 没给外接矩形：判断不了，拒绝。
+        assert!(refused(data, 0, MOVE).contains("判断不了"));
+        // 对象本来就伸在剪切外面：PDFium 没有去掉剪切，移动之后两边一样受剪切。
+        assert_eq!(
+            rewrite(data, 0, move_with_bounds(90.0, 90.0, 120.0, 120.0)),
+            "q 0 0 100 100 re W n q 1 0 0 1 10 20 cm 10 10 20 20 re f Q Q"
+        );
+        // 改色、删除不受影响。
+        assert_eq!(
+            rewrite(data, 0, EditTarget::Delete),
+            "q 0 0 100 100 re W n Q"
+        );
+        // 文字、表单也一样检查。
+        let text = b"0 0 100 100 re W n BT /F1 9 Tf (a) Tj ET /Fm0 Do";
+        assert!(refused(text, 0, move_with_bounds(95.0, 5.0, 99.0, 14.0)).contains("伸出剪切"));
+        assert!(refused(text, 1, move_with_bounds(0.0, 0.0, 100.0, 100.0)).contains("伸出剪切"));
+        // 两条互不包含的剪切、带曲线的剪切：PDFium 不会去掉，随便移动。
+        for clipped in [
+            &b"0 0 100 100 re W n 50 50 100 100 re W n /Im0 Do"[..],
+            b"0 0 m 100 0 l 100 100 l 50 150 0 100 0 50 c h W n /Im0 Do",
+        ] {
+            let map = single(clipped);
+            assert_eq!(map.objects[0].droppable_clip, None);
+            assert!(plan_page(&map, &edit(0, MOVE)).is_ok());
+        }
     }
 
     #[test]
@@ -680,8 +786,12 @@ mod tests {
         );
         // 不在行首。
         assert!(refused(b"BT /F1 9 Tf (a) Tj (b) Tj ET", 1, MOVE).contains("行首"));
-        // 不在文字块里、操作数不规整、剪切模式。
-        assert!(refused(b"/F1 9 Tf (a) Tj", 0, MOVE).contains("BT"));
+        // 写在 BT … ET 外面的文字 PDFium 照样执行，也照样移动。
+        assert_eq!(
+            rewrite(b"/F1 9 Tf (a) Tj", 0, MOVE),
+            "/F1 9 Tf 10 20 Td (a) Tj -10 -20 Td"
+        );
+        // 操作数不规整、剪切模式。
         assert!(refused(b"BT /F1 9 Tf /abc Tj ET", 0, MOVE).contains("不规整"));
         assert!(refused(b"BT /F1 9 Tf 4 Tr (a) Tj ET", 0, MOVE).contains("剪切模式"));
         // 移动之后对象数不变（后面有人接着写时多一个不可见的）。
