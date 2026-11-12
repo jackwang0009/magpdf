@@ -26,13 +26,32 @@ third_party/pdfium/
 
 `chromium/8138`～`chromium/8141` 四个上游分支头指向同一个提交（`5f092b5299`），`build.ps1` 推导版本号时优先采用 `upstream-branch.txt` 里钉住的分支号。
 
-当前 `upstream..mag/main` 只有一个提交：
+当前 `upstream..mag/main` 有 14 个提交（`mag/main` @ `6537e3b998`），导出成 `patches/pdfium/` 下的 12 个补丁，按顺序打完得到的树和 `mag/main` 相同
+（颜色空间那一项在分支上是三个提交，导出时并成了 0004 一个补丁）：
 
 ```
-9503125169 [mag-local] build: 以共享库形式构建 pdfium.dll
+0001  9503125169  [mag-local] build: 以共享库形式构建 pdfium.dll
+0002  0868e1776e  [upstream-candidate] Write Tc and Tw when generating content streams
+0003  8f29c14dac  [upstream-candidate] Do not leave open q/BT blocks for Type3 text
+0004  9b56281ffd  [upstream-candidate] Track the color space and raw components of colors
+      e2baa2a628  [upstream-candidate] Expose the base color space and fix the stroke color space name
+      1f9ba1c187  [upstream-candidate] Write colors in their own color space
+0005  8477545cb9  [upstream-candidate] Preserve text clip modes (Tr 4-7) across content rewrite
+0006  9c541c2ca4  [upstream-candidate] Update embedder test expectations for device colors
+0007  d4f688cbf8  [upstream-candidate] Write inline images back as inline images
+0008  24e188eec7  [upstream-candidate] Write shading objects back
+0009  7003f65f86  [upstream-candidate] Write the graphics state parameter dictionaries back
+0010  0b8cb812a0  [upstream-candidate] Keep the rendering intent set by the ri operator
+0011  b29afa5e97  [upstream-candidate] Do not leak graphics state inside a text clip group
+0012  6537e3b998  [upstream-candidate] Write a text with the font resource it was parsed with
 ```
 
-它新增 gn 参数 `pdf_is_shared_lib`（`pdfium.gni`），为真时 `pdfium` 目标用 `shared_library` 而不是 `component`，
+0002–0012 是 P0 的 V03 三轮对内容流生成器的修复，每个都带单元测试；做法、测量和各自能不能提交上游，见
+`docs/p0/V03-修复内容流生成器（第一轮）.md`（第三轮在第 11 节）。都还没有提交上游（要先签 Google 的企业贡献者许可协议）。
+在 `6537e3b998` 上，`pdfium_unittests` 1175 个用例里有 3 个本机环境造成的失败，`pdfium_embeddertests` 899 个里有 1 个，都不是这些补丁带来的。
+主仓库默认链接的仍然是原版预编译库；要用修补后的构建，按第 3 节构建，再把 `PDFIUM_PREBUILT_DIR` 指向产物目录。
+
+0001 新增 gn 参数 `pdf_is_shared_lib`（`pdfium.gni`），为真时 `pdfium` 目标用 `shared_library` 而不是 `component`，
 并通过 `pdfium_public_config` 定义 `FPDF_SHARED_LIBRARY`，让 `public/fpdfview.h` 里的 `FPDF_EXPORT` 在非 component 构建下
 也展开成 `dllexport` / `dllimport`。只改了 3 个文件、28 行，上游逻辑在默认值下完全不变。导出表与 pdfium-binaries 完全一致（471 个符号）。
 
