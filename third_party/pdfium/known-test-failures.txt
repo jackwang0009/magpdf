@@ -1,0 +1,11 @@
+# 开发机（Windows 11 简体中文，系统代码页 936）上原版 PDFium chromium/8138 就不通过的用例。
+# run-tests.ps1 用它区分“环境造成的失败”和“我们的改动造成的失败”。格式：<测试程序> <用例名>  # 原因
+#
+# pdfium_unittests 的 3 个：V01 报告 4.3 在只带 [mag-local] 共享库提交的构建上量过（当时还有第 4 个
+# ParserTest.RebuildCrossRefCorrectly，是检出被 autocrlf 改坏造成的，重新检出后已通过）。
+# pdfium_embeddertests 的 1 个：2026-11-12 在 9503125169（原版加共享库提交）上实测，899 个里只有它失败。
+
+pdfium_unittests WideString.ToDefANSI            # 期望代码页 1252，本机是 936
+pdfium_unittests WideString.FromDefANSI          # 同上
+pdfium_unittests CPDFCIDFontTest.Bug920636       # 和本机的字体映射、区域设置有关
+pdfium_embeddertests FPDFAnnotEmbedderTest.SetFontColor  # 期望回退字体 Noto Sans CJK JP，本机回退到 Arimo
