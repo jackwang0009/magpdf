@@ -4,7 +4,8 @@
 
 做的事（已经有结果的步骤默认跳过，`--force` 全部重来）：
 
-1. prepare      生成 OCR 合成样本，用固定的命令行工具跑一遍 OCR 得到文字行框，算出模型输入的缓存。
+1. prepare      生成 OCR 合成样本（gen_samples.py，18 页，写到 tests/out/v10-samples/），用固定的命令行工具跑一遍 OCR
+                得到文字行框，算出模型输入的缓存。
 2. env          记下显卡、驱动、DirectML、ONNX Runtime 的版本；有 Windows ML 的虚拟环境时看一眼它的目录。
 3. sizes        安装包大小：从 NuGet 取几个包，列出要随包带的 DLL 有多大（第一次要下载约 530 MB；`--quick` 不做）。
 4. timing       每页推理耗时、初始化时间、内存：每种配置各起 5 个进程，配置之间轮流跑。
@@ -202,7 +203,8 @@ class Runner:
         images = self.samples / "images"
         if not images.is_dir() or not any(images.glob("*.png")):
             self.log("生成 OCR 合成样本")
-            script = ROOT / "tests" / "corpus" / "synthetic-ocr" / "gen_synthetic.py"
+            # 用这个目录里留的那一份生成脚本：tests/corpus/synthetic-ocr/gen_synthetic.py 后来重写了，出的不是这 18 页。
+            script = HERE / "gen_samples.py"
             subprocess.run([sys.executable, str(script), "--out", str(self.samples)], check=True, capture_output=True)
         for models, flags in (("mobile", []), ("server", ["--server"])):
             cli_out = self.out / f"cli-{models}"
@@ -766,7 +768,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     prefix = Path(sys.prefix)
     ap.add_argument("--out", type=Path, default=ROOT / "tests" / "out" / "v10")
-    ap.add_argument("--samples", type=Path, default=ROOT / "tests" / "corpus" / "synthetic-ocr" / "out")
+    ap.add_argument("--samples", type=Path, default=ROOT / "tests" / "out" / "v10-samples", help="18 页合成样本放在哪里（没有就生成）")
     ap.add_argument("--models-dir", type=Path, default=Path(os.environ.get("MAGPDF_MODELS_DIR", r"D:\workspace\magpdf\models")))
     ap.add_argument("--cli", type=Path, default=Path(os.environ.get("MAGPDF_CLI", r"D:\workspace\magpdf-wt\bin\magpdf-cli.exe")))
     ap.add_argument(
