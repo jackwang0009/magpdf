@@ -1,0 +1,51 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Pages /Kids [5 0 R] /Count 1 >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+3 0 obj
+<< /FunctionType 2 /Domain [0 1] /C0 [1] /C1 [0] /N 1 >>
+endobj
+4 0 obj
+<<  /Length 640 >>
+stream
+0.2 0.6 1 rg 10 150 280 20 re f
+q /GSa gs /GSb gs 1 0.8 0 rg 20 135 120 45 re f Q
+q /GSa gs /GSa2 gs 1 0.8 0 rg 160 135 120 45 re f Q
+q /GStr gs 1 0 0 rg 20 85 80 40 re f Q
+q /GStr gs /GStr0 gs 1 0 0 rg 110 85 80 40 re f Q
+q /GStr gs 0.2 0.2 0.2 RG 6 w 205 90 m 280 120 l S Q
+q /GSlw gs 2 w 0 0 0.7 RG 20 65 m 140 65 l S Q
+q /GSlw gs 0 0 0.7 RG 20 30 m 80 50 l 140 30 l S Q
+q /Saturation ri 0.5 i 0 0.5 0 rg 160 40 m 200 80 250 80 280 40 c f Q
+q /GSa gs /AbsoluteColorimetric ri 2 i 0.5 0 0.5 rg 160 22 120 10 re f Q
+BT /F1 6 Tf 0 g 10 188 Td (gs-stacked-other-keys: stacked dictionaries, TR2 \(inverting\), LW vs w, ri / i operators) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 1 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 2 0 R >> /ExtGState << /GSa << /Type /ExtGState /ca 0.5 /SA true /OP true /RI /Perceptual /FL 0.5 /SM 0.02 >> /GSb << /ca 0.8 /BM /Multiply /AIS false >> /GSa2 << /Type /ExtGState /ca 1 /SA false /OP false /RI /RelativeColorimetric /FL 1 /SM 0 >> /GStr << /TR2 3 0 R /BG2 /Default /UCR2 /Default /HT /Default >> /GStr0 << /TR2 /Default >> /GSlw << /LW 8 /LC 1 /ML 3 >> >> >> /Contents 4 0 R >>
+endobj
+6 0 obj
+<< /Type /Catalog /Pages 1 0 R >>
+endobj
+7 0 obj
+<< /Title (gs-stacked-other-keys) /Subject (MagPDF synthetic test sample) /Producer (MagPDF synthetic corpus generator \(tests/corpus/synthetic/generate.py\)) >>
+endobj
+xref
+0 8
+0000000000 65535 f 
+0000000015 00000 n 
+0000000072 00000 n 
+0000000169 00000 n 
+0000000241 00000 n 
+0000000933 00000 n 
+0000001422 00000 n 
+0000001471 00000 n 
+trailer
+<< /Size 8 /Root 6 0 R /Info 7 0 R /ID [<36D906283DC530C1359A9A74B32FC527> <36D906283DC530C1359A9A74B32FC527>]  >>
+startxref
+1648
+%%EOF

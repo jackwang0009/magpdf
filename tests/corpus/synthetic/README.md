@@ -25,6 +25,9 @@ python tests/corpus/synthetic/generate.py --list
 | `samples_gs_text.py` | ExtGState、文字、字体 |
 | `samples_struct.py` | 多内容流、XObject、图像、标记内容、页面几何、文件结构、OCG、批注 |
 | `samples_composite.py` | 货代单证风格综合样本（虚构数据，编号校验位正确） |
+| `samples_v03_round3.py` | V03 第三轮修生成器时补的样本（软蒙版与 CTM、ExtGState 叠加和其余条目……） |
 
 加样本：在对应 `samples_*.py` 里写一个 `@sample(...)` 函数，返回 `(bytes, [每页 expect])`；用 `Content` 画内容就自动得到对象数预期。
+编号（S-0001…）按登记顺序排：已有的模块只能在**最后一个**模块的末尾加样本，或者新开一个模块、排到 `generate.py` 的
+`SAMPLE_MODULES` 最后，否则后面的编号会全部变掉。
 样本内容必须虚构，不得含任何真实单据信息。

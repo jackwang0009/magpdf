@@ -27,7 +27,8 @@ sys.path.insert(0, str(HERE.parent / "tools"))
 from common import REGISTRY, Sample, resolve_pages  # noqa: E402
 from corpuslib import dump_json  # noqa: E402
 
-SAMPLE_MODULES = ["samples_color", "samples_gs_text", "samples_struct", "samples_composite"]
+# 新模块只往后加：样本编号按登记顺序排，插在中间会让后面的编号全部变掉
+SAMPLE_MODULES = ["samples_color", "samples_gs_text", "samples_struct", "samples_composite", "samples_v03_round3"]
 MANIFEST_SCHEMA = 1
 GROUP_TITLES = {
     "color": "颜色空间与图案（方案 2.1 第 1 条）",

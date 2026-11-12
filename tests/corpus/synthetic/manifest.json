@@ -3056,6 +3056,118 @@
           }
         ]
       }
+    },
+    {
+      "id": "S-0059",
+      "category": "S",
+      "file": "gs-smask-ctm.pdf",
+      "sha256": "2dcfb7fa398a1852f536d92051a0de7809391c650a174b8047b1cfefce493716",
+      "size": 2019,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "extgstate",
+        "smask",
+        "luminosity",
+        "alpha-mask",
+        "cm",
+        "transparency-group"
+      ],
+      "expected": "软蒙版按 gs 生效那一刻的 CTM 摆放。左上：缩放平移之后设亮度蒙版，蓝块只在蒙版的方框里可见，方框中间一块更淡；右上：平移之后设蒙版、再旋转 30° 画红色方块，方块转了，蒙版的方框不转；左下：Alpha 蒙版（三角形）里的绿块；右下：压扁的蒙版下的紫色文字 MASK，两头被蒙版截掉。重写时要是在单位矩阵下写 gs，四处的可见范围都会挪到页面左下角 100×100 的区域里。",
+      "issues": [],
+      "title": "软蒙版在变换过的坐标系里设置（cm 之后 gs）：亮度蒙版、Alpha 蒙版",
+      "group": "extgstate",
+      "refs": [
+        "方案 2.1 ExtGState",
+        "P0 计划 V03 第 4 项",
+        "V03 第三轮 第 3 项"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 6,
+            "text": 2,
+            "path": 4,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "S-0060",
+      "category": "S",
+      "file": "gs-stacked-other-keys.pdf",
+      "sha256": "7688b65d289bba7b46dafddae9d521f8b033e4daef94b92eea959064ed861d05",
+      "size": 1961,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "extgstate",
+        "stacked-gs",
+        "SA",
+        "AIS",
+        "SM",
+        "FL",
+        "RI",
+        "TR2",
+        "BG2",
+        "UCR2",
+        "HT",
+        "ri",
+        "flatness",
+        "LW"
+      ],
+      "expected": "第一行：左块先后套两个字典（后一个只盖掉 ca，另加 Multiply），压在蓝带上应是 80% 的正片叠底；右块的第二个字典把第一个的条目全部盖掉，应是不透明的黄。第二行：TR2 是反相函数，红块显示成青色；再套 /TR2 /Default 的右块仍是红；右边的深灰粗线经反相变浅。第三行：字典给 LW 8、圆线端，上面一条被 w 改成 2，下面一条保持 8。右下两块用了 ri、i 操作符（PDFium 渲染不看这两个参数）。重写之后字典里的每个条目都应该还在；只合成 ca/CA/BM 的话，青块变红、粗细和线端都不对。",
+      "issues": [],
+      "title": "多个 ExtGState 叠加；SA、AIS、SM、FL、RI、TR2、BG2、UCR2、HT 等条目；ri、i 操作符",
+      "group": "extgstate",
+      "refs": [
+        "方案 2.1 ExtGState",
+        "P0 计划 V03 第 4 项",
+        "V03 第三轮 第 3 项"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 11,
+            "text": 1,
+            "path": 10,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
     }
   ]
 }
