@@ -13,6 +13,7 @@
 
   input.png     带字的图（先模糊、加噪声、按 4:2:0 压成 JPEG 再解码，存成 PNG 免得各家解码器结果不同）
   ref.png       对照：同样的纸、底纹、章、邻行、模糊、噪声（同一份）、JPEG 质量，只是没有目标行
+  ref_nonoise.png  对照图不加噪声的样子：和 ref.png 一比就是纸面噪声有多大，评价时当作“最好能做到多少”的参照
   gt_mask.png   字形像素的真值掩膜：目标行字形本来的形状（模糊之前覆盖率过半的像素）
   gt_alpha.png  模糊之后目标行让画面变暗了多少（8 位）：笔画边上发虚的一圈也在里面，≥26 的像素肉眼看得出
   nostruct.png  有章、底纹线条或表格线的样本才有：把这些去掉之后的对照图，用来量它们被抹掉了多少
@@ -747,6 +748,7 @@ def generate(spec: Spec, seed: int, index: int, out_dir: Path) -> dict[str, Any]
     clean_ref = compose(False, True)
     imwrite(sample_dir / "input.png", degrade(compose(True, True), spec.blur_sigma, noise, spec.jpeg_quality))
     imwrite(sample_dir / "ref.png", degrade(clean_ref, spec.blur_sigma, noise, spec.jpeg_quality))
+    imwrite(sample_dir / "ref_nonoise.png", degrade(clean_ref, spec.blur_sigma, np.zeros_like(noise), spec.jpeg_quality))
 
     # 真值：gt_mask 是字形本来的形状（模糊之前覆盖率过半的像素）；gt_alpha 是模糊之后这些字让画面变暗了多少，
     # 笔画边上发虚的一圈也在里面。

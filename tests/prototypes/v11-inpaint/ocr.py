@@ -148,7 +148,7 @@ def link_or_copy(src: Path, dst: Path) -> None:
 def ocr_inputs(out_dir: Path, cli: Path, models_dir: Path) -> dict[str, Any]:
     """对带字原图和无字对照图跑 OCR，写 ocr-input.json。"""
     samples = read_json(out_dir / "samples" / "index.json")["samples"]
-    work = out_dir / "ocr" / "_images"
+    work = out_dir / "ocr" / f"_images-{os.getpid()}"
     result: dict[str, Any] = {"fmt": "magpdf-v11-ocr-input/1", "cli": str(cli), "samples": {}}
     seconds: dict[str, float] = {}
     for name in ("input", "ref"):
