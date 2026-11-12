@@ -1,0 +1,10 @@
+# V11 背景修补原型：第二个虚拟环境，只用来跑 OpenCV contrib 里 xphoto 模块的修复算法（移位图、FSR）。
+# 和 requirements.txt 分开装，是因为 opencv-python-headless 和 opencv-contrib-python-headless 都提供 cv2，
+# 装在同一个环境里会互相覆盖。装法见 README。
+#
+#   python -m venv D:\workspace\magpdf-wt\venvs\v11-contrib
+#   D:\workspace\magpdf-wt\venvs\v11-contrib\Scripts\python -m pip install -r requirements-contrib.txt
+
+opencv-contrib-python-headless==5.0.0.93   # Apache-2.0；构建信息里 Non-free algorithms: NO。轮子里带一个 FFmpeg 的 DLL（LGPL），原型不用视频功能
+numpy==2.5.4                               # BSD-3-Clause（轮子里另带 OpenBLAS 等，BSD 系）
+psutil==7.2.2                              # BSD-3-Clause；bench.py 记 CPU 占用用

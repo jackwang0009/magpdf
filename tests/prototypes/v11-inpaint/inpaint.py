@@ -8,9 +8,10 @@
   fill-local-grain  同上，再按纸面颗粒的大小补上噪声，免得填过的地方比周围光滑
   telea-r{1,3,5,9}  cv2.inpaint 的 Telea 算法（快速行进法），半径 1、3、5、9
   ns-r{1,3,5,9}     cv2.inpaint 的 Navier-Stokes 算法，半径 1、3、5、9
-  fsr-fast、fsr-best、shiftmap
-                    OpenCV contrib 的 xphoto 模块里另外三种传统修复算法（频率选择重建的快、慢两档，移位图）。
-                    要装 opencv-contrib-python-headless；当前环境里没有 cv2.xphoto 时自动跳过
+  shiftmap、fsr-fast、fsr-best
+                    OpenCV contrib 的 xphoto 模块里另外三种传统修复算法：移位图（从图上别处搬小块过来拼）、
+                    频率选择重建的快、慢两档。要装 opencv-contrib-python-headless（另一个虚拟环境，见 README）；
+                    当前环境里没有 cv2.xphoto 时自动跳过。fsr-best 一行要十几到几十秒，不指名（--methods）不跑
   lama              LaMa 模型（ONNX，CPU），沿着这一行排 512×512 的窗口；没有模型文件或 onnxruntime 时自动跳过
 
 掩膜（--masks）的名字是“来源-d扩几个像素”：auto 是 masks.py 从 OCR 行框里算出来的，gt 是真值掩膜，
@@ -112,6 +113,7 @@ def _xphoto(algorithm: str) -> Callable[[Image, Mask], Image]:
         # xphoto 的掩膜反过来：非零的是好像素，零是要补的
         valid = np.where(mask[y0:y1, x0:x1] > 0, 0, 255).astype(np.uint8)
         dst = np.zeros_like(crop)
+        cv2.setRNGSeed(20261112)  # 定住 OpenCV 的随机数种子，免得两次跑出来不一样
         if algorithm == "shiftmap":
             # 移位图要求第一个通道是亮度，这里转成 Lab 再转回来
             lab = cv2.cvtColor(crop, cv2.COLOR_BGR2Lab)
@@ -133,6 +135,7 @@ class Method:
     family: str  # fill / opencv / xphoto / lama
     label: str  # 对照图上的标签
     run: Callable[[Image, Mask], Image] | None  # lama 的在运行时才建
+    default: bool = True  # 不指名时跑不跑
 
 
 METHODS: list[Method] = [
@@ -141,9 +144,9 @@ METHODS: list[Method] = [
     Method("fill-local-grain", "fill", "底色填充（就近取色＋颗粒）", fill_local_grain),
     *[Method(f"telea-r{r}", "opencv", f"Telea 半径 {r}", _cv_inpaint(r, cv2.INPAINT_TELEA)) for r in (1, 3, 5, 9)],
     *[Method(f"ns-r{r}", "opencv", f"Navier-Stokes 半径 {r}", _cv_inpaint(r, cv2.INPAINT_NS)) for r in (1, 3, 5, 9)],
-    Method("fsr-fast", "xphoto", "FSR（快）", _xphoto("fsr-fast")),
-    Method("fsr-best", "xphoto", "FSR（慢）", _xphoto("fsr-best")),
-    Method("shiftmap", "xphoto", "移位图", _xphoto("shiftmap")),
+    Method("shiftmap", "xphoto", "移位图（xphoto）", _xphoto("shiftmap")),
+    Method("fsr-fast", "xphoto", "FSR 快档（xphoto）", _xphoto("fsr-fast")),
+    Method("fsr-best", "xphoto", "FSR 慢档（xphoto）", _xphoto("fsr-best"), default=False),
     Method("lama", "lama", "LaMa", None),
 ]
 METHOD_BY_KEY = {m.key: m for m in METHODS}
@@ -231,7 +234,13 @@ def main() -> None:
         for m in METHODS:
             print(f"{m.key:17s} {m.family:7s} {m.label}")
         return
-    methods = [m for m in METHODS if (not args.methods or m.key in args.methods) and (not args.families or m.family in args.families)]
+    if args.methods:
+        unknown = [key for key in args.methods if key not in METHOD_BY_KEY]
+        if unknown:
+            ap.error(f"不认识的方法：{unknown}（--list 看全部）")
+        methods = [m for m in METHODS if m.key in args.methods]
+    else:
+        methods = [m for m in METHODS if m.default and (not args.families or m.family in args.families)]
     report = run(args.out, args.masks, methods, args.lama_model, args.lama_threads)
     for key, why in report["skipped"].items():
         print(f"跳过 {key}：{why}")
