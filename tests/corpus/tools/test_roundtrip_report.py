@@ -371,16 +371,50 @@ class CompareTests(unittest.TestCase):
         added = model.compare(base, snapshot(many_pass_files(10) + [file("new.pdf", "office-word", [diff_page(0)])]))
         self.assertEqual([f.path for f in added.added_files], ["new.pdf"])
         self.assertEqual(added.newly_failed, [], "基线里没有的文件没有东西可比")
-        # 新文件带来的差异页让这个来源的比例掉了 9 个百分点，比例规则报警：这是在提醒基线该更新了。
-        self.assertEqual(added.level, "alarm")
+        # 新文件带来一页有差异的页，按全部文件算这个来源的比例掉了 9 个百分点；和基线比只算两边都有的 10 个文件，比例没变。
+        delta = added.sources["office-word"]
+        self.assertEqual((delta.common_files, delta.added_files, delta.removed_files), (10, 1, 0))
+        self.assertAlmostEqual(delta.delta_pp or 0.0, 0.0)
+        self.assertEqual(added.level, "ok", "语料加了文件不报警")
+        self.assertTrue(any("不在基线里" in text for text in added.notices))
 
-        only_pass = model.compare(base, snapshot(many_pass_files(10) + [file("new.pdf", "office-word", [page(0)])]))
-        self.assertEqual(only_pass.level, "ok")
-        self.assertTrue(any("不在基线里" in text for text in only_pass.notices))
+        # 新文件也掩盖不了老文件的退步：加 90 个无差异的新文件、老文件里坏一页，照样按 10 个文件算，掉 10 个百分点。
+        files = many_pass_files(10) + many_pass_files(90, prefix="n")
+        files[0] = file("f0000.pdf", "office-word", [diff_page(0)])
+        masked = model.compare(base, snapshot(files))
+        self.assertAlmostEqual(masked.sources["office-word"].delta_pp or 0.0, -10.0)
+        self.assertEqual(masked.level, "alarm")
+        self.assertIn("只算两边都有的 10 个文件", masked.alarms[0])
 
         removed = model.compare(base, snapshot(many_pass_files(9)))
         self.assertEqual([f.path for f in removed.removed_files], ["f0009.pdf"])
+        self.assertEqual(removed.sources["office-word"].removed_files, 1)
         self.assertEqual(removed.level, "worse", "基线里的文件没跑到，不能当没事")
+
+        # 少掉的正好是基线里有差异的那个文件：比例不会因此变好看。
+        base_files = many_pass_files(10)
+        base_files[9] = file("f0009.pdf", "office-word", [diff_page(0)])
+        dropped_bad = model.compare(as_baseline(snapshot(base_files)), snapshot(many_pass_files(9)))
+        self.assertAlmostEqual(dropped_bad.sources["office-word"].delta_pp or 0.0, 0.0)
+        self.assertEqual(dropped_bad.newly_passed, [])
+
+        # 整个来源是新的，或者整个来源没了。
+        new_source = model.compare(base, snapshot(many_pass_files(10) + [file("design/a.pdf", "design", [diff_page(0)])]))
+        self.assertIsNone(new_source.sources["design"].base)
+        self.assertEqual((new_source.sources["design"].added_files, new_source.level), (1, "ok"))
+        with_design = as_baseline(snapshot(many_pass_files(10) + [file("design/a.pdf", "design", [page(0)])]))
+        gone = model.compare(with_design, snapshot(many_pass_files(10)))
+        self.assertEqual((gone.sources["design"].removed_files, gone.sources["design"].cur, gone.level), (1, None, "worse"))
+
+    def test_renamed_source_is_still_compared(self) -> None:
+        base = as_baseline(snapshot(many_pass_files(100, "resources")))
+        files = many_pass_files(100, "public/pdfium/resources")
+        files[0] = file("f0000.pdf", "public/pdfium/resources", [diff_page(0)])
+        result = model.compare(base, snapshot(files))
+        self.assertEqual(list(result.sources), ["public/pdfium/resources"])
+        self.assertAlmostEqual(result.sources["public/pdfium/resources"].delta_pp or 0.0, -1.0)
+        self.assertEqual(result.level, "alarm")
+        self.assertTrue(any("来源名和基线里不一样" in text for text in result.notices))
 
     def test_operator_level_regression_with_pixels_unchanged(self) -> None:
         def run(color: int) -> model.Snapshot:
@@ -575,6 +609,19 @@ class ReportTests(unittest.TestCase):
             self.assertIn("| office-word | 33 | 32 | 32 | 30 |", markdown)
             self.assertIn("bad.pdf", markdown)
 
+            # 语料多了两个文件（其中一个有差异）：不报警，页面上写明新文件没有算进和基线比的比例。
+            grown_files = self.sample_files(broken=False) + [file("new1.pdf", "office-word", [diff_page(0)]), file("new2.pdf", "office-word", [page(0)])]
+            self.write_run(root / "grown", grown_files)
+            grown = ("--roundtrip", str(root / "grown" / "roundtrip.json"), "--ops", str(root / "grown" / "ops.json"))
+            code, text = self.run_main(*grown, *common, "--baseline", str(baseline))
+            self.assertEqual(code, 0, text)
+            page_html = (root / "report.html").read_text(encoding="utf-8")
+            self.assertIn("另有 2 个新文件没有算", page_html)
+            self.assertIn("这次有、基线里没有的文件（2 个）", page_html)
+            summary = json.loads((root / "summary.json").read_text(encoding="utf-8"))
+            delta = summary["by_source"]["office-word"]["baseline"]
+            self.assertEqual((delta["common_files"], delta["added_files"], delta["delta_pp"]), (33, 2, 0.0))
+
             # 只在到报警线时才失败、或者完全不失败的两种设置。
             self.assertEqual(self.run_main(*bad, *common, "--baseline", str(baseline), "--fail-on", "alarm")[0], 2)
             self.assertEqual(self.run_main(*bad, *common, "--baseline", str(baseline), "--fail-on", "never")[0], 0)
@@ -637,6 +684,7 @@ class ReportTests(unittest.TestCase):
                 "started": "2026-11-12T02:00:00+08:00",
                 "git": {"commit": "ff6b0ac0000", "branch": "main", "dirty": False},
                 "machine": "runner-1",
+                "cli": {"version": "magpdf-cli 0.1.0", "sha256": "def"},
                 "pdfium_dll_sha256": "abc",
                 "sets": [
                     {"name": "synthetic", "title": "自制样本", "source_prefix": "", "roundtrip": "synthetic/roundtrip.json", "ops": "synthetic/ops.json",
@@ -664,6 +712,7 @@ class ReportTests(unittest.TestCase):
             candidate = model.loads_baseline((root / "candidate" / "public-pdfium.json").read_text(encoding="utf-8"))
             self.assertEqual(candidate.meta["commit"], "ff6b0ac0000")
             self.assertEqual(candidate.meta["pdfium_dll_sha256"], "abc")
+            self.assertEqual(candidate.meta["cli_sha256"], "def")
             self.assertEqual(candidate.meta["machine"], "runner-1")
             self.assertEqual(candidate.meta["source_prefix"], "public/pdfium/")
             self.assertEqual({f.source for f in candidate.files}, {"public/pdfium/resources", "public/pdfium/pixel"})

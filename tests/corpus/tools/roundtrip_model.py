@@ -17,6 +17,8 @@ roundtrip_report.py 里生成；这里不碰图片，也不写页面，方便单
 
 - 报警：任一来源的比例（扣除无对象页）比基线低 0.5 个百分点以上（像素一项，两项都无差异一项，各算各的）；
   或者出现基线里没有的崩溃、超时。
+- 和基线比的比例，两边都只拿“基线里有、这次也有”的文件算。语料加了文件（真实样本是陆续收进来的）不该让比例跟着变、
+  平白报警；少了文件也不该让比例变好看。新文件、少了的文件单独列出来。
 - 没到报警线但要处理：有新变坏的页（基线里无差异，这次不是）；基线里有的文件这次没跑到；
   有文件从正常变成打不开或保存失败；基线里有操作符级结果、这次没有。
 - 新变好的页、基线里没有的新文件只提示，不算退步。
@@ -559,9 +561,17 @@ class FileChange:
 
 @dataclass
 class SourceDelta:
+    """一个来源和基线比的结果。
+
+    `base`、`cur` 是基线和这次各自的汇总，都只算两边都有的文件；这个来源没有两边都有的文件时是 None。
+    所以语料变了的时候，`cur` 的比例和报告第 1 节里这个来源的比例（算全部文件）可以不一样。
+    """
+
     source: str
     base: Summary | None
     cur: Summary | None
+    added_files: int = 0  # 这次有、基线里没有的文件，不算进 base、cur
+    removed_files: int = 0  # 基线里有、这次没有的文件，同样不算
     #: 这次减基线，百分点；任一边没有比例时是 None。
     delta_pp: float | None = None
     strict_delta_pp: float | None = None
@@ -571,8 +581,16 @@ class SourceDelta:
     ops_newly_passed: int = 0
     alarm: bool = False
 
+    @property
+    def common_files(self) -> int:
+        return self.cur.files if self.cur is not None else 0
+
     def to_json(self) -> dict[str, Any]:
         return {
+            "scope": "common_files",
+            "common_files": self.common_files,
+            "added_files": self.added_files,
+            "removed_files": self.removed_files,
             "baseline_ratio_nonempty": self.base.ratio_nonempty if self.base else None,
             "ratio_nonempty": self.cur.ratio_nonempty if self.cur else None,
             "delta_pp": self.delta_pp,
@@ -659,17 +677,39 @@ def compare(base: Snapshot, cur: Snapshot, *, max_drop_pp: float = DEFAULT_MAX_D
     cur_files = {f.path: f for f in cur.files}
     result.removed_files = [base_files[p] for p in sorted(base_files.keys() - cur_files.keys())]
     result.added_files = [cur_files[p] for p in sorted(cur_files.keys() - base_files.keys())]
+    common = sorted(base_files.keys() & cur_files.keys())
 
-    base_summary = summarize(base.files)
-    cur_summary = summarize(cur.files)
-    for source in sorted(base_summary.keys() | cur_summary.keys()):
-        result.sources[source] = SourceDelta(source, base_summary.get(source), cur_summary.get(source))
+    # 比例只拿两边都有的文件算。基线里的文件按这次的来源名归类：来源改了名（换了前缀、挪了目录）也照样比得上。
+    base_summary: dict[str, Summary] = {}
+    cur_summary: dict[str, Summary] = {}
+    renamed = 0
+    for path in common:
+        source = cur_files[path].source
+        base_summary.setdefault(source, Summary()).add_file(base_files[path])
+        cur_summary.setdefault(source, Summary()).add_file(cur_files[path])
+        if base_files[path].source != source:
+            renamed += 1
+    added_count: dict[str, int] = {}
+    for file in result.added_files:
+        added_count[file.source] = added_count.get(file.source, 0) + 1
+    removed_count: dict[str, int] = {}
+    for file in result.removed_files:
+        removed_count[file.source] = removed_count.get(file.source, 0) + 1
+    for source in sorted(cur_summary.keys() | added_count.keys() | removed_count.keys()):
+        result.sources[source] = SourceDelta(
+            source,
+            base_summary.get(source),
+            cur_summary.get(source),
+            added_files=added_count.get(source, 0),
+            removed_files=removed_count.get(source, 0),
+        )
+    corpus_changed = bool(result.added_files or result.removed_files)
 
     def delta_of(source: str) -> SourceDelta:
         return result.sources[source]
 
     compare_ops = base.has_ops and cur.has_ops
-    for path in sorted(base_files.keys() & cur_files.keys()):
+    for path in common:
         b_file, c_file = base_files[path], cur_files[path]
         source = c_file.source
         if b_file.status != c_file.status:
@@ -709,6 +749,7 @@ def compare(base: Snapshot, cur: Snapshot, *, max_drop_pp: float = DEFAULT_MAX_D
     for source, delta in result.sources.items():
         if delta.base is None or delta.cur is None:
             continue
+        scope = f"（只算两边都有的 {delta.common_files} 个文件）" if corpus_changed else ""
         rb, rc = delta.base.ratio_nonempty, delta.cur.ratio_nonempty
         if rb is not None and rc is not None:
             delta.delta_pp = (rc - rb) * 100.0
@@ -716,7 +757,7 @@ def compare(base: Snapshot, cur: Snapshot, *, max_drop_pp: float = DEFAULT_MAX_D
                 delta.alarm = True
                 result.alarms.append(
                     f"{source}：无差异比例（扣除无对象页）从 {_pp(rb)} 降到 {_pp(rc)}，"
-                    f"低了 {(rb - rc) * 100:.2f} 个百分点，超过 {max_drop_pp:g} 个百分点的线"
+                    f"低了 {(rb - rc) * 100:.2f} 个百分点，超过 {max_drop_pp:g} 个百分点的线{scope}"
                 )
         if not compare_ops:
             continue
@@ -727,7 +768,7 @@ def compare(base: Snapshot, cur: Snapshot, *, max_drop_pp: float = DEFAULT_MAX_D
                 delta.alarm = True
                 result.alarms.append(
                     f"{source}：像素和操作符都无差异的比例（扣除无对象页）从 {_pp(sb)} 降到 {_pp(sc)}，"
-                    f"低了 {(sb - sc) * 100:.2f} 个百分点，超过 {max_drop_pp:g} 个百分点的线"
+                    f"低了 {(sb - sc) * 100:.2f} 个百分点，超过 {max_drop_pp:g} 个百分点的线{scope}"
                 )
 
     crashes = result.new_crashes
@@ -757,5 +798,10 @@ def compare(base: Snapshot, cur: Snapshot, *, max_drop_pp: float = DEFAULT_MAX_D
             "确认之后更新基线，这些页以后再变坏才报得出来。"
         )
     if result.added_files:
-        result.notices.append(f"有 {len(result.added_files)} 个文件不在基线里，这次只看结果、没有东西可比；更新基线后才受保护。")
+        result.notices.append(
+            f"有 {len(result.added_files)} 个文件不在基线里：它们的结果照常列在下面各节，但没有东西可比，"
+            "也不算进和基线比的比例；更新基线后才受保护。"
+        )
+    if renamed:
+        result.notices.append(f"有 {renamed} 个文件的来源名和基线里不一样，比较时按这次的来源名归类。")
     return result

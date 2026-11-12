@@ -155,6 +155,12 @@ try {
         $os = "$($osInfo.Caption) $($osInfo.Version)"
         $cpu = ((Get-CimInstance Win32_Processor | Select-Object -First 1).Name).Trim()
     } catch { }
+    # GitHub 托管的运行器每次换一台机器、名字都不一样。“和基线是不是同一种环境”要看的是镜像，所以流水线上记镜像名。
+    $machine = "$env:COMPUTERNAME"
+    if ($env:GITHUB_ACTIONS) {
+        $image = if ($env:ImageOS) { $env:ImageOS } else { "$env:RUNNER_OS" }
+        $machine = "github-actions/$image"
+    }
 
     New-Item -ItemType Directory -Force $OutDir | Out-Null
     foreach ($name in @('report.html', 'summary.json', 'summary.md', 'run.json', 'timings.json')) {
@@ -239,7 +245,7 @@ try {
         kind = 'magpdf-roundtrip-nightly-run'; format = 1
         started = $started.ToString('yyyy-MM-ddTHH:mm:sszzz')
         git = [ordered]@{ commit = "$commit"; branch = "$branch"; dirty = $dirty }
-        machine = "$env:COMPUTERNAME"; os = $os; cpu = $cpu; ci = [bool]$env:GITHUB_ACTIONS
+        machine = $machine; os = $os; cpu = $cpu; ci = [bool]$env:GITHUB_ACTIONS
         cli = [ordered]@{ path = $Cli; version = "$cliVersion"; sha256 = $cliHash }
         pdfium_dll_sha256 = $dllHash
         options = [ordered]@{ jobs = $Jobs; timeout_s = $Timeout; fail_on = $FailOn }
@@ -262,7 +268,7 @@ try {
     $timings = [ordered]@{
         kind = 'magpdf-roundtrip-nightly-timings'; format = 1
         started = $started.ToString('yyyy-MM-ddTHH:mm:sszzz')
-        machine = "$env:COMPUTERNAME"; jobs = $Jobs
+        machine = $machine; jobs = $Jobs
         total_s = Get-Seconds $totalWatch
         steps = $steps
     }

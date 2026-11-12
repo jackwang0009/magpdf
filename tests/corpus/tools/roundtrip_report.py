@@ -213,6 +213,9 @@ def build_report(specs: list[SetInput], env: dict[str, Any], max_drop_pp: float 
         for key in ("pdfium_dll_sha256", "machine"):
             if env.get(key):
                 current.snapshot.meta[key] = env[key]
+        cli = env.get("cli") or {}
+        if cli.get("sha256"):
+            current.snapshot.meta["cli_sha256"] = cli["sha256"]
         prefix = f"{spec.title}：" if many else ""
         if current.baseline is not None:
             current.comparison = compare(current.baseline, current.snapshot, max_drop_pp=max_drop_pp)
@@ -233,12 +236,17 @@ def build_report(specs: list[SetInput], env: dict[str, Any], max_drop_pp: float 
 
 
 def baseline_meta(current: SetReport, report: Report) -> dict[str, Any]:
-    """写进基线的那几项：够判断“是不是同一种条件下跑的”，不放会每次都变的东西（耗时）。"""
+    """写进基线的那几项：够判断“是不是同一种条件下跑的”，不放会每次都变的东西（耗时）。
+
+    `commit` 是跑测试时工作树的提交（脚本、语料、基线工具的版本）。命令行工具用 -Cli 另外给的时候，它不一定是这个提交
+    构建的，所以另记一个 `cli_sha256`；这一项只是留底，比较时不看（流水线上每次都重新构建，每次都不一样）。
+    """
     meta = current.snapshot.meta
     git = report.env.get("git") or {}
     return {
         "generated": report.generated,
         "commit": git.get("commit") or "",
+        "cli_sha256": meta.get("cli_sha256") or "",
         "cli_version": meta.get("cli_version"),
         "pdfium_version": meta.get("pdfium_version"),
         "pdfium_dll_sha256": meta.get("pdfium_dll_sha256") or "",
@@ -669,8 +677,8 @@ class HtmlBuilder:
         note = (
             '<p class="sub">比对页 = 像素判定出了结果的页（无差异 + 有差异）；页错误是原件这一页本来就加载不了，'
             "崩溃、超时、打开失败的文件里的页都不算比对页。无对象页 = 无差异并且页上没有任何对象的页，"
-            "“扣除无对象页”就是把它们从分子分母里都去掉；退步判定用这一列。判定“无差异”的阈值见最后一节。"
-            "合计只作参考：各来源要分开看（方案 13.1）。</p>"
+            "“扣除无对象页”就是把它们从分子分母里都去掉；退步判定用这一列。“比基线”一列只拿基线里有、这次也有的文件算"
+            "（第 2 节）。判定“无差异”的阈值见最后一节。合计只作参考：各来源要分开看（方案 13.1）。</p>"
         )
         return f'<h2 id="summary">1. 按来源汇总（像素比对）</h2><div class="scroll"><table>{head}{"".join(rows)}</table></div>{note}'
 
@@ -733,7 +741,8 @@ class HtmlBuilder:
         out.append(
             f'<p class="sub">规则（《测试计划》第 7 节）：任一来源的比例（扣除无对象页）比基线低 {report.max_drop_pp:g} 个百分点以上，'
             "或者出现基线里没有的崩溃、超时，算到了报警线；有新变坏的页但没到这条线，算“有退步，没到报警线”。"
-            "新变好的页不算退步，但要更新基线。基线怎么存、怎么更新见 <code>tests/baselines/README.md</code>。</p>"
+            "新变好的页不算退步，但要更新基线。这一节的比例，两边都只拿基线里有、这次也有的文件算：语料加了文件、少了文件，"
+            "不让比例跟着变，那些文件单独列在后面。基线怎么存、怎么更新见 <code>tests/baselines/README.md</code>。</p>"
         )
         for current in report.sets:
             out.append(f"<h3>{esc(current.spec.title)}</h3>")
@@ -757,17 +766,21 @@ class HtmlBuilder:
             out.append(f'<p class="sub">{"；".join(bits)}。</p>')
 
             head = (
-                "<tr><th>来源</th><th class=n>基线的比例<br>（扣除无对象页）</th><th class=n>这次</th><th class=n>变化<br>（百分点）</th>"
+                "<tr><th>来源</th><th class=n>两边都有<br>的文件</th>"
+                "<th class=n>基线的比例<br>（扣除无对象页）</th><th class=n>这次</th><th class=n>变化<br>（百分点）</th>"
                 "<th class=n>新变坏的页</th><th class=n>新变好的页</th>"
                 "<th class=n>两项都无差异：<br>基线的比例</th><th class=n>这次</th><th class=n>变化<br>（百分点）</th>"
                 "<th class=n>操作符级<br>新变坏</th><th class=n>操作符级<br>新变好</th><th>结论</th></tr>"
             )
             rows = []
             for source, delta in cmp.sources.items():
-                if delta.cur is None:
-                    verdict = '<span class="tag warn">这次没有这个来源</span>'
-                elif delta.base is None:
-                    verdict = '<span class="tag info">基线里没有</span>'
+                if delta.base is None or delta.cur is None:
+                    if delta.added_files and not delta.removed_files:
+                        verdict = '<span class="tag info">基线里没有这个来源</span>'
+                    elif delta.removed_files and not delta.added_files:
+                        verdict = '<span class="tag warn">这次没有这个来源</span>'
+                    else:
+                        verdict = '<span class="tag warn">没有两边都有的文件</span>'
                 elif delta.alarm:
                     verdict = '<span class="tag bad">低过报警线</span>'
                 elif delta.newly_failed or delta.ops_newly_failed:
@@ -776,8 +789,12 @@ class HtmlBuilder:
                     verdict = '<span class="tag good">变好了</span>'
                 else:
                     verdict = "没有变化"
+                if delta.added_files:
+                    verdict += f"　另有 {num(delta.added_files)} 个新文件没有算"
+                if delta.removed_files:
+                    verdict += f"　基线里的 {num(delta.removed_files)} 个文件这次没有"
                 rows.append(
-                    f"<tr><td>{esc(source)}</td>"
+                    f'<tr><td>{esc(source)}</td><td class="n">{num(delta.common_files)}</td>'
                     f'<td class="n">{pct(delta.base.ratio_nonempty if delta.base else None)}</td>'
                     f'<td class="n">{pct(delta.cur.ratio_nonempty if delta.cur else None)}</td>'
                     f"{_delta_td(delta.delta_pp)}"
