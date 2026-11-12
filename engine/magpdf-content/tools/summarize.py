@@ -2,7 +2,7 @@
 
 用法：
     python -X dev engine/magpdf-content/tools/summarize.py tests/out/v17/r2
-    python -X dev engine/magpdf-content/tools/summarize.py tests/out/v17/r2 --reasons --hashes
+    python -X dev engine/magpdf-content/tools/summarize.py tests/out/v17/r2 --reasons --hashes --effect --excluded
 
 只读 JSON 里的 `total`（合计数由 magpdf-cli 从页记录算出）和页记录，不重新计算比例以外的东西。
 输出里只有文件名、页序号和计数，没有文档内容。
@@ -129,12 +129,90 @@ def print_hash_comparison(root: Path, corpus: str, experiment: str) -> None:
         )
 
 
+def print_effect(root: Path, corpus: str, build: str, experiment: str) -> None:
+    """做了修改的页里，修改在画面上看得出来的有多少；这些页里改写层和对照组各过了多少。
+
+    “看得出来”：预期画面的指纹和不改动那一次（roundtrip）同一页的预期画面不同。
+    修改在画面上看不出来的页（对象在页面之外、被盖住、颜色没变等），比对通过说明不了什么。
+    """
+    base = load(root / f"{corpus}-{build}-roundtrip.json")
+    data = load(root / f"{corpus}-{build}-{experiment}.json")
+    if base is None or data is None:
+        return
+    original = hashes(base)
+    edited = visible = ours = control = exact = control_exact = 0
+    for file in data["files"]:
+        for page in file.get("page_records", []):
+            verify = page.get("verify")
+            if not page.get("edits") or not verify:
+                continue
+            edited += 1
+            before = original.get((file["path"], page["index"]))
+            if before is None or before[0] == verify.get("expected_hash"):
+                continue
+            visible += 1
+            ours += verify["status"] == "pass"
+            exact += (verify.get("diff") or {}).get("diff_pixels") == 0
+            ctl = page.get("control") or {}
+            control += ctl.get("status") == "pass"
+            control_exact += (ctl.get("diff") or {}).get("diff_pixels") == 0
+    total = data["total"]
+    kinds = "、".join(f"{kind} {count}" for kind, count in sorted(total["edits"].items()))
+    print(
+        f"| {corpus} | {build} | {experiment} | {total['objects_edited']}（{kinds}） | {edited} | {visible} | "
+        f"{ours}（{pct(ours, visible)}） | {exact} | {control}（{pct(control, visible)}） | {control_exact} |"
+    )
+
+
+EFFECT_HEADER = (
+    "| 样本 | PDFium | 实验 | 修改的对象 | 做了修改的页 | 其中画面确实变了 | 这些页里无差异 | 其中一个像素都不差 | "
+    "对照组无差异 | 对照组一个像素都不差 |\n"
+    "|---|---|---|---|---|---|---|---|---|---|"
+)
+
+
+def excluded_lines(data: dict[str, Any]) -> list[str]:
+    """另起页对象的页数、崩溃和超时的文件、PDFium 打不开的页、对照组跑不了的页。"""
+    lines: list[str] = []
+    total = data["total"]
+    if total.get("pages_split"):
+        lines.append(f"另起页对象 {total['pages_split']} 页，复制页树节点 {total['tree_nodes_split']} 个")
+    for file in data["files"]:
+        if file["status"] in ("crashed", "timed_out"):
+            lines.append(f"{file['path']} {file['status']}（{file.get('error')}）")
+        elif file.get("object_layer_error"):
+            lines.append(f"{file['path']} 自研对象层打不开")
+        pages = file.get("page_records", [])
+        broken = [page["index"] + 1 for page in pages if page.get("error")]
+        if broken:
+            lines.append(f"{file['path']} 第 {'、'.join(map(str, broken))} 页 PDFium 打不开")
+        no_control = [page["index"] + 1 for page in pages if (page.get("control") or {}).get("status") == "error"]
+        if no_control:
+            lines.append(f"{file['path']} 第 {'、'.join(map(str, no_control))} 页对照组比不了")
+    return lines
+
+
+def print_excluded(root: Path, corpus: str, build: str) -> None:
+    """同一批样本、同一份 PDFium 的各个实验合在一起列，内容相同的只列一次。"""
+    seen: dict[str, list[str]] = {}
+    for experiment in EXPERIMENTS:
+        data = load(root / f"{corpus}-{build}-{experiment}.json")
+        if data is None:
+            continue
+        for line in excluded_lines(data):
+            seen.setdefault(line, []).append(experiment)
+    for line, experiments in seen.items():
+        print(f"{corpus}-{build}（{'、'.join(experiments)}）：{line}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("root", type=Path, help="一轮实验的输出目录")
     parser.add_argument("--reasons", action="store_true", help="列出回退原因")
     parser.add_argument("--pages", type=int, default=0, help="列出回退和有差异的页（最多这么多条）")
     parser.add_argument("--hashes", action="store_true", help="比较两份 PDFium 下的画面指纹")
+    parser.add_argument("--effect", action="store_true", help="做了修改的页里画面确实变了的有多少、各过了多少")
+    parser.add_argument("--excluded", action="store_true", help="列出另起页对象的页数、崩溃超时的文件、打不开的页")
     args = parser.parse_args()
 
     for corpus in CORPORA:
@@ -160,6 +238,17 @@ def main() -> int:
         for corpus in CORPORA:
             for experiment in EXPERIMENTS:
                 print_hash_comparison(args.root, corpus, experiment)
+    if args.effect:
+        print("\n" + EFFECT_HEADER)
+        for corpus in CORPORA:
+            for build in BUILDS:
+                for experiment in ("modify", "modify-random"):
+                    print_effect(args.root, corpus, build, experiment)
+    if args.excluded:
+        print()
+        for corpus in CORPORA:
+            for build in BUILDS:
+                print_excluded(args.root, corpus, build)
     return 0
 
 
