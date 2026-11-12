@@ -31,9 +31,10 @@ GitHub Release（ONNX Runtime）国内直连常超时，需要时设置 `$env:HT
   这里的 ONNX 文件取自 [RapidAI/RapidOCR 在 ModelScope 的模型托管仓库](https://www.modelscope.cn/models/RapidAI/RapidOCR)
   （许可 Apache-2.0，与原模型一致），由 `paddleocr_convert`（内部调用 paddle2onnx）转换，识别模型的字典同时写进了 ONNX metadata 的 `character` 键。
 - 字典文件（`ppocrv5_dict.txt`、`ppocrv5_en_dict.txt`）与官方 `inference.yml` 中的 `character_dict` 逐项核对一致（V09 报告 2.1）。
+  ONNX 文件里的权重和官方 Paddle 模型是不是同一份，没有核对过（V09 报告 8.4）。
 - 预处理参数以官方 `inference.yml` 为准：det 归一化 ImageNet 均值方差、BGR；rec 高 48、`(x/255-0.5)/0.5`、BGR；
   `PP-LCNet_x0_25_textline_ori` 输入 160×80、ImageNet 归一化、RGB。
-- 文档方向分类模型 `PP-LCNet_x1_0_doc_ori`（方案 6.2 第 1 步）目前只有 Paddle 格式，需自行用 paddle2onnx 转换，V09 报告列为遗留项。
+- 文档方向分类模型 `PP-LCNet_x1_0_doc_ori`（方案 6.2 第 1 步）目前只有 Paddle 格式，需自行用 paddle2onnx 转换，V09 报告列为遗留项（8.1）。
 - 随产品分发时按《开源许可与合规清单》2.1、2.3 附许可全文并注明来源。
 
 ## 与代码的对应
