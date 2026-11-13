@@ -439,8 +439,9 @@ async fn tile_ready_event_is_not_held_back_on_an_idle_pipe() {
         let (elapsed, _) = engine.render_tile(doc_id, 4.0, i * 512, 512).await;
         worst = worst.max(elapsed);
     }
+    // 修好前空闲管道会卡在约 500 ms 定时器；阈值要低于那个回归，又要容得下 CI 共享机上偏慢的渲染。
     assert!(
-        worst < Duration::from_millis(250),
+        worst < Duration::from_millis(400),
         "从发出 render.tiles 到收到 render.tileReady 最慢 {worst:?}"
     );
 }
@@ -468,8 +469,9 @@ async fn ping_is_answered_while_pdfium_is_busy() {
         assert_eq!(pong.unwrap()["t"], t);
         worst = worst.max(at.duration_since(sent));
     }
+    // 修好前 ping 会排在 PDFium 请求后面，可能数秒无应答；CI 上调度抖动可能到一两百毫秒。
     assert!(
-        worst < Duration::from_millis(100),
+        worst < Duration::from_millis(250),
         "PDFium 忙的时候 ping 最慢 {worst:?}"
     );
     // bench.engine 要是已经结束了，上面的断言就什么也没验证到。

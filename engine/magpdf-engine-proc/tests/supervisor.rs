@@ -179,8 +179,9 @@ async fn a_killed_engine_is_replaced_and_documents_come_back() {
     let HostEvent::Restored { restored } = next_event(&mut events, is_lifecycle).await else {
         panic!("应该收到 Restored");
     };
+    // 用例里心跳是 100/400 ms；5 秒在开发机很宽裕，CI 共享机上拉起新进程偶尔更慢。
     assert!(
-        started.elapsed() < Duration::from_secs(5),
+        started.elapsed() < Duration::from_secs(15),
         "恢复用了 {:?}",
         started.elapsed()
     );
@@ -226,7 +227,7 @@ async fn a_hung_engine_is_detected_by_the_heartbeat() {
         HostEvent::Restored { .. }
     ));
     assert!(
-        started.elapsed() < Duration::from_secs(5),
+        started.elapsed() < Duration::from_secs(15),
         "发现挂死并恢复用了 {:?}",
         started.elapsed()
     );

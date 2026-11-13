@@ -47,7 +47,27 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - run: cargo test --workspace --locked
+      # 失败时把 FAILED / panicked 打成 annotation（公开 API 能读到），并上传完整日志。
+      - name: cargo test --workspace --locked
+        env:
+          RUST_BACKTRACE: '1'
+          CARGO_TERM_COLOR: always
+        run: |
+          cargo test --workspace --locked --no-fail-fast 2>&1 |
+            Tee-Object -FilePath cargo-test.log
+          $code = $LASTEXITCODE
+          if ($code -ne 0) {
+            Select-String -Path cargo-test.log -Pattern 'FAILED|failures:|panicked at|error: test failed|test result: FAILED' |
+              ForEach-Object { "::error::$($_.Line.Trim())" }
+          }
+          exit $code
+      - name: 上传 cargo test 日志
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo-test-log
+          path: cargo-test.log
+          retention-days: 14
       - name: 协议类型与入库的一致（cargo test 会重新生成 packages/protocol/src/generated）
         run: |
           git add --intent-to-add packages/protocol/src/generated
