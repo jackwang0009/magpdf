@@ -364,6 +364,7 @@ mod tests {
         if lib.candidates.is_empty() {
             return;
         }
+        // 中易宋黑仿楷和雅黑是中文 Windows 桌面常见字体；GitHub 的 windows-latest 通常没有，有则验匹配。
         for (family, must_have) in [
             (Family::Song, "simsun"),
             (Family::Hei, "simhei"),
@@ -371,6 +372,15 @@ mod tests {
             (Family::Kai, "simkai"),
             (Family::YaHei, "msyh"),
         ] {
+            let installed = lib.candidates.iter().any(|c| {
+                c.path
+                    .to_string_lossy()
+                    .to_ascii_lowercase()
+                    .contains(must_have)
+            });
+            if !installed {
+                continue;
+            }
             let m = lib.best_match(family, 400, false).expect("应匹配到字体");
             assert_eq!(m.family, family, "{family:?} 匹配到了 {:?}", m.path);
             assert!(
@@ -384,9 +394,10 @@ mod tests {
             assert!(m.embeddable());
         }
         // 本机没有黑体粗体文件（simhei 只有常规体），改用西文 Arial 验证字重匹配。
-        let bold = lib
-            .best_match(Family::Sans, 700, false)
-            .expect("应匹配到粗体");
+        // CI 镜像一般有 Arial；若连西文无衬线都没有就跳过。
+        let Some(bold) = lib.best_match(Family::Sans, 700, false) else {
+            return;
+        };
         assert_eq!(bold.weight, 700);
         assert!(
             bold.name.to_ascii_lowercase().contains("bold"),
