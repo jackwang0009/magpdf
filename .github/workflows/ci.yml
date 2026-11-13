@@ -47,18 +47,22 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      # 失败时把 FAILED / panicked 打成 annotation（公开 API 能读到），并上传完整日志。
+      # 失败时把真正的 FAILED / panicked 和日志末尾打成 annotation（公开 API 能读到；不要匹配「0 failed」）。
+      # 用 cmd 跑 cargo，避免 PowerShell 管道改写原生退出码。
       - name: cargo test --workspace --locked
         env:
           RUST_BACKTRACE: '1'
           CARGO_TERM_COLOR: always
         run: |
-          cargo test --workspace --locked --no-fail-fast 2>&1 |
-            Tee-Object -FilePath cargo-test.log
+          cmd /c "cargo test --workspace --locked --no-fail-fast > cargo-test.log 2>&1"
           $code = $LASTEXITCODE
+          Get-Content cargo-test.log -Encoding utf8
           if ($code -ne 0) {
-            Select-String -Path cargo-test.log -Pattern 'FAILED|failures:|panicked at|error: test failed|test result: FAILED' |
+            Select-String -Path cargo-test.log -Encoding utf8 -Pattern ' \.\.\. FAILED$|^failures:$|panicked at|test result: FAILED' |
+              Select-Object -First 8 |
               ForEach-Object { "::error::$($_.Line.Trim())" }
+            Get-Content cargo-test.log -Encoding utf8 -Tail 30 |
+              ForEach-Object { "::error::tail: $($_.TrimEnd())" }
           }
           exit $code
       - name: 上传 cargo test 日志
