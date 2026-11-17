@@ -57,9 +57,11 @@ third_party/pdfium/
 
 ### 远程仓库建好之后
 
-`magpdf-pdfium` 仓库目前还没有创建，`mag/main` 靠 `patches/pdfium/*.patch` 重放。建好后：
+`magpdf-pdfium` 仓库 2026-11-17 建好了：<https://github.com/jackwang0009/magpdf-pdfium>（公开，默认分支 `mag/main`）。
+下面四步只做了第 1 步，`mag/main` 仍然靠 `patches/pdfium/*.patch` 随主仓库走：
 
-1. 在本地检出里 `git remote add magpdf <url>`，推送 `upstream` 与 `mag/main`（`git push magpdf upstream mag/main`）。
+1. （已做）推送 `upstream`（`5f092b5299`）与 `mag/main`（`6537e3b998`）。当时是直接推到仓库地址，本地检出没有加远程；
+   以后要常推，再 `git remote add magpdf <url>`。本地工作树里没提交的 Type3 改动没有推。
 2. 之后同步用 `sync.ps1 -MagRemote <url>`；`patches/pdfium/` 退役（保留到首个 tag 发布为止，作为可追溯记录）。
 3. 把 `ci/build-pdfium.yml` 复制到该仓库的 `.github/workflows/`，改好 `MAGPDF_REPO`。
 4. 在主仓库把它挂成子模块：`git submodule add -b mag/main <url> third_party/pdfium/src`，并在 `sync.ps1` 把默认 `-Root` 指向子模块所在目录
