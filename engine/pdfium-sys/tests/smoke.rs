@@ -81,6 +81,17 @@ fn linked_version_is_known() {
     assert_ne!(Library::linked_version(), "unknown");
 }
 
+#[cfg(windows)]
+#[test]
+fn loaded_path_points_at_the_pdfium_library_in_use() {
+    // 不用先初始化库：pdfium.dll 是静态导入的，进程一启动就加载了。
+    let path = Library::loaded_path().expect("loaded pdfium path");
+    assert!(path.is_file(), "{}", path.display());
+    let name = path.file_name().expect("file name").to_string_lossy();
+    assert!(name.eq_ignore_ascii_case("pdfium.dll"), "{name}");
+    assert!(std::fs::metadata(&path).expect("metadata").len() > 1_000_000);
+}
+
 #[test]
 fn render_and_inspect_objects() {
     with_library(|lib| {

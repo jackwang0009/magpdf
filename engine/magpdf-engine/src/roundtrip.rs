@@ -265,11 +265,17 @@ pub struct FileResult {
     #[serde(flatten)]
     pub id: FileId,
     pub status: FileStatus,
+    /// 工具自己给的原因，不带子进程标准错误的内容。
     pub error: Option<String>,
     /// 子进程退出码（隔离模式下崩溃时）。
     pub exit_code: Option<i32>,
+    /// 隔离模式下子进程标准错误的末尾（崩溃、输出解析不了时由 CLI 填写）。
+    /// 里面可能带出文档里的东西，所以和 `error` 分开放：报告页面和日志只用 `error`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stderr: Option<String>,
     pub original_bytes: u64,
     pub saved_bytes: Option<u64>,
+    /// 文档的页数。崩溃、超时的文件，只要子进程打开了文档，这里也有数（`pages` 是空的）。
     pub page_count: usize,
     pub pages: Vec<PageRecord>,
     pub timings: FileTimings,
@@ -286,6 +292,7 @@ impl FileResult {
             status,
             error: Some(error.into()),
             exit_code: None,
+            stderr: None,
             original_bytes: 0,
             saved_bytes: None,
             page_count: 0,
@@ -299,6 +306,12 @@ impl FileResult {
 /// 每页结果的接收方。差异页附带原件与保存结果的位图，供调用方写差异图；
 /// 调用方可以改写记录（例如填入 [`PageRecord::diff_images`]）。
 pub type PageSink<'a> = dyn FnMut(&mut PageRecord, Option<(&Bitmap, &Bitmap)>) + 'a;
+
+/// 文档打开之后、处理任何页面之前调用一次，参数是页数。
+///
+/// 隔离模式下子进程用它先把页数报给父进程：后面处理页面时崩溃或超时，父进程仍然知道
+/// 这个文件有几页没有比对到（V14 每晚往返报告第 10 节第 2 条）。
+pub type LoadedHook<'a> = dyn FnMut(usize) + 'a;
 
 /// 默认的页面准备步骤：把全部顶层对象标记为已修改并重新生成内容流。
 ///
@@ -332,12 +345,46 @@ pub fn run_bytes_with(
     prepare: &mut dyn FnMut(&Page<'_>) -> pdfium_sys::Result<()>,
     sink: &mut PageSink<'_>,
 ) -> FileResult {
+    run_bytes_inner(lib, id, data, opts, prepare, &mut |_| {}, sink)
+}
+
+/// 同 [`run_bytes`]，文档打开之后先调用一次 `on_loaded`（见 [`LoadedHook`]）。
+/// 文档打不开时不调用。
+pub fn run_bytes_reporting(
+    lib: &Library,
+    id: FileId,
+    data: Vec<u8>,
+    opts: &Options,
+    on_loaded: &mut LoadedHook<'_>,
+    sink: &mut PageSink<'_>,
+) -> FileResult {
+    run_bytes_inner(
+        lib,
+        id,
+        data,
+        opts,
+        &mut mark_all_and_regenerate,
+        on_loaded,
+        sink,
+    )
+}
+
+fn run_bytes_inner(
+    lib: &Library,
+    id: FileId,
+    data: Vec<u8>,
+    opts: &Options,
+    prepare: &mut dyn FnMut(&Page<'_>) -> pdfium_sys::Result<()>,
+    on_loaded: &mut LoadedHook<'_>,
+    sink: &mut PageSink<'_>,
+) -> FileResult {
     let started = Instant::now();
     let mut result = FileResult {
         id,
         status: FileStatus::Ok,
         error: None,
         exit_code: None,
+        stderr: None,
         original_bytes: data.len() as u64,
         saved_bytes: None,
         page_count: 0,
@@ -363,6 +410,7 @@ pub fn run_bytes_with(
     result.timings.load_ms = elapsed_ms(t);
     let page_count = doc.page_count();
     result.page_count = page_count;
+    on_loaded(page_count);
 
     let t = Instant::now();
     let mut records: Vec<PageRecord> = (0..page_count).map(PageRecord::new).collect();
@@ -974,6 +1022,35 @@ mod tests {
         });
     }
 
+    #[test]
+    fn page_count_is_reported_before_any_page_is_processed() {
+        with_library(|lib| {
+            // 先报页数，再处理页面：子进程在后面崩溃时，父进程已经拿到了页数。
+            let events = std::cell::RefCell::new(Vec::new());
+            let result = run_bytes_reporting(
+                lib,
+                id("synthetic", "a.pdf"),
+                sample_pdf(),
+                &Options::default(),
+                &mut |pages| events.borrow_mut().push(format!("loaded {pages}")),
+                &mut |rec, _| events.borrow_mut().push(format!("page {}", rec.index)),
+            );
+            assert_eq!(result.page_count, 1);
+            assert_eq!(*events.borrow(), ["loaded 1", "page 0"]);
+
+            // 打不开的文件不报页数。
+            let result = run_bytes_reporting(
+                lib,
+                id("public", "broken.pdf"),
+                b"not a pdf".to_vec(),
+                &Options::default(),
+                &mut |_| panic!("打不开的文件没有页数可报"),
+                &mut |_, _| panic!("没有页面可回调"),
+            );
+            assert_eq!(result.status, FileStatus::LoadFailed);
+        });
+    }
+
     fn page(status: PageStatus, objects: usize, hints: &[Hint]) -> PageRecord {
         let mut rec = PageRecord::new(0);
         rec.status = status;
@@ -988,6 +1065,7 @@ mod tests {
             status,
             error: None,
             exit_code: None,
+            stderr: None,
             original_bytes: 1,
             saved_bytes: None,
             page_count: pages.len(),

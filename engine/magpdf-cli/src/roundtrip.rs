@@ -20,9 +20,20 @@ use magpdf_engine::roundtrip::{
     SourceSummary,
 };
 use pdfium_sys::{Bitmap, Library};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::image::{heatmap, write_png};
+
+/// `--json` 结果的种类标记，和下面的格式版本一起写在最前面。
+const REPORT_KIND: &str = "magpdf-roundtrip";
+
+/// `--json` 结果的格式版本。字段的含义变了就加一，读它的工具（`tests/corpus/tools/roundtrip_model.py`）
+/// 见到不认识的版本会拒收，免得字段改了却没人发现（V14 每晚往返报告第 10 节）。
+///
+/// - 1：最初的格式，没有 `kind`、`format` 这两个字段。崩溃文件的 `error` 后面接着“；stderr：…”。
+/// - 2：加了 `kind`、`format`；`tool.pdfium_library` 是实际加载的 PDFium 库文件；崩溃、超时的文件只要
+///   子进程打开了文档，`page_count` 就有数；子进程标准错误的末尾从 `error` 里分出来，放在 `stderr`。
+const REPORT_FORMAT: u32 = 2;
 
 #[derive(Args, Debug)]
 pub struct RoundtripArgs {
@@ -86,6 +97,8 @@ struct Entry {
 
 #[derive(Debug, Serialize)]
 struct Report<'a> {
+    kind: &'static str,
+    format: u32,
     tool: Tool,
     options: ReportOptions<'a>,
     started_unix_s: u64,
@@ -99,7 +112,24 @@ struct Report<'a> {
 struct Tool {
     name: &'static str,
     version: &'static str,
+    /// 编译时链接的那一份预编译库的版本号。修补过的构建和原版是同一个号。
     pdfium: &'static str,
+    /// 实际加载的 PDFium 库文件的路径。是哪一份 PDFium，由读结果的工具拿这个文件算哈希来认
+    /// （这里不算：命令行工具不为这一件事多带一个哈希库）。取不到时不写这个字段。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pdfium_library: Option<String>,
+}
+
+/// 子进程（`roundtrip-worker`）标准输出的第一行：文档打开之后立刻写出、刷新。
+/// 后面处理页面时崩溃或超时，父进程从这一行知道这个文件有几页。
+#[derive(Debug, Serialize, Deserialize)]
+struct LoadedLine {
+    loaded: Loaded,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Loaded {
+    page_count: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -177,10 +207,13 @@ pub fn run(lib: &Library, args: &RoundtripArgs) -> Result<()> {
 
     if let Some(json_path) = &args.json {
         let report = Report {
+            kind: REPORT_KIND,
+            format: REPORT_FORMAT,
             tool: Tool {
                 name: "magpdf-cli roundtrip",
                 version: env!("CARGO_PKG_VERSION"),
                 pdfium: Library::linked_version(),
+                pdfium_library: Library::loaded_path().map(|p| p.display().to_string()),
             },
             options: ReportOptions {
                 input: args.input.display().to_string(),
@@ -226,13 +259,25 @@ pub fn run_worker(lib: &Library, args: &WorkerArgs) -> Result<()> {
         &opts,
         args.diff_dir.as_deref(),
         args.save_dir.as_deref(),
+        &mut |page_count| {
+            // 文档一打开就把页数写出去并刷新：后面崩溃了，父进程还读得到这一行。写不出去不算错。
+            let line = LoadedLine {
+                loaded: Loaded { page_count },
+            };
+            if let Ok(text) = serde_json::to_string(&line) {
+                let mut stdout = std::io::stdout().lock();
+                let _ = writeln!(stdout, "{text}");
+                let _ = stdout.flush();
+            }
+        },
     );
-    let stdout = std::io::stdout().lock();
-    serde_json::to_writer(stdout, &result)?;
+    let mut stdout = std::io::stdout().lock();
+    serde_json::to_writer(&mut stdout, &result)?;
+    writeln!(stdout)?;
     Ok(())
 }
 
-/// 读入一个文件、跑往返测试、按需写出差异图和保存结果。
+/// 读入一个文件、跑往返测试、按需写出差异图和保存结果。文档打开之后先调用一次 `on_loaded`（页数）。
 fn process_file(
     lib: &Library,
     path: &Path,
@@ -240,6 +285,7 @@ fn process_file(
     opts: &Options,
     diff_dir: Option<&Path>,
     save_dir: Option<&Path>,
+    on_loaded: &mut roundtrip::LoadedHook<'_>,
 ) -> FileResult {
     let data = match fs::read(path) {
         Ok(data) => data,
@@ -248,7 +294,7 @@ fn process_file(
         }
     };
     let mut sink = diff_sink(diff_dir, id.clone(), opts);
-    let mut result = roundtrip::run_bytes(lib, id, data, opts, &mut sink);
+    let mut result = roundtrip::run_bytes_reporting(lib, id, data, opts, on_loaded, &mut sink);
     if let (Some(dir), Some(saved)) = (save_dir, result.saved.take())
         && let Err(e) = write_saved(dir, &result.id, &saved)
     {
@@ -347,6 +393,7 @@ fn run_in_process(
             opts,
             args.diff_dir.as_deref(),
             args.save_dir.as_deref(),
+            &mut |_| {},
         );
         if !args.quiet {
             eprintln!("{}", progress_line(i + 1, entries.len(), &result));
@@ -462,6 +509,7 @@ fn run_one_isolated(
     let stdout = out_reader.join().unwrap_or_default();
     let stderr = err_reader.join().unwrap_or_default();
     let elapsed = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+    let (loaded_pages, parsed) = parse_worker_output(&stdout);
 
     let mut result = match status {
         None => FileResult::failed(
@@ -469,13 +517,17 @@ fn run_one_isolated(
             FileStatus::TimedOut,
             format!("超过 {} s 未完成，已终止", timeout.as_secs()),
         ),
-        Some(status) if status.success() => match serde_json::from_slice::<FileResult>(&stdout) {
+        Some(status) if status.success() => match parsed {
             Ok(result) => result,
-            Err(e) => FileResult::failed(
-                entry.id.clone(),
-                FileStatus::Crashed,
-                format!("子进程输出无法解析：{e}{}", stderr_tail(&stderr)),
-            ),
+            Err(e) => {
+                let mut result = FileResult::failed(
+                    entry.id.clone(),
+                    FileStatus::Crashed,
+                    format!("子进程输出无法解析：{e}"),
+                );
+                result.stderr = stderr_tail(&stderr);
+                result
+            }
         },
         Some(status) => {
             let code = status.code();
@@ -483,19 +535,49 @@ fn run_one_isolated(
                 entry.id.clone(),
                 FileStatus::Crashed,
                 format!(
-                    "子进程异常退出（{}）{}",
+                    "子进程异常退出（{}）",
                     code.map_or_else(|| "被终止".to_owned(), |c| format!("0x{:08X}", c as u32)),
-                    stderr_tail(&stderr)
                 ),
             );
             result.exit_code = code;
+            result.stderr = stderr_tail(&stderr);
             result
         }
     };
+    // 崩溃、超时的文件没有完整结果，页数用子进程打开文档之后报的那一行。
+    if result.page_count == 0
+        && let Some(pages) = loaded_pages
+    {
+        result.page_count = pages;
+    }
     if result.timings.total_ms == 0 {
         result.timings.total_ms = elapsed;
     }
     result
+}
+
+/// 读子进程的标准输出：前面可以有一行页数（[`LoadedLine`]），最后一行是完整的 `FileResult`。
+///
+/// 子进程崩溃或被终止时最后一行不是完整结果，这时第二项是出错的原因，页数照样返回。
+/// 旧版子进程只写一份结果、没有页数那一行，也读得了。
+fn parse_worker_output(stdout: &[u8]) -> (Option<usize>, std::result::Result<FileResult, String>) {
+    let mut loaded = None;
+    let mut last: Option<&[u8]> = None;
+    for line in stdout.split(|b| *b == b'\n') {
+        let line = line.trim_ascii();
+        if line.is_empty() {
+            continue;
+        }
+        if let Ok(header) = serde_json::from_slice::<LoadedLine>(line) {
+            loaded = Some(header.loaded.page_count);
+        }
+        last = Some(line);
+    }
+    let result = match last {
+        Some(line) => serde_json::from_slice::<FileResult>(line).map_err(|e| e.to_string()),
+        None => Err("子进程没有输出".to_owned()),
+    };
+    (loaded, result)
 }
 
 fn read_all(reader: Option<impl Read>) -> Vec<u8> {
@@ -506,11 +588,13 @@ fn read_all(reader: Option<impl Read>) -> Vec<u8> {
     buf
 }
 
-fn stderr_tail(stderr: &[u8]) -> String {
+/// 子进程标准错误的最后 300 个字符，换行换成空格；什么也没有时是 `None`。
+/// 放进结果的 `stderr` 字段，不拼到 `error` 里：这一段可能带出文档里的东西。
+fn stderr_tail(stderr: &[u8]) -> Option<String> {
     let text = String::from_utf8_lossy(stderr);
     let text = text.trim();
     if text.is_empty() {
-        return String::new();
+        return None;
     }
     let flat = text.replace(['\r', '\n'], " ");
     let tail: String = flat
@@ -521,7 +605,7 @@ fn stderr_tail(stderr: &[u8]) -> String {
         .into_iter()
         .rev()
         .collect();
-    format!("；stderr：{tail}")
+    Some(tail)
 }
 
 fn progress_line(done: usize, total: usize, r: &FileResult) -> String {
@@ -629,6 +713,128 @@ mod tests {
             source: "office-word".to_owned(),
         };
         assert_eq!(diff_stem(&id, 0), "office-word__sub_dir_a_b__p001");
+    }
+
+    fn sample_result(pages: usize) -> FileResult {
+        let id = FileId {
+            path: "a.pdf".to_owned(),
+            source: "s".to_owned(),
+        };
+        let mut result = FileResult::failed(id, FileStatus::Ok, "");
+        result.error = None;
+        result.page_count = pages;
+        result
+    }
+
+    #[test]
+    fn worker_output_is_a_page_count_line_then_the_result() {
+        let result = serde_json::to_string(&sample_result(3)).unwrap();
+
+        // 正常：先一行页数，再一行结果。
+        let (loaded, parsed) = parse_worker_output(
+            format!("{{\"loaded\":{{\"page_count\":3}}}}\n{result}\n").as_bytes(),
+        );
+        assert_eq!(loaded, Some(3));
+        assert_eq!(parsed.unwrap(), sample_result(3));
+
+        // 打开文档之后崩溃：只有页数那一行，结果读不出来，页数还在。
+        let (loaded, parsed) = parse_worker_output(b"{\"loaded\":{\"page_count\":12}}\r\n");
+        assert_eq!(loaded, Some(12));
+        assert!(parsed.is_err());
+
+        // 结果写到一半被终止。
+        let cut = &result[..result.len() / 2];
+        let (loaded, parsed) =
+            parse_worker_output(format!("{{\"loaded\":{{\"page_count\":3}}}}\n{cut}").as_bytes());
+        assert_eq!(loaded, Some(3));
+        assert!(parsed.is_err());
+
+        // 文档还没打开就崩溃：什么也没有。
+        let (loaded, parsed) = parse_worker_output(b"");
+        assert_eq!(loaded, None);
+        assert_eq!(parsed.unwrap_err(), "子进程没有输出");
+
+        // 打不开的文件不报页数，只有结果；旧版子进程也是只写一份结果、末尾没有换行。
+        let (loaded, parsed) = parse_worker_output(result.as_bytes());
+        assert_eq!(loaded, None);
+        assert_eq!(parsed.unwrap().page_count, 3);
+    }
+
+    #[test]
+    fn page_count_line_matches_what_the_worker_writes() {
+        let line = serde_json::to_string(&LoadedLine {
+            loaded: Loaded { page_count: 7 },
+        })
+        .unwrap();
+        assert_eq!(line, r#"{"loaded":{"page_count":7}}"#);
+        assert_eq!(parse_worker_output(line.as_bytes()).0, Some(7));
+    }
+
+    #[test]
+    fn child_stderr_is_kept_apart_from_the_error_text() {
+        assert_eq!(stderr_tail(b""), None);
+        assert_eq!(stderr_tail(b" \r\n "), None);
+        assert_eq!(
+            stderr_tail(b"thread 'main' panicked\r\nat src/x.rs\n").as_deref(),
+            Some("thread 'main' panicked  at src/x.rs")
+        );
+        let long = "x".repeat(400) + "END";
+        let tail = stderr_tail(long.as_bytes()).unwrap();
+        assert_eq!(tail.chars().count(), 300);
+        assert!(tail.ends_with("END"));
+
+        // 结果里：error 只有工具自己的话，stderr 另放；没有 stderr 时不写这个字段。
+        let mut crashed = sample_result(0);
+        crashed.status = FileStatus::Crashed;
+        crashed.error = Some("子进程异常退出（0x80000003）".to_owned());
+        crashed.stderr = stderr_tail(b"panicked at something");
+        let json = serde_json::to_value(&crashed).unwrap();
+        assert_eq!(json["error"], "子进程异常退出（0x80000003）");
+        assert_eq!(json["stderr"], "panicked at something");
+        assert!(
+            serde_json::to_value(sample_result(1))
+                .unwrap()
+                .get("stderr")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn report_starts_with_kind_and_format() {
+        let by_source = BTreeMap::new();
+        let total = SourceSummary::default();
+        let opts = Options::default();
+        let report = Report {
+            kind: REPORT_KIND,
+            format: REPORT_FORMAT,
+            tool: Tool {
+                name: "magpdf-cli roundtrip",
+                version: "0.0.0",
+                pdfium: "1.2.3.4",
+                pdfium_library: Some(r"C:\x\pdfium.dll".to_owned()),
+            },
+            options: ReportOptions {
+                input: "in".to_owned(),
+                root: "in".to_owned(),
+                isolate: true,
+                timeout_s: 60,
+                jobs: 2,
+                engine: &opts,
+            },
+            started_unix_s: 0,
+            elapsed_ms: 0,
+            by_source: &by_source,
+            total: &total,
+            files: &[],
+        };
+        let text = serde_json::to_string(&report).unwrap();
+        assert!(
+            text.starts_with(r#"{"kind":"magpdf-roundtrip","format":2,"tool":{"#),
+            "{text}"
+        );
+        let json: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(json["tool"]["pdfium_library"], r"C:\x\pdfium.dll");
+        assert_eq!(json["tool"]["pdfium"], "1.2.3.4");
     }
 
     #[test]

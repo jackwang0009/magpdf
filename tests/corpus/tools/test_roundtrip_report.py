@@ -8,6 +8,8 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
+import html
 import io
 import json
 import sys
@@ -235,6 +237,39 @@ class SummaryTests(unittest.TestCase):
         files = [file("x.pdf", "s", [], status="crashed", error=text, exit_code=-2147483645)]
         snap = snapshot(files)
         self.assertEqual(snap.files[0].error, "子进程异常退出（0x80000003）")
+
+    def test_crashed_files_keep_their_page_count(self) -> None:
+        # 格式 2：崩溃、超时的文件只要子进程打开了文档，page_count 就有数；这些页没有比对到。
+        files = [
+            file("ok.pdf", "s", [page(0), page(1)]),
+            {**file("crash.pdf", "s", [], status="crashed", error="子进程异常退出（0x80000003）", exit_code=-2147483645),
+             "page_count": 7, "stderr": "panicked: 发货人 SAMPLE CO LTD"},
+            {**file("slow.pdf", "s", [], status="timed_out", error="超过 60 s 未完成，已终止"), "page_count": 30},
+            file("early.pdf", "s", [], status="crashed", error="子进程异常退出（0xC0000005）"),  # 文档没打开就崩溃：不知道页数
+            {**file("locked.pdf", "s", [], status="load_failed", error="打开文档失败：Password"), "page_count": 0},
+        ]
+        snap = snapshot(files)
+        self.assertEqual({f.path: f.page_count for f in snap.files}, {"ok.pdf": 2, "crash.pdf": 7, "slow.pdf": 30, "early.pdf": 0, "locked.pdf": 0})
+        crash = next(f for f in snap.files if f.path == "crash.pdf")
+        self.assertEqual(crash.error, "子进程异常退出（0x80000003）", "错误信息里本来就没有子进程标准错误的内容")
+        summary = model.summarize(snap.files)["s"]
+        self.assertEqual((summary.crashed, summary.timed_out, summary.crash_pages), (2, 1, 37))
+        self.assertEqual((summary.pages, summary.compared), (2, 2), "崩溃文件的页不算有记录的页，也不算比对页")
+        self.assertEqual(summary.to_json()["crash_pages"], 37)
+        self.assertNotIn("page_count", model.dumps_baseline(snap, {}), "页数不进基线")
+
+    def test_newer_roundtrip_format_is_refused(self) -> None:
+        data = roundtrip([file("a.pdf", "s", [page(0)])])
+        self.assertEqual(model.load_run(data, None, name="set").meta["roundtrip_format"], 1, "没有 format 字段的是最初的格式")
+        data["kind"], data["format"] = "magpdf-roundtrip", model.ROUNDTRIP_FORMAT
+        data["tool"]["pdfium_library"] = r"C:\somewhere\pdfium.dll"
+        snap = model.load_run(data, None, name="set")
+        self.assertEqual((snap.meta["roundtrip_format"], snap.meta["pdfium_library"]), (model.ROUNDTRIP_FORMAT, r"C:\somewhere\pdfium.dll"))
+        data["format"] = model.ROUNDTRIP_FORMAT + 1
+        with self.assertRaises(model.RoundtripFormatError) as caught:
+            model.load_run(data, None, name="set")
+        self.assertIn("只认到", str(caught.exception))
+        self.assertIsInstance(caught.exception, ValueError, "报告工具按读输入出错处理，退出码 1")
 
 
 class BaselineTests(unittest.TestCase):
@@ -753,6 +788,82 @@ class ReportTests(unittest.TestCase):
             page_html = (root / "report.html").read_text(encoding="utf-8")
             self.assertNotIn("data:image", page_html)
             self.assertIn('href="run/diff/s__bad__p001_a.png"', page_html, "不内嵌缩略图时还有链接")
+
+    def test_format_2_results(self) -> None:
+        """格式 2 的结果：实际加载的 PDFium、崩溃文件的页数、和 error 分开放的子进程标准错误。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dll = root / "bin" / "pdfium.dll"
+            dll.parent.mkdir()
+            dll.write_bytes(b"stand-in for the library file " * 64)
+            sha = hashlib.sha256(dll.read_bytes()).hexdigest()
+            files = [
+                file("ok.pdf", "s", [page(0)]),
+                {**file("crash.pdf", "s", [], status="crashed", error="子进程异常退出（0x80000003）", exit_code=-2147483645),
+                 "page_count": 7, "stderr": "panicked: 发货人 SAMPLE CO LTD"},
+                file("early.pdf", "s", [], status="crashed", error="子进程异常退出（0xC0000005）"),
+            ]
+            data = roundtrip(files)
+            data["kind"], data["format"] = "magpdf-roundtrip", 2
+            data["tool"]["pdfium_library"] = str(dll)
+            (root / "set").mkdir()
+            result_path = root / "set" / "roundtrip.json"
+            run = {
+                "kind": report.RUN_KIND,
+                "format": 1,
+                "pdfium_dll_sha256": "0" * 64,  # 入口脚本记的是命令行工具旁边那一份，这里故意让它对不上
+                "sets": [{"name": "set", "title": "样本", "roundtrip": "set/roundtrip.json"}],
+            }
+
+            def go() -> tuple[int, str, str, dict[str, Any]]:
+                result_path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+                (root / "run.json").write_text(json.dumps(run, ensure_ascii=False), encoding="utf-8")
+                code, text = self.run_main("--run", str(root / "run.json"), "--out", str(root / "report.html"),
+                                           "--summary", str(root / "summary.json"), "--baseline-out", str(root / "candidate"))
+                page_html = (root / "report.html").read_text(encoding="utf-8") if code != 1 else ""
+                summary = json.loads((root / "summary.json").read_text(encoding="utf-8")) if code != 1 else {}
+                return code, text, page_html, summary
+
+            code, text, page_html, summary = go()
+            self.assertEqual(code, 0, text)
+            # 是哪一份 PDFium，以命令行工具说它加载的那个文件为准。
+            self.assertIn("实际加载的 PDFium 库不是入口脚本记下的那一份", text)
+            self.assertIn(sha[:16], page_html)
+            self.assertNotIn("0" * 16, page_html)
+            self.assertIn(f"实际加载的文件：{html.escape(str(dll))}", page_html)
+            candidate = model.loads_baseline((root / "candidate" / "set.json").read_text(encoding="utf-8"))
+            self.assertEqual(candidate.meta["pdfium_dll_sha256"], sha)
+            self.assertEqual(summary["sets"][0]["meta"]["roundtrip_format"], 2)
+            # 崩溃文件的页数：打开了文档的有数，没打开的写不知道。
+            section = page_html[page_html.index('id="files"') : page_html.index('id="run"')]
+            self.assertIn("页数", section)
+            self.assertIn('<td class="n">7</td>', section)
+            self.assertIn('<td class="n">不知道</td>', section)
+            self.assertEqual(summary["by_source"]["s"]["crash_pages"], 7)
+            # 子进程标准错误单独放在 stderr 字段里，页面上没有它。
+            self.assertNotIn("SAMPLE CO LTD", page_html)
+            self.assertIn("子进程异常退出（0x80000003）", page_html)
+
+            # 入口脚本记的和实际加载的是同一份：不提示。
+            run["pdfium_dll_sha256"] = sha
+            code, text, page_html, _ = go()
+            self.assertEqual(code, 0, text)
+            self.assertNotIn("实际加载的 PDFium 库", text)
+
+            # 那个文件不在这台机器上（报告是拿别处跑出来的结果生成的）：用入口脚本记的。
+            data["tool"]["pdfium_library"] = str(root / "elsewhere" / "pdfium.dll")
+            run["pdfium_dll_sha256"] = "1" * 64
+            code, text, page_html, _ = go()
+            self.assertEqual(code, 0, text)
+            self.assertIn("1" * 16, page_html)
+            self.assertNotIn("实际加载的 PDFium 库不是", text)
+
+            # 命令行工具比报告工具新：拒收，退出码 1。
+            data["format"] = model.ROUNDTRIP_FORMAT + 1
+            code, text, _, _ = go()
+            self.assertEqual(code, 1)
+            self.assertIn("读输入出错", text)
+            self.assertIn("只认到", text)
 
     def test_structure_check_is_reported_but_does_not_fail_the_run(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

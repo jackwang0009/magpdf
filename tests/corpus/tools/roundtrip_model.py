@@ -37,6 +37,12 @@ from typing import Any, Iterable
 BASELINE_KIND = "magpdf-roundtrip-baseline"
 BASELINE_FORMAT = 1
 
+#: 认得的 `magpdf-cli roundtrip --json` 的格式版本，最高到这一个（engine/magpdf-cli/src/roundtrip.rs 的 REPORT_FORMAT）。
+#: 1：没有 `format` 字段；崩溃文件的 `error` 后面接着“；stderr：…”。
+#: 2：有 `kind`、`format`；`tool.pdfium_library` 是实际加载的 PDFium 库文件；崩溃、超时的文件只要子进程打开了文档，
+#:    `page_count` 就有数；子进程标准错误的末尾单独放在 `stderr`，不在 `error` 里。
+ROUNDTRIP_FORMAT = 2
+
 #: 操作符级差异的五类，和 ops_diff.py 每页的 counts 一致。
 OPS_KEYS = ("color", "text", "gs", "clip", "events")
 OPS_LABELS = {
@@ -196,6 +202,9 @@ class FileResult:
     pages: list[Page] = field(default_factory=list)
     error: str = ""
     exit_code: int | None = None
+    #: 文档的页数。崩溃、超时的文件 `pages` 是空的，页数只在这里：子进程打开了文档就有数，没打开就崩溃是 0
+    #: （格式 1 的结果里崩溃文件总是 0）。基线里不存。
+    page_count: int = 0
     #: 这个文件整个没做成操作符级比对的原因。
     ops_note: str = ""
     #: 结构校验的结果；None = 这个文件没有查（没有保存结果，或者结构校验的结果里没有它）。
@@ -217,11 +226,15 @@ class Snapshot:
         return sum(len(f.pages) for f in self.files)
 
 
+class RoundtripFormatError(ValueError):
+    """`roundtrip --json` 的格式版本比这个工具认得的新。"""
+
+
 def clean_error(text: Any) -> str:
     """错误信息只留工具自己写的那一段。
 
-    隔离模式下崩溃的文件，错误信息后面跟着子进程标准错误的末尾（“；stderr：…”），那一段可能带出文档里的东西，
-    页面上不显示；要看去原始的 JSON 里看。
+    隔离模式下崩溃的文件，格式 1 的结果里错误信息后面跟着子进程标准错误的末尾（“；stderr：…”），那一段可能带出
+    文档里的东西，页面上不显示；要看去原始的 JSON 里看。格式 2 起那一段单独放在 `stderr` 字段里，这里不读它。
     """
     if not text:
         return ""
@@ -330,6 +343,12 @@ def load_run(
     给了 `root_source` 时，直接放在输入目录下的文件改用它：来源名就不跟着输入目录叫什么变了
     （PDFium 的 `testing/resources` 拷到别的名字的目录里，来源还是 `resources`）。
     """
+    fmt = roundtrip.get("format")
+    if fmt is not None and (not isinstance(fmt, int) or fmt > ROUNDTRIP_FORMAT):
+        raise RoundtripFormatError(
+            f"roundtrip 结果的格式版本是 {fmt!r}，这个工具只认到 {ROUNDTRIP_FORMAT}；"
+            "命令行工具比报告工具新，先更新 tests/corpus/tools"
+        )
     ops_by_path: dict[str, dict[str, Any]] = {}
     if ops is not None:
         for record in ops.get("files") or []:
@@ -350,6 +369,7 @@ def load_run(
             pages=[_page_from_record(p) for p in entry.get("pages") or []],
             error=clean_error(entry.get("error")),
             exit_code=entry.get("exit_code"),
+            page_count=int(entry.get("page_count") or 0),
         )
         if ops is not None:
             _attach_ops(result, ops_by_path.get(result.path))
@@ -360,8 +380,11 @@ def load_run(
     tool = roundtrip.get("tool") or {}
     options = roundtrip.get("options") or {}
     meta: dict[str, Any] = {
+        "roundtrip_format": fmt if fmt is not None else 1,
         "cli_version": tool.get("version"),
         "pdfium_version": tool.get("pdfium"),
+        # 实际加载的 PDFium 库文件（格式 2 起才有）。是哪一份，报告工具拿这个文件算哈希来认。
+        "pdfium_library": tool.get("pdfium_library"),
         "thresholds": options.get("thresholds"),
         "scale": options.get("scale"),
         "calibrate": bool(options.get("calibrate")),
@@ -395,6 +418,8 @@ class Summary:
     reopen_failed: int = 0
     crashed: int = 0
     timed_out: int = 0
+    #: 崩溃、超时的文件里的页数：这些页没有比对到，也不在 `pages` 里。子进程没打开文档就崩溃的文件不知道页数，算 0。
+    crash_pages: int = 0
     pages: int = 0  # 有记录的页：比对页 + 页错误
     passed: int = 0
     diff: int = 0
@@ -449,6 +474,8 @@ class Summary:
         self.files += 1
         if file.status in ("load_failed", "save_failed", "reopen_failed", "crashed", "timed_out"):
             setattr(self, file.status, getattr(self, file.status) + 1)
+        if file.status in CRASH_STATUSES:
+            self.crash_pages += file.page_count
         for page in file.pages:
             self.pages += 1
             if page.pixel == "pass":
@@ -489,6 +516,7 @@ class Summary:
             "reopen_failed",
             "crashed",
             "timed_out",
+            "crash_pages",
             "pages",
             "passed",
             "diff",
@@ -518,6 +546,7 @@ class Summary:
             "reopen_failed": self.reopen_failed,
             "crashed": self.crashed,
             "timed_out": self.timed_out,
+            "crash_pages": self.crash_pages,
             "pages": self.pages,
             "compared": self.compared,
             "passed": self.passed,

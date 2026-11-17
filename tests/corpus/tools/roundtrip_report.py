@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 import base64
 import datetime as dt
+import hashlib
 import html
 import io
 import json
@@ -190,6 +191,28 @@ def broken_by_roundtrip(files: Iterable[FileResult]) -> list[FileResult]:
     return [f for f in files if f.struct is not None and f.struct.cls == "ok_bad"]
 
 
+def loaded_pdfium_sha256(meta: dict[str, Any]) -> str:
+    """实际加载的 PDFium 库文件的 SHA-256。
+
+    命令行工具从格式 2 起在结果里写了它加载的是哪个文件（`tool.pdfium_library`），不写哈希；这里拿那个文件来算。
+    结果里没有这一项，或者文件不在这台机器上（报告是拿别处跑出来的结果生成的），返回空串。
+    """
+    library = meta.get("pdfium_library")
+    if not library:
+        return ""
+    path = Path(str(library))
+    try:
+        if not path.is_file():
+            return ""
+        digest = hashlib.sha256()
+        with path.open("rb") as f:
+            for block in iter(lambda: f.read(1 << 20), b""):
+                digest.update(block)
+    except OSError:
+        return ""
+    return digest.hexdigest()
+
+
 def struct_tool_text(meta: dict[str, Any]) -> str:
     """结构校验是拿什么查的，给页面上用的一句话。两种查法查的东西不完全一样，页面上要写明是哪一种。"""
     tool = meta.get("struct_tool") or {}
@@ -248,6 +271,17 @@ def build_report(specs: list[SetInput], env: dict[str, Any], max_drop_pp: float 
         if cli.get("sha256"):
             current.snapshot.meta["cli_sha256"] = cli["sha256"]
         prefix = f"{spec.title}：" if many else ""
+        # 入口脚本记的是命令行工具旁边那个 pdfium.dll 的哈希；命令行工具自己说了加载的是哪个文件时，以那个文件为准。
+        actual = loaded_pdfium_sha256(current.snapshot.meta)
+        if actual:
+            declared = current.snapshot.meta.get("pdfium_dll_sha256")
+            if declared and declared != actual:
+                report.notices.append(
+                    f"{prefix}实际加载的 PDFium 库不是入口脚本记下的那一份（命令行工具旁边的 pdfium.dll）；"
+                    "页面和候选基线里记的是实际加载的那一份。"
+                )
+            current.snapshot.meta["pdfium_dll_sha256"] = actual
+            env["pdfium_dll_sha256"] = actual
         if current.baseline is not None:
             current.comparison = compare(current.baseline, current.snapshot, max_drop_pp=max_drop_pp)
             report.alarms += [prefix + text for text in current.comparison.alarms]
@@ -1149,6 +1183,8 @@ class HtmlBuilder:
                 if not files:
                     continue
                 rows = []
+                # 崩溃、超时的文件没有逐页的结果；子进程打开了文档就知道页数，这些页没有比对到。
+                with_pages = status in ("crashed", "timed_out")
                 for file in files:
                     code = f"0x{file.exit_code & 0xFFFFFFFF:08X}" if file.exit_code is not None else "—"
                     if not base_status:
@@ -1159,12 +1195,14 @@ class HtmlBuilder:
                         note = "基线里也是"
                     else:
                         note = f'<span class="tag bad">基线里是{FILE_STATUS_LABELS.get(base_status[file.path], base_status[file.path])}</span>'
+                    pages = f'<td class="n">{num(file.page_count) if file.page_count else "不知道"}</td>' if with_pages else ""
                     rows.append(
-                        f'<tr><td>{esc(file.source)}</td><td class="path">{esc(file.path)}</td><td>{esc(code)}</td>'
+                        f'<tr><td>{esc(file.source)}</td><td class="path">{esc(file.path)}</td>{pages}<td>{esc(code)}</td>'
                         f"<td>{esc(file.error)}</td><td>{note}</td></tr>"
                     )
+                pages_head = "<th class=n>页数<br>（没有比对到）</th>" if with_pages else ""
                 table = (
-                    '<div class="scroll"><table><tr><th>来源</th><th>文件</th><th>退出码</th><th>工具给的原因</th><th>和基线比</th></tr>'
+                    f'<div class="scroll"><table><tr><th>来源</th><th>文件</th>{pages_head}<th>退出码</th><th>工具给的原因</th><th>和基线比</th></tr>'
                     + "".join(rows)
                     + "</table></div>"
                 )
@@ -1184,7 +1222,10 @@ class HtmlBuilder:
                 )
         if not any_rows:
             out.append("<p>没有。</p>")
-        out.append('<p class="sub">崩溃的文件，子进程标准错误的内容没有放到页面上，要看去原始的 roundtrip JSON 里看。</p>')
+        out.append(
+            '<p class="sub">崩溃的文件，子进程标准错误的内容没有放到页面上，要看去原始的 roundtrip JSON 里看。'
+            "崩溃、超时的文件，页数是子进程打开文档之后报的；写“不知道”的是文档还没打开就崩溃了，或者结果是旧版命令行工具写的。</p>"
+        )
         return "".join(out)
 
     # ---- 7. 这一次怎么跑的 ----------------------------------------------
@@ -1239,7 +1280,8 @@ class HtmlBuilder:
         if cli:
             kv.append(("命令行工具", f"{cli.get('version') or ''}　SHA-256 {str(cli.get('sha256') or '')[:16]}…"))
         if env.get("pdfium_dll_sha256"):
-            kv.append(("PDFium", f"{first.get('pdfium_version') or ''}　pdfium.dll 的 SHA-256 {str(env.get('pdfium_dll_sha256'))[:16]}…"))
+            loaded = f"　实际加载的文件：{first.get('pdfium_library')}" if first.get("pdfium_library") else ""
+            kv.append(("PDFium", f"{first.get('pdfium_version') or ''}　pdfium.dll 的 SHA-256 {str(env.get('pdfium_dll_sha256'))[:16]}…{loaded}"))
         struct_meta = next((s.snapshot.meta for s in report.sets if s.snapshot.has_struct), None)
         if struct_meta is not None:
             kv.append(("结构校验", struct_tool_text(struct_meta)))

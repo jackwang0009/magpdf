@@ -1,6 +1,6 @@
 use std::ffi::{CString, c_char};
 use std::marker::PhantomData;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -71,6 +71,70 @@ impl Library {
     /// 编译时链接的 PDFium 预编译库版本，例如 `159.0.8138.0`。
     pub fn linked_version() -> &'static str {
         env!("PDFIUM_PREBUILT_VERSION")
+    }
+
+    /// 这个进程实际加载的 PDFium 库文件（Windows 上是 `pdfium.dll`）的路径；取不到时是 `None`。
+    ///
+    /// [`linked_version`](Self::linked_version) 是编译时那一份预编译库的版本号。修补过的构建和原版的版本号
+    /// 一样，运行时加载的也不一定是编译时那一份（看可执行文件旁边放的是哪个），所以报告里要分清用的是
+    /// 哪一份 PDFium，得看实际加载的文件（V14 每晚往返报告第 10 节第 1 条）。不需要先初始化库。
+    pub fn loaded_path() -> Option<PathBuf> {
+        loaded::path()
+    }
+}
+
+#[cfg(windows)]
+mod loaded {
+    use std::ffi::{OsString, c_void};
+    use std::os::windows::ffi::OsStringExt;
+    use std::path::PathBuf;
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetModuleHandleW(module_name: *const u16) -> *mut c_void;
+        fn GetModuleFileNameW(module: *mut c_void, filename: *mut u16, size: u32) -> u32;
+    }
+
+    /// Windows 的路径最长约 32767 个字符（加了 `\\?\` 前缀时）。
+    const MAX_PATH_CHARS: usize = 32 * 1024;
+
+    pub(super) fn path() -> Option<PathBuf> {
+        let name: Vec<u16> = "pdfium.dll".encode_utf16().chain([0]).collect();
+        // SAFETY: name 是以 0 结尾的 UTF-16 字符串，调用期间一直有效；函数只读它，不保存指针。
+        let module = unsafe { GetModuleHandleW(name.as_ptr()) };
+        if module.is_null() {
+            return None;
+        }
+        let mut buf = vec![0u16; 512];
+        loop {
+            let size = u32::try_from(buf.len()).ok()?;
+            // SAFETY: buf 有 size 个 u16 的空间可写；module 是上面取到的模块句柄。pdfium.dll 是随可执行文件
+            // 静态导入的，进程存活期间不会卸载，句柄一直有效。
+            let len = unsafe { GetModuleFileNameW(module, buf.as_mut_ptr(), size) };
+            let len = usize::try_from(len).ok()?;
+            if len == 0 {
+                return None;
+            }
+            // 返回值等于缓冲区大小说明路径被截断了：加大再取。
+            if len < buf.len() {
+                buf.truncate(len);
+                return Some(PathBuf::from(OsString::from_wide(&buf)));
+            }
+            if buf.len() >= MAX_PATH_CHARS {
+                return None;
+            }
+            buf.resize(buf.len() * 2, 0);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+mod loaded {
+    use std::path::PathBuf;
+
+    /// 只在 Windows 上实现（产品只有 Windows 版）；别的系统上报不出来。
+    pub(super) fn path() -> Option<PathBuf> {
+        None
     }
 }
 
