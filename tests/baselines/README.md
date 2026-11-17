@@ -81,8 +81,9 @@ git add tests/baselines/roundtrip/synthetic.json tests/baselines/roundtrip/publi
 ### 和机器有关的地方
 
 没有嵌入的字体换成什么字体，各台机器不一样（V14 自制样本报告 4.4 第 9 条），所以基线要在跑每晚测试的那种环境里生成。
-现在入库的两份基线是在开发机上用 `main` @ `ff6b0ac` 的命令行工具、配原版预编译库生成的。流水线第一次在 GitHub 上跑出来之后，
-如果它的结果和这两份不一样，用它产物里的 `baseline-candidate/` 换掉这两份（见 `docs/p0/V14-每晚往返与分类报告.md`）。
+现在入库的两份基线是在开发机上用 `main` @ `c193e81` 的命令行工具、配原版预编译库生成的。2026-11-17 流水线第一次在 GitHub 上跑
+（镜像 `win25-vs2026`），产物里的 `baseline-candidate/` 和这两份除了 `meta` 逐项相同，所以没有换。以后 GitHub 换了镜像、结果变了，
+再用产物里的候选基线换（见 `docs/p0/V14-每晚往返与分类报告.md` 第 9 节末尾的补记）。
 
 要同时盯两种 PDFium（原版和 `mag/main`）时，各用一个目录：`-BaselineDir tests/baselines/roundtrip-<名字>`。
 
