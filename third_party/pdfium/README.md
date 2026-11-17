@@ -27,7 +27,7 @@ third_party/pdfium/
 `chromium/8138`～`chromium/8141` 四个上游分支头指向同一个提交（`5f092b5299`），`build.ps1` 推导版本号时优先采用 `upstream-branch.txt` 里钉住的分支号。
 
 当前 `upstream..mag/main` 有 14 个提交（`mag/main` @ `6537e3b998`），导出成 `patches/pdfium/` 下的 12 个补丁，按顺序打完得到的树和 `mag/main` 相同
-（颜色空间那一项在分支上是三个提交，导出时并成了 0004 一个补丁）：
+（颜色空间那一项在分支上是三个提交，导出时并成了 0004 一个补丁；远程的 `mag/main` 另有一个只加流水线文件的提交 `636cfe4701`，补丁里没有它）：
 
 ```
 0001  9503125169  [mag-local] build: 以共享库形式构建 pdfium.dll
@@ -58,12 +58,13 @@ third_party/pdfium/
 ### 远程仓库建好之后
 
 `magpdf-pdfium` 仓库 2026-11-17 建好了：<https://github.com/jackwang0009/magpdf-pdfium>（公开，默认分支 `mag/main`）。
-下面四步只做了第 1 步，`mag/main` 仍然靠 `patches/pdfium/*.patch` 随主仓库走：
+下面四步做了第 1、3 步，`mag/main` 仍然靠 `patches/pdfium/*.patch` 随主仓库走：
 
 1. （已做）推送 `upstream`（`5f092b5299`）与 `mag/main`（`6537e3b998`）。当时是直接推到仓库地址，本地检出没有加远程；
    以后要常推，再 `git remote add magpdf <url>`。本地工作树里没提交的 Type3 改动没有推。
 2. 之后同步用 `sync.ps1 -MagRemote <url>`；`patches/pdfium/` 退役（保留到首个 tag 发布为止，作为可追溯记录）。
-3. 把 `ci/build-pdfium.yml` 复制到该仓库的 `.github/workflows/`，改好 `MAGPDF_REPO`。
+3. （已做）把 `ci/build-pdfium.yml` 原样放进该仓库的 `.github/workflows/`（`mag/main` 上的 `[mag-local]` 提交 `636cfe4701`，
+   用 GitHub 接口加的，本地检出里没有这个提交）。两边要保持一致。第一次运行无缓存 11 分 43 秒（V01 报告 4.5）。
 4. 在主仓库把它挂成子模块：`git submodule add -b mag/main <url> third_party/pdfium/src`，并在 `sync.ps1` 把默认 `-Root` 指向子模块所在目录
    （子模块只含 PDFium 本体，DEPS 子仓库依然由 gclient 管理，因此 `.gclient` 要放在子模块的父目录）。
    在此之前**不要**提交子模块，`.gitmodules` 保持为空。
