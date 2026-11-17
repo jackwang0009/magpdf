@@ -2,22 +2,31 @@
 # 并按《工程规范》§6 摆好分支：upstream → origin/<chromium/NNNN>，mag/main 在其上叠加 [mag-local] 提交。
 #
 # 用法（默认值都对应本机约定，可按需覆盖）：
-#   pwsh third_party/pdfium/sync.ps1                         # Root=D:\pdfium-src, DepotTools=D:\depot_tools
+#   pwsh third_party/pdfium/sync.ps1                         # 见下面“检出放在哪里”；DepotTools=D:\depot_tools
 #   pwsh third_party/pdfium/sync.ps1 -Root E:\src -Proxy http://127.0.0.1:7897 -NoHistory -Jobs 8
 #   pwsh third_party/pdfium/sync.ps1 -MagRemote https://github.com/<org>/magpdf-pdfium.git   # 仓库建好之后
 #   pwsh third_party/pdfium/sync.ps1 -NoSync                 # 离线：只整理分支/重放补丁，不跑 gclient sync
 #   pwsh third_party/pdfium/sync.ps1 -Root $PWD -DepsOnly -NoHistory   # CI：检出已由 actions/checkout 放好，只拉 DEPS + 打补丁
 #
-# 结果目录结构：<Root>\.gclient、<Root>\pdfium\（检出，HEAD 在 mag/main）、<Root>\pdfium\build\ 等 DEPS 子仓库。
-# 之后用 build.ps1 -Source <Root>\pdfium 构建。
+# 检出放在哪里（-Root 是 gclient 的根目录，放 .gclient；检出是它下面名叫 -Name 的目录）：
+#   * 给了 -Root，或者设了环境变量 PDFIUM_ROOT：用它，检出是 <Root>\pdfium；
+#   * 没给，而主仓库的子模块 third_party/pdfium/src 已经取下来（git submodule update --init third_party/pdfium/src）：
+#     用子模块。Root 是这个脚本所在的目录，检出是 src。这时不整理分支：停在哪个提交由主仓库记着，
+#     和 -DepsOnly 一样只拉 DEPS、打补丁；
+#   * 都没有：本机约定的 D:\pdfium-src。
 #
-# mag/main 的来源：
+# 结果目录结构：<Root>\.gclient、<Root>\<Name>\（检出，HEAD 在 mag/main）、<Root>\<Name>\build\ 等 DEPS 子仓库。
+# 之后用 build.ps1 -Source <Root>\<Name> 构建。
+#
+# mag/main 的来源（检出不是子模块、也没有给 -DepsOnly 时）：
 #   * 给了 -MagRemote：从那里拉 mag/main（远程名固定为 magpdf，避免与分支名 mag/main 混淆）；
-#   * 没给且本地还没有 mag/main：在 upstream 上用 git am 重放 patches/pdfium/*.patch 生成（当前就是这种方式）；
+#   * 没给且本地还没有 mag/main：在 upstream 上用 git am 重放 patches/pdfium/*.patch 生成；
 #   * 本地已有 mag/main：原样保留，只 checkout 过去。
 [CmdletBinding()]
 param(
-    [string]$Root = $(if ($env:PDFIUM_ROOT) { $env:PDFIUM_ROOT } else { 'D:\pdfium-src' }),
+    [string]$Root = '',
+    # 检出的目录名，也是 .gclient 里 solution 的名字。默认 pdfium；用子模块时是 src。
+    [string]$Name = '',
     [string]$DepotTools = $(if ($env:DEPOT_TOOLS) { $env:DEPOT_TOOLS } else { 'D:\depot_tools' }),
     [string]$Remote = 'https://pdfium.googlesource.com/pdfium.git',
     [string]$MagRemote = '',
@@ -32,6 +41,21 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
+
+# ---------- 检出放在哪里 ----------
+$submodule = Join-Path $here 'src'   # 主仓库的子模块 third_party/pdfium/src（magpdf-pdfium）
+if (-not $Root) {
+    if ($env:PDFIUM_ROOT) { $Root = $env:PDFIUM_ROOT }
+    elseif (Test-Path (Join-Path $submodule '.git')) { $Root = $here; if (-not $Name) { $Name = 'src' } }
+    else { $Root = 'D:\pdfium-src' }
+}
+if (-not $Name) { $Name = 'pdfium' }
+if ($Name -notmatch '^[A-Za-z0-9_.-]+$') { throw "-Name 只能是一个目录名，现在是 '$Name'" }
+$src = Join-Path $Root $Name
+# 检出就是子模块（不管是自动选的，还是 -Root、-Name 明着指过去的）：分支不归这个脚本管
+$isSubmodule = (Test-Path (Join-Path $submodule '.git')) -and (Test-Path $src) -and
+    ((Resolve-Path $src).Path.TrimEnd('\') -eq (Resolve-Path $submodule).Path.TrimEnd('\'))
+
 $sw = [Diagnostics.Stopwatch]::StartNew()
 function Step($msg) { Write-Host ('[{0,8:N1}s] {1}' -f $sw.Elapsed.TotalSeconds, $msg) -ForegroundColor Cyan }
 function Run([string]$exe, [string[]]$argv) {
@@ -44,6 +68,21 @@ if (-not $UpstreamBranch) {
     $UpstreamBranch = (Get-Content (Join-Path $here 'upstream-branch.txt') | Where-Object { $_ -and $_ -notmatch '^\s*#' } | Select-Object -First 1).Trim()
 }
 if ($UpstreamBranch -notmatch '^chromium/\d+$') { throw "上游分支必须形如 chromium/NNNN，现在是 '$UpstreamBranch'" }
+if ($isSubmodule -and -not $DepsOnly) {
+    Step "检出是主仓库的子模块（$src）：不整理分支，只拉 DEPS、打补丁"
+    $DepsOnly = $true
+}
+if ($isSubmodule) {
+    # 子模块是 git 自己检出的，全局开着 core.autocrlf 时文件会变成 CRLF，testing/resources 里的测试 PDF 就被改坏了
+    # （README 第 2 节）。DEPS 在仓库里是 LF，拿它看一眼。
+    $eol = "$(& git -C $src ls-files --eol -- DEPS)"
+    if ($eol -match 'w/crlf') {
+        throw ("子模块是按 core.autocrlf=true 检出的（文件成了 CRLF）。改过来再跑：`n" +
+            "  git -C `"$src`" config core.autocrlf false`n" +
+            "  git -C `"$src`" rm -rq --cached .`n" +
+            "  git -C `"$src`" reset -q --hard")
+    }
+}
 
 # ---------- 环境 ----------
 $env:DEPOT_TOOLS_WIN_TOOLCHAIN = '0'   # 不要 Google 内部的 VS 工具链包，用本机 Build Tools
@@ -70,13 +109,13 @@ $gclientFile = Join-Path $Root '.gclient'
 #   rust-toolchain 下载 427 MB、解压后 2.8 GB；siso 64 MB。去掉 rust-toolchain 后 gn gen 已验证可用（V01 报告第 4 节）。
 $gclientWanted = @"
 solutions = [
-  { "name"        : 'pdfium',
+  { "name"        : '$Name',
     "url"         : '$Remote',
     "deps_file"   : 'DEPS',
     "managed"     : False,
     "custom_deps" : {
-      'pdfium/third_party/rust-toolchain': None,
-      'pdfium/third_party/siso/cipd': None,
+      '$Name/third_party/rust-toolchain': None,
+      '$Name/third_party/siso/cipd': None,
     },
     "custom_vars": {'checkout_configuration': 'minimal', 'checkout_v8': False},
   },
@@ -91,9 +130,8 @@ elseif ((Get-Content $gclientFile -Raw).Trim() -ne $gclientWanted.Trim()) {
 }
 
 # ---------- PDFium 本体 ----------
-$src = Join-Path $Root 'pdfium'
 if ($DepsOnly) {
-    # CI 场景：<Root>\pdfium 已经是 magpdf-pdfium 的检出（origin 不是上游），不动分支，不 fetch
+    # CI 和子模块：检出已经是 magpdf-pdfium 的（origin 不是上游），不动分支，不 fetch
     if (-not (Test-Path (Join-Path $src '.git'))) { throw "-DepsOnly 要求 $src 已经检出" }
     Step "-DepsOnly：使用现有检出 $src（$(& git -C $src rev-parse --short HEAD)），跳过分支整理"
 }

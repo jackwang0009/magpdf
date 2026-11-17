@@ -1,20 +1,22 @@
 # third_party/pdfium：MagPDF 的 PDFium 分支与构建脚本
 
-PDFium 分支本身（`magpdf-pdfium` 仓库，分支 `mag/main`）**不在**这个目录里，这里只放构建它所需的脚本、参数、补丁与 CI 草案。
+PDFium 分支本身在 `magpdf-pdfium` 仓库（分支 `mag/main`），挂在这个目录下的子模块 `src/` 上；**克隆主仓库时默认不取它**，
+`src/` 是个空目录。这里放构建它所需的脚本、参数、补丁与流水线文件。
 `pdfium-sys` 默认链接 `third_party/pdfium-prebuilt/`（pdfium-binaries 原版），引擎组用这里的脚本构建分支产物后，
 把 `PDFIUM_PREBUILT_DIR` 指向 `<out>/dist` 即可切换，Rust 侧零改动（V01 报告：`docs/p0/V01-原生构建与预编译库.md`）。
 
 ```
 third_party/pdfium/
-├── sync.ps1               从零同步：depot_tools、.gclient、PDFium、DEPS；整理 upstream / mag/main 分支
+├── src/                   子模块：magpdf-pdfium 的 mag/main（默认不取；要用时 git submodule update --init third_party/pdfium/src）
+├── sync.ps1               同步：depot_tools、.gclient、PDFium、DEPS；整理 upstream / mag/main 分支（用子模块时不动分支）
 ├── build.ps1              gn gen + ninja，产出与 pdfium-binaries 布局一致的 dist/
 ├── apply-patches.ps1      把 patches/<子仓库>/ 下的补丁打到 DEPS 子仓库（幂等）
 ├── upstream-branch.txt    当前跟踪的上游稳定分支（chromium/8138）
 ├── args/release.gn        Release 构建参数模板（带 PDB）
 ├── args/debug.gn          Debug 构建参数模板
-├── patches/pdfium/        mag/main 相对 upstream 的提交（git format-patch），远程仓库建好前的唯一载体
+├── patches/pdfium/        mag/main 相对 upstream 的提交（git format-patch），和子模块里的是同一批，留到首个 tag 发布为止
 ├── patches/build/         对 DEPS 子仓库 build/（Chromium 构建系统）的本地补丁
-└── ci/build-pdfium.yml    magpdf-pdfium 仓库的 GitHub Actions 草案
+└── ci/build-pdfium.yml    magpdf-pdfium 仓库的 GitHub Actions 流水线（那边 .github/workflows/ 里的是同一份）
 ```
 
 ## 1. 分支约定（《工程规范》§6）
@@ -58,16 +60,22 @@ third_party/pdfium/
 ### 远程仓库建好之后
 
 `magpdf-pdfium` 仓库 2026-11-17 建好了：<https://github.com/jackwang0009/magpdf-pdfium>（公开，默认分支 `mag/main`）。
-下面四步做了第 1、3 步，`mag/main` 仍然靠 `patches/pdfium/*.patch` 随主仓库走：
+下面四步做了第 1、3、4 步；`patches/pdfium/*.patch` 还留着，和子模块指的是同一批提交：
 
 1. （已做）推送 `upstream`（`5f092b5299`）与 `mag/main`（`6537e3b998`）。当时是直接推到仓库地址，本地检出没有加远程；
    以后要常推，再 `git remote add magpdf <url>`。本地工作树里没提交的 Type3 改动没有推。
 2. 之后同步用 `sync.ps1 -MagRemote <url>`；`patches/pdfium/` 退役（保留到首个 tag 发布为止，作为可追溯记录）。
 3. （已做）把 `ci/build-pdfium.yml` 原样放进该仓库的 `.github/workflows/`（`mag/main` 上的 `[mag-local]` 提交 `636cfe4701`，
    用 GitHub 接口加的，本地检出里没有这个提交）。两边要保持一致。第一次运行无缓存 11 分 43 秒（V01 报告 4.5）。
-4. 在主仓库把它挂成子模块：`git submodule add -b mag/main <url> third_party/pdfium/src`，并在 `sync.ps1` 把默认 `-Root` 指向子模块所在目录
-   （子模块只含 PDFium 本体，DEPS 子仓库依然由 gclient 管理，因此 `.gclient` 要放在子模块的父目录）。
-   在此之前**不要**提交子模块，`.gitmodules` 保持为空。
+4. （已做）在主仓库挂成子模块 `third_party/pdfium/src`，记的是远程 `mag/main` 的 `636cfe4701`。子模块只含 PDFium 本体，
+   DEPS 子仓库依然由 gclient 管理，所以 `.gclient` 放在子模块的父目录，也就是这个目录（已经在主仓库的 `.gitignore` 里）。
+   - 克隆主仓库默认不取子模块，CI 也不取，都不受影响。要从子模块构建：
+     `git submodule update --init third_party/pdfium/src`（`.gitmodules` 里写了浅克隆，只取那一个提交）。
+   - 取下来之后，`sync.ps1`、`build.ps1` 不给目录时用的就是它（先后顺序见第 3 节）。`sync.ps1` 在子模块上不整理分支，
+     停在哪个提交由主仓库记着，只拉 DEPS、打补丁。
+   - 要在子模块里改 PDFium（提交、变基），先 `git -C third_party/pdfium/src fetch --unshallow` 把历史取全；
+     改完推到 `magpdf-pdfium`，再在主仓库提交子模块的新位置。
+   - 开发机上原来的检出 `D:\pdfium-src\pdfium` 照常能用：子模块没取下来时，脚本的默认目录还是它。
 
 ## 2. 环境要求（Windows x64）
 
@@ -98,6 +106,17 @@ pwsh third_party/pdfium/build.ps1 -Source D:\pdfium-src\pdfium -Jobs 12
 $env:PDFIUM_PREBUILT_DIR = 'D:\pdfium-src\pdfium\out\Release\dist'
 cargo test --workspace
 ```
+
+从子模块构建是同样三步，目录不用给：
+
+```powershell
+git submodule update --init third_party/pdfium/src    # 只做一次
+pwsh third_party/pdfium/sync.ps1 -NoHistory -Jobs 8   # 结果：third_party\pdfium\.gclient，DEPS 在 third_party\pdfium\src 里
+pwsh third_party/pdfium/build.ps1 -Jobs 12            # 结果：third_party\pdfium\src\out\Release\dist
+```
+
+两个脚本不给目录时按这个顺序找：环境变量（`sync.ps1` 是 `PDFIUM_ROOT`，`build.ps1` 是 `PDFIUM_SRC`）；
+子模块（`sync.ps1` 看它取下来没有，`build.ps1` 看它同步过没有）；都没有就是 `D:\pdfium-src`。
 
 `build.ps1` 常用参数：`-Config Debug`、`-Out <目录>`、`-Targets pdfium`（只编库）、`-Clean`（先 `gn clean`）、
 `-ExtraArgs 'symbol_level = 2'`、`-Version 159.0.8138.0`（离线或分支号推不出来时手工指定）、`-NoDist`。

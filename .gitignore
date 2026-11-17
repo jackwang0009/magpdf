@@ -15,6 +15,10 @@ coverage/
 
 # PDFium 预编译库：由 scripts/fetch-pdfium-prebuilt.ps1 拉取，不入库
 /third_party/pdfium-prebuilt/
+# 在子模块 third_party/pdfium/src 上同步时，gclient 写在它父目录里的东西（third_party/pdfium/README.md 第 1 节）
+/third_party/pdfium/.gclient*
+/third_party/pdfium/.gcs_entries
+/third_party/pdfium/.cipd/
 
 # 模型文件与 ONNX Runtime：由 models/fetch-models.ps1 按 manifest.json 下载，不入库
 /models/**/*.onnx

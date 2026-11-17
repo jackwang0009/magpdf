@@ -13,13 +13,19 @@
 #   pwsh third_party/pdfium/build.ps1 -Version 159.0.8138.0 -ExtraArgs 'symbol_level = 2'
 # 完成后：$env:PDFIUM_PREBUILT_DIR = "<Out>\dist"; cargo test --workspace
 #
-# 环境变量默认值：PDFIUM_SRC（源码目录）、HTTPS_PROXY（只用于在线查询 Chromium 主版本号，可不设）。
+# 源码目录（-Source）没给时：先看环境变量 PDFIUM_SRC；再看主仓库的子模块 third_party/pdfium/src 同步好了没有
+# （有 .gn 文件，也就是 sync.ps1 在子模块上跑过），同步好了就用它；都没有用本机约定的 D:\pdfium-src\pdfium。
+# 另一个环境变量 HTTPS_PROXY 只用于在线查询 Chromium 主版本号，可不设。
 # 细节、耗时与常见错误见同目录 README.md。
 #Requires -Version 5.1
 [CmdletBinding()]
 param(
-    # PDFium 源码目录（gclient 检出里的 pdfium/，含 .gn 与 BUILD.gn）
-    [string]$Source = $(if ($env:PDFIUM_SRC) { $env:PDFIUM_SRC } else { 'D:\pdfium-src\pdfium' }),
+    # PDFium 源码目录（gclient 检出里的 pdfium/ 或子模块 src/，含 .gn 与 BUILD.gn）
+    [string]$Source = $(
+        if ($env:PDFIUM_SRC) { $env:PDFIUM_SRC }
+        elseif (Test-Path (Join-Path $PSScriptRoot 'src\build\config\BUILDCONFIG.gn')) { Join-Path $PSScriptRoot 'src' }
+        else { 'D:\pdfium-src\pdfium' }
+    ),
     # 输出目录；相对路径相对于 Source（gn 惯例 out/Release）
     [string]$Out = '',
     [ValidateSet('Release', 'Debug')] [string]$Config = 'Release',

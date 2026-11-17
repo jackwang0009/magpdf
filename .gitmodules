@@ -1,0 +1,5 @@
+[submodule "third_party/pdfium/src"]
+	path = third_party/pdfium/src
+	url = https://github.com/jackwang0009/magpdf-pdfium.git
+	branch = mag/main
+	shallow = true
