@@ -1,8 +1,8 @@
-# PDFium 分支流水线草案（《工程规范》§7 "PDFium" 行：全量构建、C++ 测试、产出预编译库，60 分钟内）。
+# PDFium 分支流水线（《工程规范》§7 "PDFium" 行：全量构建、C++ 测试、产出预编译库，60 分钟内）。
 #
-# 这份文件放在 magpdf 主仓库里只是草案，复制到 magpdf-pdfium 仓库的 .github/workflows/build-pdfium.yml 才会运行。
-# 它在 magpdf-pdfium 的 mag/main 上运行，构建脚本和 args 仍取自 magpdf 主仓库 third_party/pdfium/（单一来源，
-# 见下面的 MAGPDF_REPO / MAGPDF_REF）。
+# 源头是 magpdf 主仓库的 third_party/pdfium/ci/build-pdfium.yml，部署在 magpdf-pdfium 的 .github/workflows/build-pdfium.yml，
+# 两边保持一致。它在 magpdf-pdfium 的 mag/main 上运行，构建脚本和 args 仍取自 magpdf 主仓库 third_party/pdfium/
+# （单一来源，见下面的 MAGPDF_REPO / MAGPDF_REF）。
 #
 # 产物：pdfium-win-x64-<MAJOR.MINOR.BUILD.PATCH>.zip，内容即 build.ps1 的 dist/（与 pdfium-binaries 布局一致，
 # 含 pdfium.dll.pdb），scripts/fetch-pdfium-prebuilt.ps1 之后可以直接改指向这里的 Release。
