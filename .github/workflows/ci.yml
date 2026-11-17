@@ -17,9 +17,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: pnpm
@@ -37,7 +37,7 @@ jobs:
     # 调试构建从开发服务器加载界面，不需要先构建前端；界面端到端测试不在这里跑（《测试计划》：每晚）。
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: 拉取 PDFium 预编译库
         run: pwsh scripts/fetch-pdfium-prebuilt.ps1
       - uses: dtolnay/rust-toolchain@stable
@@ -67,7 +67,7 @@ jobs:
           exit $code
       - name: 上传 cargo test 日志
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: cargo-test-log
           path: cargo-test.log
@@ -78,7 +78,7 @@ jobs:
           git diff --exit-code -- packages/protocol/src/generated
       - name: magpdf-cli 烟雾测试
         run: cargo run --locked -p magpdf-cli -- --help
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
       - name: 自制样本校验（往返测试的烟雾子集）
@@ -92,7 +92,7 @@ jobs:
         run: pwsh scripts/nightly-roundtrip.ps1 -Cli target/debug/magpdf-cli.exe -SkipCalibrate -RequireBaseline
       - name: 上传往返测试报告
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: roundtrip-report-pr
           path: |
@@ -106,7 +106,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check

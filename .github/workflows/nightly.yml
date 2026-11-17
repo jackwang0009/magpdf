@@ -37,7 +37,7 @@ jobs:
       # 定时触发时没有输入，按 any 算。
       FAIL_ON: ${{ inputs.fail_on || 'any' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: 拉取 PDFium 预编译库
         run: pwsh scripts/fetch-pdfium-prebuilt.ps1
       - uses: dtolnay/rust-toolchain@stable
@@ -46,7 +46,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: 构建发布版 magpdf-cli（pdfium.dll 会被复制到它旁边）
         run: cargo build --release --locked -p magpdf-cli
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
       - name: 安装测试用的 Python 包
@@ -54,7 +54,7 @@ jobs:
       - name: 报告工具的单元测试
         run: python -X dev -m unittest discover -s tests/corpus/tools -p "test_*.py"
       - name: PDFium 公开测试集的缓存
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: tests/out/corpus-cache/pdfium
           # 版本和内容指纹都固定在取文件的脚本里，脚本变了缓存就作废。
@@ -65,7 +65,7 @@ jobs:
         run: pwsh scripts/nightly-roundtrip.ps1 -RequireBaseline -FailOn $env:FAIL_ON
       - name: 上传报告页面和 JSON
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: roundtrip-report-${{ github.run_number }}
           # report.html 要和各语料集的 diff 目录放在一起才点得开原图。保存结果（saved）不传。
