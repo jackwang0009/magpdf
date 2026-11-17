@@ -167,7 +167,9 @@ else {
 if ($NoSync) { Step '-NoSync：跳过 gclient sync 与 DEPS 子仓库补丁' }
 else {
     Step "gclient sync -j$Jobs$(if ($NoHistory) { ' --no-history' })$(if ($NoHooks) { ' --nohooks' })"
-    # 不加 --reset / -D：DEPS 子仓库（如 build/）里可能有正在调试的本地改动，由 apply-patches.ps1 的幂等检查兜底
+    # 不加 --reset / -D：DEPS 子仓库（如 build/）里可能有正在调试的本地改动。
+    # 但 gclient 看到未提交的改动会拒绝更新，所以我们自己的补丁先撤下，同步完再打上（CI 恢复的缓存里就带着补丁）。
+    & (Join-Path $here 'apply-patches.ps1') -Source $src -Revert
     $syncArgs = @('sync', "-j$Jobs")
     if ($NoHistory) { $syncArgs += '--no-history' }
     if ($NoHooks) { $syncArgs += '--nohooks' }
