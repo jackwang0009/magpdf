@@ -98,6 +98,22 @@ def ops(files: list[dict[str, Any]]) -> dict[str, Any]:
     return {"files": files}
 
 
+def struct_side(status: str = "ok", problems: int = 0, **kinds: int) -> dict[str, Any]:
+    """`struct_check.py --json` 里一侧（原件或保存结果）的结果。"""
+    return {"status": status, "problems": problems, "kinds": dict(kinds)}
+
+
+def struct_file(path: str, source: str, original: dict[str, Any] | None = None, saved: dict[str, Any] | None = None, *, skipped: str = "") -> dict[str, Any]:
+    """`struct_check.py --json` 里的一个文件；没写的一侧是没问题。"""
+    if skipped:
+        return {"path": path, "source": source, "skipped": skipped}
+    return {"path": path, "source": source, "original": original or struct_side(), "saved": saved or struct_side()}
+
+
+def struct(files: list[dict[str, Any]]) -> dict[str, Any]:
+    return {"kind": "magpdf-struct-check", "version": 1, "tool": {"pikepdf": "10.17.0", "libqpdf": "12.4.2"}, "files": files}
+
+
 def many_pass_files(count: int, source: str = "office-word", *, objects: int = 1, prefix: str = "f") -> list[dict[str, Any]]:
     return [file(f"{prefix}{i:04d}.pdf", source, [page(0, objects=objects)]) for i in range(count)]
 
@@ -486,6 +502,77 @@ class CompareTests(unittest.TestCase):
         self.assertEqual(result.level, "ok", "条件不同只提示，不改判定")
 
 
+class StructTests(unittest.TestCase):
+    """结构校验：只统计，按“原件 / 保存结果各自有没有问题”分四类。"""
+
+    def sample(self) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        files = [
+            file("good.pdf", "office", [page(0)]),
+            file("repaired.pdf", "office", [page(0)]),
+            file("both.pdf", "office", [page(0)]),
+            file("broken.pdf", "office", [page(0)]),
+            file("crash.pdf", "office", [], status="crashed"),
+            file("x.pdf", "scans", [page(0)]),
+        ]
+        results = struct(
+            [
+                struct_file("good.pdf", "office"),
+                struct_file("repaired.pdf", "office", original=struct_side("problems", 2, xref=2)),
+                struct_file("both.pdf", "office", original=struct_side("unreadable", 1, xref=1), saved=struct_side("problems", 3, pages=2, stream=1)),
+                struct_file("broken.pdf", "office", saved=struct_side("error", 1, content=1)),
+                struct_file("crash.pdf", "office", skipped="no saved file"),
+                struct_file("x.pdf", "scans", original={**struct_side(), "undecoded": True}),
+            ]
+        )
+        return files, results
+
+    def test_files_fall_into_four_classes(self) -> None:
+        files, results = self.sample()
+        snap = model.load_run(roundtrip(files), None, results, name="set", source_prefix="real/")
+        self.assertTrue(snap.has_struct)
+        by_path = {f.path: f for f in snap.files}
+        self.assertEqual(
+            {path: f.struct.cls for path, f in by_path.items() if f.struct is not None},
+            {"good.pdf": "ok_ok", "repaired.pdf": "bad_ok", "both.pdf": "bad_bad", "broken.pdf": "ok_bad", "x.pdf": "ok_ok"},
+        )
+        self.assertIsNone(by_path["crash.pdf"].struct)
+        self.assertEqual(by_path["crash.pdf"].struct_note, "没有保存结果")
+
+        summaries = model.summarize_struct(snap.files)
+        self.assertEqual(list(summaries), ["real/office", "real/scans"], "按来源分开，来源带着语料集的前缀")
+        office = summaries["real/office"]
+        self.assertEqual((office.files, office.checked, office.not_checked), (5, 4, 1))
+        self.assertEqual((office.ok_ok, office.bad_ok, office.bad_bad, office.ok_bad), (1, 1, 1, 1))
+        self.assertEqual((office.original_bad, office.saved_bad), (2, 2))
+        self.assertEqual(office.saved_kinds, {"pages": 1, "stream": 1, "content": 1}, "各类问题涉及的文件数，只数保存结果有问题的文件")
+        self.assertEqual(summaries["real/scans"].undecoded, 1)
+
+        total = model.struct_total_of(summaries.values())
+        self.assertEqual((total.files, total.checked, total.ok_ok, total.ok_bad, total.undecoded), (6, 5, 2, 1, 1))
+        self.assertEqual(total.to_json()["saved_kinds"], {"stream": 1, "pages": 1, "content": 1})
+
+    def test_a_file_missing_from_the_result_counts_as_not_checked(self) -> None:
+        files = [file("a.pdf", "s", [page(0)]), file("b.pdf", "s", [page(0)])]
+        snap = model.load_run(roundtrip(files), None, struct([struct_file("a.pdf", "s")]), name="set")
+        summary = model.summarize_struct(snap.files)["s"]
+        self.assertEqual((summary.checked, summary.not_checked), (1, 1))
+        self.assertEqual({f.path: f.struct_note for f in snap.files}, {"a.pdf": "", "b.pdf": "结构校验的结果里没有这个文件"})
+        # 没给结构校验的结果：每个文件都算没查，快照上也标着没有。
+        plain = snapshot(files)
+        self.assertFalse(plain.has_struct)
+        self.assertEqual(model.summarize_struct(plain.files)["s"].not_checked, 2)
+
+    def test_struct_results_stay_out_of_the_baseline_and_the_verdict(self) -> None:
+        files, results = self.sample()
+        cur = model.load_run(roundtrip(files), None, results, name="set")
+        text = model.dumps_baseline(cur, {"has_ops": False})
+        self.assertNotIn("struct", text, "结构校验不进基线")
+        self.assertNotIn("ok_bad", text)
+        base = model.loads_baseline(text)
+        cmp = model.compare(base, cur)
+        self.assertEqual((cmp.level, cmp.alarms, cmp.worse), ("ok", [], []), "写坏了一个文件也不算退步：这一项只统计")
+
+
 class FingerprintTests(unittest.TestCase):
     def test_depends_on_names_and_bytes_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -667,10 +754,91 @@ class ReportTests(unittest.TestCase):
             self.assertNotIn("data:image", page_html)
             self.assertIn('href="run/diff/s__bad__p001_a.png"', page_html, "不内嵌缩略图时还有链接")
 
+    def test_structure_check_is_reported_but_does_not_fail_the_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            files = [
+                file("good.pdf", "office-word", [page(0)]),
+                file("repaired.pdf", "office-word", [page(0)]),
+                file("both.pdf", "office-word", [page(0)]),
+                file("broken.pdf", "office-word", [page(0)]),
+                file("crash.pdf", "office-word", [], status="crashed", exit_code=-2147483645),
+            ]
+            self.write_run(root, files)
+            results = struct(
+                [
+                    struct_file("good.pdf", "office-word"),
+                    struct_file("repaired.pdf", "office-word", original=struct_side("problems", 2, xref=2)),
+                    struct_file("both.pdf", "office-word", original=struct_side("unreadable", 1, xref=1), saved=struct_side("problems", 3, pages=2, stream=1)),
+                    struct_file("broken.pdf", "office-word", saved={**struct_side("problems", 1, stream=1), "messages": ["x.pdf (object 5 0, offset 9): 发货人 SAMPLE CO LTD"]}),
+                    struct_file("crash.pdf", "office-word", skipped="no saved file"),
+                ]
+            )
+            (root / "struct.json").write_text(json.dumps(results, ensure_ascii=False), encoding="utf-8")
+            common = ("--roundtrip", str(root / "roundtrip.json"), "--name", "office", "--out", str(root / "report.html"),
+                      "--summary", str(root / "summary.json"), "--markdown", str(root / "summary.md"))
+
+            # 没给结构校验的结果：页面上照样有这一节，写明这一次没有。
+            code, text = self.run_main(*common, "--baseline-out", str(root / "baselines"))
+            self.assertEqual(code, 0, text)
+            page_html = (root / "report.html").read_text(encoding="utf-8")
+            self.assertIn("这一次没有结构校验的结果", page_html)
+            summary = json.loads((root / "summary.json").read_text(encoding="utf-8"))
+            self.assertIsNone(summary["by_source"]["office-word"]["struct"])
+            self.assertEqual((summary["sets"][0]["has_struct"], summary["sets"][0]["struct"]), (False, None))
+            self.assertNotIn("结构校验", (root / "summary.md").read_text(encoding="utf-8"))
+
+            # 给了：一个文件被写坏，只提示、列出来，退出码不变（和自己的基线比，没有退步）。
+            with_struct = (*common, "--struct", str(root / "struct.json"), "--baseline", str(root / "baselines" / "office.json"))
+            code, text = self.run_main(*with_struct)
+            self.assertEqual(code, 0, text)
+            self.assertIn("结构校验：1 个文件原件没问题、保存结果有问题", text)
+            page_html = (root / "report.html").read_text(encoding="utf-8")
+            self.assertIn('class="banner ok"', page_html)
+            self.assertLess(page_html.index('id="ops"'), page_html.index('id="struct"'))
+            self.assertLess(page_html.index('id="struct"'), page_html.index('id="files"'))
+            section = page_html[page_html.index('id="struct"') : page_html.index('id="files"')]
+            for cell in (">5<", ">4<", ">1<"):
+                self.assertIn(cell, section)
+            self.assertIn("broken.pdf", section, "被写坏的文件要点名")
+            self.assertIn("both.pdf", section)
+            self.assertNotIn("repaired.pdf", section, "原件有问题、保存结果没问题的只计数")
+            self.assertIn("流的长度或解码 ×1", section)
+            self.assertIn("页树和页对象 ×2", section)
+            self.assertNotIn("SAMPLE CO LTD", page_html, "qpdf 的原话不上页面")
+            self.assertIn("pikepdf 10.17.0（里面的 qpdf 是 12.4.2）", section, "页面上写明是拿什么查的")
+            self.assertIn("不查线性化", section)
+            summary = json.loads((root / "summary.json").read_text(encoding="utf-8"))
+            self.assertEqual((summary["level"], summary["exit_code"]), ("ok", 0))
+            source = summary["by_source"]["office-word"]["struct"]
+            self.assertEqual(
+                {k: source[k] for k in ("files", "checked", "not_checked", "ok_ok", "bad_ok", "bad_bad", "ok_bad", "original_bad", "saved_bad")},
+                {"files": 5, "checked": 4, "not_checked": 1, "ok_ok": 1, "bad_ok": 1, "bad_bad": 1, "ok_bad": 1, "original_bad": 2, "saved_bad": 2},
+            )
+            self.assertEqual(summary["sets"][0]["struct_broken_by_roundtrip"], ["broken.pdf"])
+            self.assertTrue(summary["sets"][0]["has_struct"])
+            markdown = (root / "summary.md").read_text(encoding="utf-8")
+            self.assertIn("| office-word | 4 | 1 | 1 | 1 | 1 | 1 |", markdown)
+            self.assertIn("原件没问题、保存结果有问题的文件（1）", markdown)
+            self.assertIn("`broken.pdf`", markdown)
+            self.assertNotIn("SAMPLE CO LTD", markdown)
+            # 结构校验不进候选基线。
+            self.run_main(*with_struct, "--baseline-out", str(root / "candidate"))
+            self.assertNotIn("struct", (root / "candidate" / "office.json").read_text(encoding="utf-8"))
+
+            # 换成 qpdf --check 这个命令查的结果：页面上跟着改口。
+            results["tool"] = {"qpdf": "qpdf version 12.4.2"}
+            (root / "struct.json").write_text(json.dumps(results, ensure_ascii=False), encoding="utf-8")
+            self.run_main(*with_struct)
+            page_html = (root / "report.html").read_text(encoding="utf-8")
+            self.assertIn("qpdf --check 这个命令（qpdf version 12.4.2）", page_html)
+            self.assertNotIn("check_pdf_syntax", page_html)
+
     def test_run_manifest_with_two_sets(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             self.write_run(root / "synthetic", [file("a.pdf", "synthetic", [page(0), diff_page(1)])])
+            (root / "synthetic" / "struct.json").write_text(json.dumps(struct([struct_file("a.pdf", "synthetic")])), encoding="utf-8")
             self.write_run(root / "public", [file("x.pdf", "resources", [page(0)]), file("pixel/y.pdf", "pixel", [page(0)])])
             calibrate = roundtrip([file("x.pdf", "resources", [page(0)]), file("pixel/y.pdf", "pixel", [diff_page(0)])])
             (root / "public" / "calibrate.json").write_text(json.dumps(calibrate), encoding="utf-8")
@@ -688,9 +856,10 @@ class ReportTests(unittest.TestCase):
                 "pdfium_dll_sha256": "abc",
                 "sets": [
                     {"name": "synthetic", "title": "自制样本", "source_prefix": "", "roundtrip": "synthetic/roundtrip.json", "ops": "synthetic/ops.json",
-                     "baseline": str(base_dir / "synthetic.json"), "seconds": {"roundtrip": 0.9}},
+                     "struct": "synthetic/struct.json", "baseline": str(base_dir / "synthetic.json"), "seconds": {"roundtrip": 0.9, "struct_check": 0.4}},
                     {"name": "public-pdfium", "title": "PDFium 公开测试集", "source_prefix": "public/pdfium/", "roundtrip": "public/roundtrip.json",
-                     "ops": "public/ops.json", "calibrate": "public/calibrate.json", "baseline": str(base_dir / "public-pdfium.json")},
+                     "ops": "public/ops.json", "calibrate": "public/calibrate.json", "baseline": str(base_dir / "public-pdfium.json"),
+                     "struct_error": "struct_check.py 退出码 1"},
                 ],
             }
             (root / "run.json").write_text(json.dumps(run, ensure_ascii=False), encoding="utf-8")
@@ -704,7 +873,13 @@ class ReportTests(unittest.TestCase):
             self.assertEqual(summary["sets"][1]["calibration"], {"compared": 2, "failed": 1, "crashed": 0})
             self.assertEqual(summary["sets"][1]["baseline_problem"], "基线文件不存在")
             self.assertEqual(summary["sets"][0]["baseline"]["level"], "ok", "基线里没有操作符级结果、这次有：只提示")
+            # 结构校验：一个语料集做了，另一个没做成，各写各的。
+            self.assertIn("PDFium 公开测试集：结构校验没做成（struct_check.py 退出码 1）", text)
+            self.assertEqual([s["has_struct"] for s in summary["sets"]], [True, False])
+            self.assertEqual(summary["by_source"]["synthetic"]["struct"]["ok_ok"], 1)
+            self.assertIsNone(summary["by_source"]["public/pdfium/pixel"]["struct"])
             page_html = (root / "report.html").read_text(encoding="utf-8")
+            self.assertIn("结构校验 0.4 s", page_html)
             self.assertIn("PDFium 公开测试集 小计", page_html)
             self.assertIn("合计（仅供参考）", page_html)
             self.assertIn('class="banner worse"', page_html)

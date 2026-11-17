@@ -22,6 +22,10 @@ roundtrip_report.py 里生成；这里不碰图片，也不写页面，方便单
 - 没到报警线但要处理：有新变坏的页（基线里无差异，这次不是）；基线里有的文件这次没跑到；
   有文件从正常变成打不开或保存失败；基线里有操作符级结果、这次没有。
 - 新变好的页、基线里没有的新文件只提示，不算退步。
+
+结构校验（struct_check.py 的结果，《方案》13.2 第 4 项）：只统计，不进基线，不算退步。有保存结果的文件按
+“原件 / 保存结果各自有没有问题”分四类；“原件没问题、保存结果有问题”的文件另外提示一句。判定怎么写还没有定
+（《P0 第二轮文档修订记录》C13）。
 """
 
 from __future__ import annotations
@@ -79,6 +83,38 @@ DEFAULT_MAX_DROP_PP = 0.5
 
 CRASH_STATUSES = ("crashed", "timed_out")
 
+#: 结构校验一侧（原件或保存结果）的结果，和 struct_check.py 写出的 status 一致。
+STRUCT_STATUS_LABELS = {
+    "ok": "没问题",
+    "problems": "查出问题",
+    "unreadable": "打不开",
+    "error": "查到一半出错",
+}
+
+#: 结构校验查出的问题归成的几类，和 struct_check.py 的 KINDS 一致。
+STRUCT_KIND_LABELS = {
+    "xref": "交叉引用表和文件尾",
+    "stream": "流的长度或解码",
+    "object": "对象语法",
+    "pages": "页树和页对象",
+    "content": "内容流",
+    "password": "要口令",
+    "other": "其他",
+}
+
+#: 一个文件按“原件 / 保存结果各自有没有问题”分的四类。
+STRUCT_CLASSES = ("ok_ok", "bad_ok", "bad_bad", "ok_bad")
+STRUCT_CLASS_LABELS = {
+    "ok_ok": "原件和保存结果都没问题",
+    "bad_ok": "原件有问题，保存结果没问题",
+    "bad_bad": "原件和保存结果都有问题",
+    "ok_bad": "原件没问题，保存结果有问题",
+}
+
+STRUCT_SKIP_LABELS = {
+    "no saved file": "没有保存结果",
+}
+
 
 @dataclass
 class Page:
@@ -125,6 +161,34 @@ class Page:
 
 
 @dataclass
+class StructSide:
+    """结构校验里一侧（原件或保存结果）的结果。"""
+
+    status: str  # ok / problems / unreadable / error
+    problems: int = 0  # 查出的问题条数
+    kinds: dict[str, int] = field(default_factory=dict)  # 按 STRUCT_KIND_LABELS 的几类计数
+    #: 有这台机器解不了的流（pikepdf 的轮子里没有 JBIG2 解码器），这些流没有查到。
+    undecoded: bool = False
+
+    @property
+    def good(self) -> bool:
+        return self.status == "ok"
+
+
+@dataclass
+class StructPair:
+    """一个文件的结构校验结果：原件一侧、保存结果一侧。"""
+
+    original: StructSide
+    saved: StructSide
+
+    @property
+    def cls(self) -> str:
+        """STRUCT_CLASSES 里的一类。"""
+        return ("ok" if self.original.good else "bad") + "_" + ("ok" if self.saved.good else "bad")
+
+
+@dataclass
 class FileResult:
     path: str  # 相对语料目录的路径，分隔符是 /
     source: str  # 来源，已经带上语料集的前缀
@@ -134,6 +198,9 @@ class FileResult:
     exit_code: int | None = None
     #: 这个文件整个没做成操作符级比对的原因。
     ops_note: str = ""
+    #: 结构校验的结果；None = 这个文件没有查（没有保存结果，或者结构校验的结果里没有它）。
+    struct: StructPair | None = None
+    struct_note: str = ""
 
 
 @dataclass
@@ -144,6 +211,7 @@ class Snapshot:
     files: list[FileResult] = field(default_factory=list)
     meta: dict[str, Any] = field(default_factory=dict)
     has_ops: bool = False
+    has_struct: bool = False
 
     def page_count(self) -> int:
         return sum(len(f.pages) for f in self.files)
@@ -222,15 +290,41 @@ def _attach_ops(result: FileResult, record: dict[str, Any] | None) -> None:
         }
 
 
+def _struct_side(record: Any) -> StructSide | None:
+    if not isinstance(record, dict) or record.get("status") not in STRUCT_STATUS_LABELS:
+        return None
+    kinds = record.get("kinds") if isinstance(record.get("kinds"), dict) else {}
+    return StructSide(
+        status=str(record["status"]),
+        problems=int(record.get("problems") or 0),
+        kinds={str(k): int(v) for k, v in kinds.items() if int(v)},
+        undecoded=bool(record.get("undecoded")),
+    )
+
+
+def _attach_struct(result: FileResult, record: dict[str, Any] | None) -> None:
+    """把 struct_check.py 的一个文件记录挂到文件上。"""
+    if record is None:
+        result.struct_note = "结构校验的结果里没有这个文件"
+        return
+    original, saved = _struct_side(record.get("original")), _struct_side(record.get("saved"))
+    if original is None or saved is None:
+        reason = str(record.get("skipped") or "没有结果")
+        result.struct_note = STRUCT_SKIP_LABELS.get(reason, reason)
+        return
+    result.struct = StructPair(original, saved)
+
+
 def load_run(
     roundtrip: dict[str, Any],
     ops: dict[str, Any] | None = None,
+    struct: dict[str, Any] | None = None,
     *,
     name: str,
     source_prefix: str = "",
     root_source: str = "",
 ) -> Snapshot:
-    """把一次 `roundtrip --json`（和可选的 `ops_diff.py --json`）读成 Snapshot。
+    """把一次 `roundtrip --json`（和可选的 `ops_diff.py --json`、`struct_check.py --json`）读成 Snapshot。
 
     来源 = `source_prefix` + 命令行工具给的来源（输入目录下的第一级子目录名，直接放在输入目录下的文件用输入目录的名字）。
     给了 `root_source` 时，直接放在输入目录下的文件改用它：来源名就不跟着输入目录叫什么变了
@@ -240,6 +334,10 @@ def load_run(
     if ops is not None:
         for record in ops.get("files") or []:
             ops_by_path[str(record.get("path"))] = record
+    struct_by_path: dict[str, dict[str, Any]] = {}
+    if struct is not None:
+        for record in struct.get("files") or []:
+            struct_by_path[str(record.get("path"))] = record
     files: list[FileResult] = []
     for entry in roundtrip.get("files") or []:
         source = str(entry.get("source") or "")
@@ -255,6 +353,8 @@ def load_run(
         )
         if ops is not None:
             _attach_ops(result, ops_by_path.get(result.path))
+        if struct is not None:
+            _attach_struct(result, struct_by_path.get(result.path))
         files.append(result)
     files.sort(key=lambda f: (f.source, f.path))
     tool = roundtrip.get("tool") or {}
@@ -271,7 +371,10 @@ def load_run(
         "started_unix_s": roundtrip.get("started_unix_s"),
         "elapsed_ms": roundtrip.get("elapsed_ms"),
     }
-    return Snapshot(name=name, files=files, meta=meta, has_ops=ops is not None)
+    if struct is not None and isinstance(struct.get("tool"), dict):
+        # 结构校验是拿什么查的：pikepdf（{"pikepdf": 版本, "libqpdf": 版本}）还是 qpdf --check（{"qpdf": 版本}）。
+        meta["struct_tool"] = {str(k): str(v) for k, v in struct["tool"].items()}
+    return Snapshot(name=name, files=files, meta=meta, has_ops=ops is not None, has_struct=struct is not None)
 
 
 # ---------------------------------------------------------------------------
@@ -450,6 +553,82 @@ def summarize(files: Iterable[FileResult]) -> dict[str, Summary]:
 def total_of(summaries: Iterable[Summary]) -> Summary:
     """合计。只作参考：方案 13.1 要求按来源分别报告。"""
     total = Summary()
+    for summary in summaries:
+        total.add(summary)
+    return total
+
+
+@dataclass
+class StructSummary:
+    """一个来源（或小计）的结构校验汇总。只统计，不参加退步判定。"""
+
+    files: int = 0  # 这个来源的文件数
+    checked: int = 0  # 查了的：有保存结果，原件和保存结果各查了一遍
+    not_checked: int = 0  # 没查的：没有保存结果（打不开、崩溃、超时的文件）
+    ok_ok: int = 0
+    bad_ok: int = 0
+    bad_bad: int = 0
+    ok_bad: int = 0
+    undecoded: int = 0  # 查了的文件里，有解不了的流（没查到那些流）的
+    #: 保存结果有问题的文件里，各类问题涉及的文件数。
+    saved_kinds: dict[str, int] = field(default_factory=dict)
+
+    def add_file(self, file: FileResult) -> None:
+        self.files += 1
+        pair = file.struct
+        if pair is None:
+            self.not_checked += 1
+            return
+        self.checked += 1
+        setattr(self, pair.cls, getattr(self, pair.cls) + 1)
+        if pair.original.undecoded or pair.saved.undecoded:
+            self.undecoded += 1
+        if not pair.saved.good:
+            for kind in pair.saved.kinds:
+                self.saved_kinds[kind] = self.saved_kinds.get(kind, 0) + 1
+
+    def add(self, other: "StructSummary") -> None:
+        for name in ("files", "checked", "not_checked", "ok_ok", "bad_ok", "bad_bad", "ok_bad", "undecoded"):
+            setattr(self, name, getattr(self, name) + getattr(other, name))
+        for kind, count in other.saved_kinds.items():
+            self.saved_kinds[kind] = self.saved_kinds.get(kind, 0) + count
+
+    @property
+    def original_bad(self) -> int:
+        """原件自己就过不了检查的。"""
+        return self.bad_ok + self.bad_bad
+
+    @property
+    def saved_bad(self) -> int:
+        """保存结果过不了检查的。"""
+        return self.bad_bad + self.ok_bad
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "files": self.files,
+            "checked": self.checked,
+            "not_checked": self.not_checked,
+            "ok_ok": self.ok_ok,
+            "bad_ok": self.bad_ok,
+            "bad_bad": self.bad_bad,
+            "ok_bad": self.ok_bad,
+            "original_bad": self.original_bad,
+            "saved_bad": self.saved_bad,
+            "undecoded": self.undecoded,
+            "saved_kinds": {k: self.saved_kinds[k] for k in STRUCT_KIND_LABELS if self.saved_kinds.get(k)},
+        }
+
+
+def summarize_struct(files: Iterable[FileResult]) -> dict[str, StructSummary]:
+    """结构校验按来源汇总，键按来源名排序。"""
+    by_source: dict[str, StructSummary] = {}
+    for file in files:
+        by_source.setdefault(file.source, StructSummary()).add_file(file)
+    return dict(sorted(by_source.items()))
+
+
+def struct_total_of(summaries: Iterable[StructSummary]) -> StructSummary:
+    total = StructSummary()
     for summary in summaries:
         total.add(summary)
     return total

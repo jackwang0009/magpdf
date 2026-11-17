@@ -1,12 +1,13 @@
 ﻿<#
 .SYNOPSIS
-  每晚的往返测试（V14）：全量往返（隔离模式）、校准轮、操作符级比对、报告页面、和基线比较。本机和流水线用同一个脚本。
+  每晚的往返测试（V14）：全量往返（隔离模式）、校准轮、操作符级比对、结构校验、报告页面、和基线比较。本机和流水线用同一个脚本。
 
 .DESCRIPTION
   对每个语料集依次做：
     1. magpdf-cli roundtrip --isolate：写 JSON、没通过的页的三张图、保存结果
     2. magpdf-cli roundtrip --calibrate：校准轮，不重写内容流，应当全部无差异（-SkipCalibrate 跳过）
     3. tests/corpus/tools/ops_diff.py：操作符级比对（-SkipOpsDiff 跳过）
+    4. tests/corpus/tools/struct_check.py：结构校验，原件和保存结果各查一遍；只统计，不进基线，不算退步（-SkipStructCheck 跳过）
   然后用 tests/corpus/tools/roundtrip_report.py 生成报告页面，并和 tests/baselines/roundtrip/<语料集>.json 比较。
 
   语料集：
@@ -22,7 +23,7 @@
     summary.json、summary.md            机器可读的摘要、Markdown 摘要
     run.json、timings.json              这一次的输入和环境、各步耗时
     baseline-candidate/<语料集>.json    这一次的结果，按基线的格式写出
-    <语料集>/roundtrip.json、calibrate.json、ops.json、diff/、saved/
+    <语料集>/roundtrip.json、calibrate.json、ops.json、struct.json、diff/、saved/
 
   退出码：0 没有退步（或者没有基线）；2 到了报警线；3 有退步但没到报警线；1 脚本或工具出错。
   规则见 tests/baselines/README.md。
@@ -38,6 +39,10 @@
 
 .PARAMETER RequireBaseline
   有语料集没有基线时退出码 1（流水线上用，免得基线被删了还一路绿）。
+
+.PARAMETER Qpdf
+  qpdf 可执行文件。给了，结构校验就改用 `qpdf --check` 这个命令来查（它比默认的 pikepdf 多查线性化、表单域、书签和名称树）；
+  没给也可以用环境变量 MAGPDF_QPDF。流水线上没有装 qpdf，不给这个参数。
 
 .EXAMPLE
   pwsh scripts/nightly-roundtrip.ps1 -Cli D:\workspace\magpdf-wt\bin\magpdf-cli.exe -PublicPdfium D:\tmp\v03-public\testing\resources
@@ -58,7 +63,9 @@ param(
     [switch]$RequireBaseline,
     [switch]$SkipCalibrate,
     [switch]$SkipOpsDiff,
+    [switch]$SkipStructCheck,
     [switch]$SkipSynthetic,
+    [string]$Qpdf = '',
     [string]$Python = 'python'
 )
 $ErrorActionPreference = 'Stop'
@@ -105,6 +112,11 @@ try {
     if (Test-Path $dll -PathType Leaf) { $dllHash = (Get-FileHash $dll -Algorithm SHA256).Hash.ToLower() }
     $pythonVersion = @(& $Python --version)[0]
     if ($LASTEXITCODE -ne 0) { throw "找不到 Python（$Python）" }
+    if (-not $Qpdf) { $Qpdf = "$env:MAGPDF_QPDF" }
+    if ($Qpdf) {
+        if (-not (Test-Path $Qpdf -PathType Leaf)) { throw "找不到 qpdf：$Qpdf" }
+        $Qpdf = (Resolve-Path $Qpdf).Path
+    }
 
     if (-not $OutDir) { $OutDir = Join-Path $root 'tests\out\nightly' }
     $OutDir = Get-FullPath $OutDir
@@ -225,6 +237,24 @@ try {
             $steps["$name.ops_diff"] = $seconds.ops_diff
         }
 
+        # 4. 结构校验：原件和保存结果各查一遍。只统计，不进基线，也不算退步；做不成同样不让整轮失败。
+        $structJson = $null; $structError = ''
+        if (-not $SkipStructCheck) {
+            $structJson = Join-Path $setDir 'struct.json'
+            $structArgs = @('--roundtrip', $roundtripJson, '--save-dir', (Join-Path $setDir 'saved'), '--json', $structJson, '--max-list', '0')
+            if ($Qpdf) { $structArgs += @('--qpdf', $Qpdf) }
+            $watch = [Diagnostics.Stopwatch]::StartNew()
+            & $Python -X dev (Join-Path $tools 'struct_check.py') @structArgs |
+                Set-Content -Path (Join-Path $setDir 'struct.txt') -Encoding utf8
+            if ($LASTEXITCODE -ne 0 -or -not (Test-Path $structJson)) {
+                $structError = "struct_check.py 退出码 $LASTEXITCODE"
+                Write-Warning "结构校验没做成（$name）：$structError"
+                $structJson = $null
+            }
+            $seconds.struct_check = Get-Seconds $watch
+            $steps["$name.struct_check"] = $seconds.struct_check
+        }
+
         $record = [ordered]@{
             name = $name; title = $set.title; source_prefix = $set.prefix; root_source = $set.rootSource
             corpus_dir = $set.dir
@@ -236,6 +266,8 @@ try {
         if ($calibrateJson) { $record.calibrate = "$name/calibrate.json" }
         if ($opsJson) { $record.ops = "$name/ops.json" }
         if ($opsError) { $record.ops_error = $opsError }
+        if ($structJson) { $record.struct = "$name/struct.json" }
+        if ($structError) { $record.struct_error = $structError }
         $setRecords += $record
     }
 

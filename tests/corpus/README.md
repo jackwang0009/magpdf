@@ -34,6 +34,8 @@ pwsh scripts/nightly-roundtrip.ps1 -PublicPdfium <PDFium 的 testing\resources> 
 ```
 
 - `tools/roundtrip_report.py`：报告页面和退步判定（`roundtrip_model.py` 是口径和规则，`test_roundtrip_report.py` 是它们的单元测试）。
+- `tools/struct_check.py`：结构校验，原件和保存结果各查一遍（pikepdf，做的事和 `qpdf --check` 差不多；`--qpdf` 改用那个命令本身）。
+  只统计，不算退步；`test_struct_check.py` 是它的单元测试。
 - `tools/corpus_fingerprint.py`：语料指纹，用来确认两次跑的是同一批文件。
 - `tools/tamper_baseline.py`：故意改一份基线，验证退步检测还管用。
 - 基线存什么、什么时候更新、怎么审：`tests/baselines/README.md`。做法和本机结果：`docs/p0/V14-每晚往返与分类报告.md`。

@@ -8,12 +8,12 @@
 
 用法二（手里只有一份 roundtrip 的 JSON 时）：
     python tests/corpus/tools/roundtrip_report.py --roundtrip tests/out/x.json [--ops tests/out/x-ops.json] \
-        [--diff-dir tests/out/x-diff] [--name NAME] [--source-prefix public/pdfium/] \
+        [--struct tests/out/x-struct.json] [--diff-dir tests/out/x-diff] [--name NAME] [--source-prefix public/pdfium/] \
         [--baseline tests/baselines/roundtrip/NAME.json] --out tests/out/x-report.html
 
 页面里有：按来源的汇总表（全部比对页、扣除无对象页两种口径）、和基线的比较（新变坏的页、新变好的页、各来源比例的变化）、
-没通过的页（差异像素数、最大连通区域、三张图）、操作符级比对、崩溃超时和打不开的文件。口径和退步判定的规则见
-roundtrip_model.py 开头。
+没通过的页（差异像素数、最大连通区域、三张图）、操作符级比对、结构校验（struct_check.py 的结果，只统计）、
+崩溃超时和打不开的文件。口径和退步判定的规则见 roundtrip_model.py 开头。
 
 页面是一个文件：样式写在页面里，没有脚本，不引用外网的东西；缩略图内嵌，点开看的原图是相对路径（--diff-dir 里的 PNG），
 所以整个输出目录一起拿走才点得开原图。页面里只有文件的相对路径、页码和数字，不放文档里的文字；崩溃文件错误信息里
@@ -51,6 +51,8 @@ from roundtrip_model import (  # noqa: E402
     OPS_KEYS,
     OPS_LABELS,
     PIXEL_LABELS,
+    STRUCT_KIND_LABELS,
+    STRUCT_STATUS_LABELS,
     BaselineError,
     Comparison,
     FileResult,
@@ -58,12 +60,16 @@ from roundtrip_model import (  # noqa: E402
     PageChange,
     Snapshot,
     SourceDelta,
+    StructSide,
+    StructSummary,
     Summary,
     compare,
     dumps_baseline,
     load_run,
     loads_baseline,
+    struct_total_of,
     summarize,
+    summarize_struct,
     total_of,
 )
 
@@ -98,6 +104,8 @@ class SetInput:
     root_source: str = ""
     ops: Path | None = None
     ops_error: str = ""
+    struct: Path | None = None
+    struct_error: str = ""
     diff_dir: Path | None = None
     calibrate: Path | None = None
     baseline: Path | None = None
@@ -161,6 +169,10 @@ class Report:
     def by_source(self) -> dict[str, Summary]:
         return summarize(f for s in self.sets for f in s.snapshot.files)
 
+    def struct_by_source(self) -> dict[str, StructSummary]:
+        """结构校验按来源汇总，只算做了结构校验的语料集。"""
+        return summarize_struct(f for s in self.sets if s.snapshot.has_struct for f in s.snapshot.files)
+
     def source_delta(self, source: str) -> SourceDelta | None:
         for s in self.sets:
             if s.comparison is not None and source in s.comparison.sources:
@@ -173,10 +185,29 @@ def read_json(path: Path) -> Any:
         return json.load(f)
 
 
+def broken_by_roundtrip(files: Iterable[FileResult]) -> list[FileResult]:
+    """结构校验里“原件没问题、保存结果有问题”的文件：往返把好文件写坏了。"""
+    return [f for f in files if f.struct is not None and f.struct.cls == "ok_bad"]
+
+
+def struct_tool_text(meta: dict[str, Any]) -> str:
+    """结构校验是拿什么查的，给页面上用的一句话。两种查法查的东西不完全一样，页面上要写明是哪一种。"""
+    tool = meta.get("struct_tool") or {}
+    if tool.get("qpdf"):
+        return f"qpdf --check 这个命令（{tool['qpdf']}）"
+    if tool.get("pikepdf"):
+        return (
+            f"pikepdf {tool['pikepdf']}（里面的 qpdf 是 {tool.get('libqpdf') or '?'}）的 check_pdf_syntax()；"
+            "它和 qpdf --check 做的事差不多，但不是同一个命令，不查线性化、表单域、书签和名称树"
+        )
+    return "pikepdf 的 check_pdf_syntax()（和 qpdf --check 做的事差不多，不是同一个命令）"
+
+
 def load_set(spec: SetInput) -> SetReport:
     ops = read_json(spec.ops) if spec.ops is not None and spec.ops.is_file() else None
+    struct = read_json(spec.struct) if spec.struct is not None and spec.struct.is_file() else None
     naming = {"name": spec.name, "source_prefix": spec.source_prefix, "root_source": spec.root_source}
-    snapshot = load_run(read_json(spec.roundtrip), ops, **naming)
+    snapshot = load_run(read_json(spec.roundtrip), ops, struct, **naming)
     if spec.corpus_dir is not None and spec.corpus_dir.is_dir():
         snapshot.meta["corpus"] = corpus_fingerprint(spec.corpus_dir)
     report = SetReport(spec=spec, snapshot=snapshot)
@@ -226,6 +257,15 @@ def build_report(specs: list[SetInput], env: dict[str, Any], max_drop_pp: float 
             report.notices.append(f"{prefix}{current.baseline_problem or '没有给基线'}，这一批没有做退步判定。")
         if spec.ops_error:
             report.notices.append(f"{prefix}操作符级比对没做成（{spec.ops_error}）。")
+        if spec.struct_error:
+            report.notices.append(f"{prefix}结构校验没做成（{spec.struct_error}）。")
+        broken = broken_by_roundtrip(current.snapshot.files)
+        if broken:
+            # 只统计，不算退步：判定怎么写还没有定（《P0 第二轮文档修订记录》C13）。
+            report.notices.append(
+                f"{prefix}结构校验：{len(broken)} 个文件原件没问题、保存结果有问题（往返把好文件写坏了）；"
+                "这一项现在只统计，不算退步，文件列在第 5 节。"
+            )
         cal = current.calibration
         if cal is not None and (cal.failed or cal.crashed):
             report.worse.append(
@@ -1002,10 +1042,96 @@ class HtmlBuilder:
                 )
         return "".join(out)
 
-    # ---- 5. 没能比对的 --------------------------------------------------
+    # ---- 5. 结构校验 ----------------------------------------------------
+
+    def struct_row(self, name: str, s: StructSummary, *, cls: str = "") -> str:
+        return (
+            f'<tr class="{cls}"><td>{esc(name)}</td><td class="n">{num(s.files)}</td><td class="n">{num(s.checked)}</td>'
+            f'<td class="n">{num(s.ok_ok)}</td><td class="n">{num(s.bad_ok)}</td><td class="n">{num(s.bad_bad)}</td>'
+            f'<td class="n">{_alert_num(s.ok_bad)}</td><td class="n">{num(s.not_checked)}</td>'
+            f'<td class="n">{num(s.undecoded)}</td></tr>'
+        )
+
+    def struct_section(self) -> str:
+        report = self.report
+        out = ['<h2 id="struct">5. 结构校验（只统计，不算退步）</h2>']
+        if not any(s.snapshot.has_struct for s in report.sets):
+            out.append("<p>这一次没有结构校验的结果（没有给 <code>struct_check.py --json</code> 的输出）。</p>")
+            return "".join(out)
+        tool = next((struct_tool_text(s.snapshot.meta) for s in report.sets if s.snapshot.has_struct), "")
+        out.append(
+            '<p class="sub">每个有保存结果的文件，原件和保存结果各查一遍：读交叉引用表和文件尾、把每条流解一遍、把每页的内容流过一遍。'
+            f"用的是 {esc(tool)}。"
+            "这一节只统计：不进基线，不参加上面的退步判定，《方案》13.2 第 4 项的判定怎么写还没有定。"
+            "要盯的是“原件没问题、保存结果有问题”一列：那是往返把好文件写坏了。</p>"
+        )
+        head = (
+            "<tr><th>来源</th><th class=n>文件</th><th class=n>查了的<br>（有保存结果）</th><th class=n>原件和保存结果<br>都没问题</th>"
+            "<th class=n>原件有问题<br>保存结果没问题</th><th class=n>原件和保存结果<br>都有问题</th>"
+            "<th class=n>原件没问题<br>保存结果有问题</th><th class=n>没查<br>（没有保存结果）</th><th class=n>有解不了的流</th></tr>"
+        )
+        rows = []
+        for current in report.sets:
+            if not current.snapshot.has_struct:
+                continue
+            by_source = summarize_struct(current.snapshot.files)
+            for source, s in by_source.items():
+                rows.append(self.struct_row(source, s))
+            if len(by_source) > 1:
+                rows.append(self.struct_row(f"{current.spec.title} 小计", struct_total_of(by_source.values()), cls="subtotal"))
+        out.append(f'<div class="scroll"><table>{head}{"".join(rows)}</table></div>')
+        out.append(
+            '<p class="sub">“有问题”包括三种：打得开但查出了问题（qpdf 绕得过去的损坏）、打不开、查到一半出错。'
+            "“没查”的是没有保存结果的文件（原件打不开、崩溃、超时）。“有解不了的流”是 pikepdf 报的：文件里有它解不了的流"
+            "（轮子里没有 JBIG2 解码器），那些流没有查到，其余照查；用 qpdf 这个命令查时不报这一项。</p>"
+        )
+
+        def side_text(side: StructSide) -> str:
+            label = STRUCT_STATUS_LABELS.get(side.status, side.status)
+            return f"{label}（{side.problems} 条）" if side.problems else label
+
+        def kinds_text(side: StructSide) -> str:
+            return "、".join(f"{STRUCT_KIND_LABELS.get(kind, kind)} ×{count}" for kind, count in side.kinds.items()) or "—"
+
+        for current in report.sets:
+            if not current.snapshot.has_struct:
+                continue
+            broken = broken_by_roundtrip(current.snapshot.files)
+            if broken:
+                rows = [
+                    f'<tr><td>{esc(f.source)}</td><td class="path">{esc(f.path)}</td><td>{esc(side_text(f.struct.saved))}</td>'
+                    f"<td>{esc(kinds_text(f.struct.saved))}</td></tr>"
+                    for f in broken
+                    if f.struct is not None
+                ]
+                out.append(
+                    f'<h3>{esc(current.spec.title)}：<span class="tag bad">原件没问题、保存结果有问题</span> {len(broken)} 个文件</h3>'
+                    '<div class="scroll"><table><tr><th>来源</th><th>文件</th><th>保存结果</th><th>问题是哪一类</th></tr>'
+                    + "".join(rows)
+                    + "</table></div>"
+                )
+            both = [f for f in current.snapshot.files if f.struct is not None and f.struct.cls == "bad_bad"]
+            if both:
+                rows = [
+                    f'<tr><td>{esc(f.source)}</td><td class="path">{esc(f.path)}</td><td>{esc(side_text(f.struct.original))}</td>'
+                    f"<td>{esc(side_text(f.struct.saved))}</td><td>{esc(kinds_text(f.struct.saved))}</td></tr>"
+                    for f in both
+                    if f.struct is not None
+                ]
+                out.append(
+                    f"<details><summary>{esc(current.spec.title)}：原件和保存结果都有问题的 {len(both)} 个文件"
+                    "（原件本来就过不了检查）</summary>"
+                    '<div class="scroll"><table><tr><th>来源</th><th>文件</th><th>原件</th><th>保存结果</th><th>保存结果的问题是哪一类</th></tr>'
+                    + "".join(rows)
+                    + "</table></div></details>"
+                )
+        out.append('<p class="sub">qpdf 报的原话里有对象号和偏移，没有放到页面上；要看，在本机用 <code>struct_check.py --messages</code> 重查那个文件。</p>')
+        return "".join(out)
+
+    # ---- 6. 没能比对的 --------------------------------------------------
 
     def files_section(self) -> str:
-        out = ['<h2 id="files">5. 崩溃、超时、打不开的文件和加载不了的页</h2>']
+        out = ['<h2 id="files">6. 崩溃、超时、打不开的文件和加载不了的页</h2>']
         any_rows = False
         for current in self.report.sets:
             groups: dict[str, list[FileResult]] = {}
@@ -1061,12 +1187,12 @@ class HtmlBuilder:
         out.append('<p class="sub">崩溃的文件，子进程标准错误的内容没有放到页面上，要看去原始的 roundtrip JSON 里看。</p>')
         return "".join(out)
 
-    # ---- 6. 这一次怎么跑的 ----------------------------------------------
+    # ---- 7. 这一次怎么跑的 ----------------------------------------------
 
     def run_section(self) -> str:
         report = self.report
         env = report.env
-        out = ['<h2 id="run">6. 这一次是怎么跑的</h2>']
+        out = ['<h2 id="run">7. 这一次是怎么跑的</h2>']
         rows = []
         for current in report.sets:
             spec, meta = current.spec, current.snapshot.meta
@@ -1081,7 +1207,7 @@ class HtmlBuilder:
             seconds = spec.seconds
             timing = "，".join(
                 f"{label} {seconds[key]:.1f} s"
-                for key, label in (("roundtrip", "往返"), ("calibrate", "校准"), ("ops_diff", "操作符级"))
+                for key, label in (("roundtrip", "往返"), ("calibrate", "校准"), ("ops_diff", "操作符级"), ("struct_check", "结构校验"))
                 if key in seconds
             )
             rows.append(
@@ -1114,6 +1240,9 @@ class HtmlBuilder:
             kv.append(("命令行工具", f"{cli.get('version') or ''}　SHA-256 {str(cli.get('sha256') or '')[:16]}…"))
         if env.get("pdfium_dll_sha256"):
             kv.append(("PDFium", f"{first.get('pdfium_version') or ''}　pdfium.dll 的 SHA-256 {str(env.get('pdfium_dll_sha256'))[:16]}…"))
+        struct_meta = next((s.snapshot.meta for s in report.sets if s.snapshot.has_struct), None)
+        if struct_meta is not None:
+            kv.append(("结构校验", struct_tool_text(struct_meta)))
         if env.get("machine"):
             detail = "，".join(str(env[k]) for k in ("os", "cpu") if env.get(k))
             kv.append(("机器", f"{env.get('machine')}{'（' + detail + '）' if detail else ''}"))
@@ -1127,11 +1256,13 @@ class HtmlBuilder:
             self.header(),
             self.banner(),
             '<nav><a href="#summary">1. 按来源汇总</a><a href="#baseline">2. 和基线比较</a><a href="#failed">3. 没通过的页</a>'
-            '<a href="#ops">4. 操作符级比对</a><a href="#files">5. 崩溃、超时、打不开</a><a href="#run">6. 怎么跑的</a></nav>',
+            '<a href="#ops">4. 操作符级比对</a><a href="#struct">5. 结构校验</a><a href="#files">6. 崩溃、超时、打不开</a>'
+            '<a href="#run">7. 怎么跑的</a></nav>',
             self.summary_section(),
             self.baseline_section(),
             self.failed_section(),
             self.ops_section(),
+            self.struct_section(),
             self.files_section(),
             self.run_section(),
             '<p class="foot">由 tests/corpus/tools/roundtrip_report.py 生成。页面不引用外部的脚本、样式和图片；'
@@ -1222,6 +1353,30 @@ def render_markdown(report: Report) -> str:
                     f"| {s.strict_pass} | {pct(s.strict_ratio_nonempty)} | {counts} |"
                 )
 
+    if any(s.snapshot.has_struct for s in report.sets):
+        lines += [
+            "",
+            "结构校验（只统计，不算退步）：",
+            "",
+            "| 来源 | 查了的文件 | 原件和保存结果都没问题 | 原件有问题，保存结果没问题 | 原件和保存结果都有问题 "
+            "| 原件没问题，保存结果有问题 | 没查（没有保存结果） |",
+            "|---|---|---|---|---|---|---|",
+        ]
+        for current in report.sets:
+            if not current.snapshot.has_struct:
+                continue
+            for source, st in summarize_struct(current.snapshot.files).items():
+                lines.append(f"| {source} | {st.checked} | {st.ok_ok} | {st.bad_ok} | {st.bad_bad} | {st.ok_bad} | {st.not_checked} |")
+        for current in report.sets:
+            broken = broken_by_roundtrip(current.snapshot.files)
+            if not broken:
+                continue
+            lines += ["", f"**{current.spec.title}：原件没问题、保存结果有问题的文件（{len(broken)}）**", ""]
+            for file in broken[:30]:
+                lines.append(f"- `{file.source}` `{file.path}`")
+            if len(broken) > 30:
+                lines.append(f"- …… 另有 {len(broken) - 30} 个，见报告页面")
+
     for current in report.sets:
         cmp = current.comparison
         if cmp is None:
@@ -1242,10 +1397,13 @@ def render_markdown(report: Report) -> str:
 
 def summary_json(report: Report, exit_code: int) -> dict[str, Any]:
     by_source: dict[str, Any] = {}
+    struct_by_source = report.struct_by_source()
     for source, s in report.by_source().items():
         entry = s.to_json()
         delta = report.source_delta(source)
         entry["baseline"] = delta.to_json() if delta is not None else None
+        # 结构校验只统计，不参加退步判定；这个来源所在的语料集没做结构校验时是 None。
+        entry["struct"] = struct_by_source[source].to_json() if source in struct_by_source else None
         by_source[source] = entry
     sets = []
     for current in report.sets:
@@ -1259,9 +1417,14 @@ def summary_json(report: Report, exit_code: int) -> dict[str, Any]:
                 "files": len(current.snapshot.files),
                 "pages": current.snapshot.page_count(),
                 "has_ops": current.snapshot.has_ops,
+                "has_struct": current.snapshot.has_struct,
                 "meta": current.snapshot.meta,
                 "seconds": current.spec.seconds,
                 "total": total_of(summarize(current.snapshot.files).values()).to_json(),
+                "struct": struct_total_of(summarize_struct(current.snapshot.files).values()).to_json()
+                if current.snapshot.has_struct
+                else None,
+                "struct_broken_by_roundtrip": [f.path for f in broken_by_roundtrip(current.snapshot.files)],
                 "calibration": None if cal is None else {"compared": cal.compared, "failed": len(cal.failed), "crashed": cal.crashed},
                 "baseline": None
                 if cmp is None or current.baseline is None
@@ -1338,6 +1501,8 @@ def specs_from_run(run_path: Path) -> tuple[list[SetInput], dict[str, Any]]:
                 root_source=str(entry.get("root_source") or ""),
                 ops=resolve(entry.get("ops")),
                 ops_error=str(entry.get("ops_error") or ""),
+                struct=resolve(entry.get("struct")),
+                struct_error=str(entry.get("struct_error") or ""),
                 diff_dir=resolve(entry.get("diff_dir")),
                 calibrate=resolve(entry.get("calibrate")),
                 baseline=resolve(entry.get("baseline")),
@@ -1357,6 +1522,7 @@ def main(argv: Iterable[str] | None = None) -> int:
     parser.add_argument("--run", type=Path, help="scripts/nightly-roundtrip.ps1 写的 run.json（可以有多个语料集）")
     parser.add_argument("--roundtrip", type=Path, help="单独一份 magpdf-cli roundtrip --json 的结果")
     parser.add_argument("--ops", type=Path, help="同一批的 ops_diff.py --json 结果")
+    parser.add_argument("--struct", type=Path, help="同一批的 struct_check.py --json 结果（结构校验，只统计）")
     parser.add_argument("--diff-dir", type=Path, help="同一批的 roundtrip --diff-dir 目录")
     parser.add_argument("--name", default="run", help="语料集的名字（也是基线文件名）")
     parser.add_argument("--source-prefix", default="", help="加在来源名前面，例如 public/pdfium/")
@@ -1386,6 +1552,7 @@ def main(argv: Iterable[str] | None = None) -> int:
                     source_prefix=args.source_prefix,
                     root_source=args.root_source,
                     ops=args.ops,
+                    struct=args.struct,
                     diff_dir=args.diff_dir,
                     baseline=args.baseline,
                     corpus_dir=args.corpus_dir,
