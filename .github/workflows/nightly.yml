@@ -3,8 +3,6 @@
 #
 # 逻辑都在 scripts/nightly-roundtrip.ps1 里，本机跑的是同一个脚本；这里只准备环境、上传产物。
 # 退步怎么判、基线怎么更新：tests/baselines/README.md。
-#
-# 注意：这个文件写出来之后还没有在 GitHub 上跑过（docs/p0/V14-每晚往返与分类报告.md“没做的和没验的”）。
 name: Nightly
 
 on:

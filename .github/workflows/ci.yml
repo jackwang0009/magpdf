@@ -1,5 +1,5 @@
-# PR 流水线（《工程规范》第 7 节）：构建（用 PDFium 预编译库）、代码检查、单元测试、许可证检查。
-# 往返/编辑测试子集、契约测试在 V02、V06、V14 落地后加入；PDFium 分支自己的流水线在 magpdf-pdfium 仓库。
+# PR 流水线（《工程规范》第 7 节）：构建（用 PDFium 预编译库）、代码检查、单元测试、往返测试子集（自制样本和基线比）、许可证检查。
+# 编辑测试子集、契约测试以后加入；PDFium 分支自己的流水线在 magpdf-pdfium 仓库。
 name: CI
 
 on:
@@ -85,10 +85,21 @@ jobs:
         run: |
           python -m pip install -r tests/requirements-test.txt
           python tests/corpus/synthetic/check.py --cli target/debug/magpdf-cli.exe
-      # 自制样本和基线的比较（scripts/nightly-roundtrip.ps1 -SkipCalibrate -RequireBaseline）先不放在这里：
-      # 基线是在开发机上生成的，要等每晚的流水线在 GitHub 的机器上跑过一次、确认结果一样之后再加（V14 报告第 9 节）。
       - name: 往返测试报告工具的单元测试
         run: python -X dev -m unittest discover -s tests/corpus/tools -p "test_*.py"
+      # 没设 MAGPDF_PUBLIC_PDFIUM，只跑自制样本；公开测试集在每晚的流水线里跑。
+      - name: 自制样本往返测试，和基线比（不能出现主干上没有的失败页）
+        run: pwsh scripts/nightly-roundtrip.ps1 -Cli target/debug/magpdf-cli.exe -SkipCalibrate -RequireBaseline
+      - name: 上传往返测试报告
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: roundtrip-report-pr
+          path: |
+            tests/out/nightly
+            !tests/out/nightly/*/saved/**
+          if-no-files-found: ignore
+          retention-days: 14
 
   licenses:
     name: 依赖许可证与安全公告
