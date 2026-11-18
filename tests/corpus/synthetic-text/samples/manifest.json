@@ -44,9 +44,9 @@
   ],
   "note": "",
   "warnings": [],
-  "bytes": 4205,
+  "bytes": 4207,
   "committed": true,
-  "path": "samples\\zh-fang-tier1.pdf"
+  "path": "samples/zh-fang-tier1.pdf"
  },
  {
   "name": "zh-hei-tier2-embed",
@@ -93,9 +93,9 @@
   ],
   "note": "",
   "warnings": [],
-  "bytes": 4055,
+  "bytes": 4056,
   "committed": true,
-  "path": "samples\\zh-hei-tier2-embed.pdf"
+  "path": "samples/zh-hei-tier2-embed.pdf"
  },
  {
   "name": "zh-sun-tier2-system",
@@ -142,9 +142,9 @@
   ],
   "note": "",
   "warnings": [],
-  "bytes": 6430,
+  "bytes": 6431,
   "committed": true,
-  "path": "samples\\zh-sun-tier2-system.pdf"
+  "path": "samples/zh-sun-tier2-system.pdf"
  },
  {
   "name": "zh-sun1-tier2-embed",
@@ -154,7 +154,7 @@
   "font_file": "simsun.ttc",
   "font_index": 1,
   "base_font": "NSimSun",
-  "pages": 2,
+  "pages": 1,
   "lines": [
    {
     "index": 1,
@@ -191,9 +191,9 @@
   ],
   "note": "",
   "warnings": [],
-  "bytes": 10035623,
+  "bytes": 10035260,
   "committed": false,
-  "path": "D:\\workspace\\magpdf-wt\\v08-edit-line\\out\\v08-samples-large\\zh-sun1-tier2-embed.pdf"
+  "path": "out/v08-samples-large/zh-sun1-tier2-embed.pdf"
  },
  {
   "name": "zh-kai-tier2-system",
@@ -242,7 +242,7 @@
   "warnings": [],
   "bytes": 266556,
   "committed": true,
-  "path": "samples\\zh-kai-tier2-system.pdf"
+  "path": "samples/zh-kai-tier2-system.pdf"
  },
  {
   "name": "zh-yahei-tier1",
@@ -289,9 +289,9 @@
   ],
   "note": "",
   "warnings": [],
-  "bytes": 9781,
+  "bytes": 9782,
   "committed": true,
-  "path": "samples\\zh-yahei-tier1.pdf"
+  "path": "samples/zh-yahei-tier1.pdf"
  },
  {
   "name": "zh-yahei_bd-tier2-embed",
@@ -338,9 +338,9 @@
   ],
   "note": "",
   "warnings": [],
-  "bytes": 9371,
+  "bytes": 9372,
   "committed": true,
-  "path": "samples\\zh-yahei_bd-tier2-embed.pdf"
+  "path": "samples/zh-yahei_bd-tier2-embed.pdf"
  },
  {
   "name": "zh-dengxian-tier3",
@@ -389,7 +389,7 @@
   "warnings": [],
   "bytes": 7618,
   "committed": true,
-  "path": "samples\\zh-dengxian-tier3.pdf"
+  "path": "samples/zh-dengxian-tier3.pdf"
  },
  {
   "name": "zh-dengxian_bd-tier2-embed",
@@ -438,7 +438,7 @@
   "warnings": [],
   "bytes": 11392063,
   "committed": false,
-  "path": "D:\\workspace\\magpdf-wt\\v08-edit-line\\out\\v08-samples-large\\zh-dengxian_bd-tier2-embed.pdf"
+  "path": "out/v08-samples-large/zh-dengxian_bd-tier2-embed.pdf"
  },
  {
   "name": "zh-stzhongs-tier2-system",
@@ -487,7 +487,7 @@
   "warnings": [],
   "bytes": 242935,
   "committed": true,
-  "path": "samples\\zh-stzhongs-tier2-system.pdf"
+  "path": "samples/zh-stzhongs-tier2-system.pdf"
  },
  {
   "name": "zh-stkaiti-tier1",
@@ -497,7 +497,7 @@
   "font_file": "STKAITI.TTF",
   "font_index": 0,
   "base_font": "ABCDEF+STKaiti",
-  "pages": 2,
+  "pages": 1,
   "lines": [
    {
     "index": 1,
@@ -534,9 +534,9 @@
   ],
   "note": "",
   "warnings": [],
-  "bytes": 7618,
+  "bytes": 7268,
   "committed": true,
-  "path": "samples\\zh-stkaiti-tier1.pdf"
+  "path": "samples/zh-stkaiti-tier1.pdf"
  },
  {
   "name": "zh-stfangsong-tier2-embed",
@@ -583,9 +583,9 @@
   ],
   "note": "",
   "warnings": [],
-  "bytes": 6889,
+  "bytes": 6887,
   "committed": true,
-  "path": "samples\\zh-stfangsong-tier2-embed.pdf"
+  "path": "samples/zh-stfangsong-tier2-embed.pdf"
  },
  {
   "name": "zh-stxihei-tier1",
@@ -632,9 +632,9 @@
   ],
   "note": "",
   "warnings": [],
-  "bytes": 5871,
+  "bytes": 5876,
   "committed": true,
-  "path": "samples\\zh-stxihei-tier1.pdf"
+  "path": "samples/zh-stxihei-tier1.pdf"
  },
  {
   "name": "zh-simyou-tier2-embed",
@@ -681,9 +681,9 @@
   ],
   "note": "",
   "warnings": [],
-  "bytes": 3250661,
+  "bytes": 3250663,
   "committed": false,
-  "path": "D:\\workspace\\magpdf-wt\\v08-edit-line\\out\\v08-samples-large\\zh-simyou-tier2-embed.pdf"
+  "path": "out/v08-samples-large/zh-simyou-tier2-embed.pdf"
  },
  {
   "name": "zh-li-tier2-system",
@@ -732,7 +732,7 @@
   "warnings": [],
   "bytes": 206054,
   "committed": true,
-  "path": "samples\\zh-li-tier2-system.pdf"
+  "path": "samples/zh-li-tier2-system.pdf"
  },
  {
   "name": "zh-yahei_lt-tier1",
@@ -779,9 +779,9 @@
   ],
   "note": "",
   "warnings": [],
-  "bytes": 7188,
+  "bytes": 7186,
   "committed": true,
-  "path": "samples\\zh-yahei_lt-tier1.pdf"
+  "path": "samples/zh-yahei_lt-tier1.pdf"
  },
  {
   "name": "zh-dengxian_lt-tier2-embed",
@@ -830,7 +830,7 @@
   "warnings": [],
   "bytes": 7574,
   "committed": true,
-  "path": "samples\\zh-dengxian_lt-tier2-embed.pdf"
+  "path": "samples/zh-dengxian_lt-tier2-embed.pdf"
  },
  {
   "name": "zh-stxingkai-tier2-embed",
@@ -840,7 +840,7 @@
   "font_file": "STXINGKA.TTF",
   "font_index": 0,
   "base_font": "ABCDEF+STXingkai",
-  "pages": 2,
+  "pages": 1,
   "lines": [
    {
     "index": 1,
@@ -877,9 +877,9 @@
   ],
   "note": "",
   "warnings": [],
-  "bytes": 7604,
+  "bytes": 7264,
   "committed": true,
-  "path": "samples\\zh-stxingkai-tier2-embed.pdf"
+  "path": "samples/zh-stxingkai-tier2-embed.pdf"
  },
  {
   "name": "zh-stxinwei-tier2-embed",
@@ -926,9 +926,9 @@
   ],
   "note": "",
   "warnings": [],
-  "bytes": 2872890,
+  "bytes": 2872889,
   "committed": false,
-  "path": "D:\\workspace\\magpdf-wt\\v08-edit-line\\out\\v08-samples-large\\zh-stxinwei-tier2-embed.pdf"
+  "path": "out/v08-samples-large/zh-stxinwei-tier2-embed.pdf"
  },
  {
   "name": "zh-stsong-tier2-system",
@@ -977,7 +977,7 @@
   "warnings": [],
   "bytes": 242919,
   "committed": true,
-  "path": "samples\\zh-stsong-tier2-system.pdf"
+  "path": "samples/zh-stsong-tier2-system.pdf"
  },
  {
   "name": "en-times-tier2-system",
@@ -1024,9 +1024,9 @@
   ],
   "note": "",
   "warnings": [],
-  "bytes": 22969,
+  "bytes": 22971,
   "committed": true,
-  "path": "samples\\en-times-tier2-system.pdf"
+  "path": "samples/en-times-tier2-system.pdf"
  },
  {
   "name": "en-timesbd-tier1",
@@ -1075,7 +1075,7 @@
   "warnings": [],
   "bytes": 18253,
   "committed": true,
-  "path": "samples\\en-timesbd-tier1.pdf"
+  "path": "samples/en-timesbd-tier1.pdf"
  },
  {
   "name": "en-arial-tier2-system",
@@ -1085,7 +1085,7 @@
   "font_file": "arial.ttf",
   "font_index": 0,
   "base_font": "ABCDEF+Arial",
-  "pages": 2,
+  "pages": 1,
   "lines": [
    {
     "index": 1,
@@ -1122,9 +1122,9 @@
   ],
   "note": "",
   "warnings": [],
-  "bytes": 19009,
+  "bytes": 18630,
   "committed": true,
-  "path": "samples\\en-arial-tier2-system.pdf"
+  "path": "samples/en-arial-tier2-system.pdf"
  },
  {
   "name": "en-arialbd-tier2-embed",
@@ -1173,7 +1173,7 @@
   "warnings": [],
   "bytes": 552002,
   "committed": true,
-  "path": "samples\\en-arialbd-tier2-embed.pdf"
+  "path": "samples/en-arialbd-tier2-embed.pdf"
  },
  {
   "name": "en-calibri-tier2-system",
@@ -1222,7 +1222,7 @@
   "warnings": [],
   "bytes": 35285,
   "committed": true,
-  "path": "samples\\en-calibri-tier2-system.pdf"
+  "path": "samples/en-calibri-tier2-system.pdf"
  },
  {
   "name": "en-calibrib-tier2-system",
@@ -1269,9 +1269,9 @@
   ],
   "note": "",
   "warnings": [],
-  "bytes": 12134,
+  "bytes": 12136,
   "committed": true,
-  "path": "samples\\en-calibrib-tier2-system.pdf"
+  "path": "samples/en-calibrib-tier2-system.pdf"
  },
  {
   "name": "en-cour-tier1",
@@ -1318,9 +1318,9 @@
   ],
   "note": "",
   "warnings": [],
-  "bytes": 15107,
+  "bytes": 15108,
   "committed": true,
-  "path": "samples\\en-cour-tier1.pdf"
+  "path": "samples/en-cour-tier1.pdf"
  },
  {
   "name": "en-courbd-tier2-system",
@@ -1367,9 +1367,9 @@
   ],
   "note": "",
   "warnings": [],
-  "bytes": 17895,
+  "bytes": 17893,
   "committed": true,
-  "path": "samples\\en-courbd-tier2-system.pdf"
+  "path": "samples/en-courbd-tier2-system.pdf"
  },
  {
   "name": "en-georgia-tier2-embed",
@@ -1379,7 +1379,7 @@
   "font_file": "georgia.ttf",
   "font_index": 0,
   "base_font": "Georgia",
-  "pages": 2,
+  "pages": 1,
   "lines": [
    {
     "index": 1,
@@ -1416,9 +1416,9 @@
   ],
   "note": "",
   "warnings": [],
-  "bytes": 142232,
+  "bytes": 141841,
   "committed": true,
-  "path": "samples\\en-georgia-tier2-embed.pdf"
+  "path": "samples/en-georgia-tier2-embed.pdf"
  },
  {
   "name": "en-segoe-tier2-system",
@@ -1467,7 +1467,7 @@
   "warnings": [],
   "bytes": 36869,
   "committed": true,
-  "path": "samples\\en-segoe-tier2-system.pdf"
+  "path": "samples/en-segoe-tier2-system.pdf"
  },
  {
   "name": "en-seguibl-tier2-system",
@@ -1514,9 +1514,9 @@
   ],
   "note": "",
   "warnings": [],
-  "bytes": 7696,
+  "bytes": 7697,
   "committed": true,
-  "path": "samples\\en-seguibl-tier2-system.pdf"
+  "path": "samples/en-seguibl-tier2-system.pdf"
  },
  {
   "name": "en-cambria-tier1",
@@ -1565,7 +1565,7 @@
   "warnings": [],
   "bytes": 10091,
   "committed": true,
-  "path": "samples\\en-cambria-tier1.pdf"
+  "path": "samples/en-cambria-tier1.pdf"
  },
  {
   "name": "en-constan-tier2-system",
@@ -1612,9 +1612,9 @@
   ],
   "note": "",
   "warnings": [],
-  "bytes": 7967,
+  "bytes": 7968,
   "committed": true,
-  "path": "samples\\en-constan-tier2-system.pdf"
+  "path": "samples/en-constan-tier2-system.pdf"
  },
  {
   "name": "en-trebuc-tier2-embed",
@@ -1663,7 +1663,7 @@
   "warnings": [],
   "bytes": 150797,
   "committed": true,
-  "path": "samples\\en-trebuc-tier2-embed.pdf"
+  "path": "samples/en-trebuc-tier2-embed.pdf"
  },
  {
   "name": "en-verdana-tier2-system",
@@ -1673,7 +1673,7 @@
   "font_file": "verdana.ttf",
   "font_index": 0,
   "base_font": "Verdana",
-  "pages": 2,
+  "pages": 1,
   "lines": [
    {
     "index": 1,
@@ -1710,9 +1710,9 @@
   ],
   "note": "",
   "warnings": [],
-  "bytes": 9811,
+  "bytes": 9417,
   "committed": true,
-  "path": "samples\\en-verdana-tier2-system.pdf"
+  "path": "samples/en-verdana-tier2-system.pdf"
  },
  {
   "name": "en-tahoma-tier2-system",
@@ -1759,9 +1759,9 @@
   ],
   "note": "",
   "warnings": [],
-  "bytes": 14839,
+  "bytes": 14842,
   "committed": true,
-  "path": "samples\\en-tahoma-tier2-system.pdf"
+  "path": "samples/en-tahoma-tier2-system.pdf"
  },
  {
   "name": "en-comic-tier1",
@@ -1810,7 +1810,7 @@
   "warnings": [],
   "bytes": 12885,
   "committed": true,
-  "path": "samples\\en-comic-tier1.pdf"
+  "path": "samples/en-comic-tier1.pdf"
  },
  {
   "name": "en-pala-tier2-system",
@@ -1857,9 +1857,9 @@
   ],
   "note": "",
   "warnings": [],
-  "bytes": 23890,
+  "bytes": 23891,
   "committed": true,
-  "path": "samples\\en-pala-tier2-system.pdf"
+  "path": "samples/en-pala-tier2-system.pdf"
  },
  {
   "name": "en-candara-tier2-embed",
@@ -1908,7 +1908,7 @@
   "warnings": [],
   "bytes": 139284,
   "committed": true,
-  "path": "samples\\en-candara-tier2-embed.pdf"
+  "path": "samples/en-candara-tier2-embed.pdf"
  },
  {
   "name": "en-consola-tier2-system",
@@ -1957,6 +1957,6 @@
   "warnings": [],
   "bytes": 24040,
   "committed": true,
-  "path": "samples\\en-consola-tier2-system.pdf"
+  "path": "samples/en-consola-tier2-system.pdf"
  }
 ]

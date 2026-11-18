@@ -138,13 +138,13 @@ def invert_to_unicode(gmap: dict) -> dict:
 
 
 def font_file(path: Path, index: int = 0):
-    """打开字体文件（TTC 按面索引）。"""
+    """打开字体文件（TTC 按面索引）；关掉时间戳重算以保证重复生成逐字节一致。"""
     from fontTools.ttLib import TTCollection, TTFont
 
     raw = path.read_bytes()
     if raw[:4] == b"ttcf":
         return TTCollection(io.BytesIO(raw)).fonts[index]
-    return TTFont(io.BytesIO(raw), fontNumber=index)
+    return TTFont(io.BytesIO(raw), fontNumber=index, recalcTimestamp=False)
 
 
 def ttf_subset(path: Path, chars: str, index: int = 0) -> tuple[bytes, dict[str, int]]:
@@ -152,9 +152,11 @@ def ttf_subset(path: Path, chars: str, index: int = 0) -> tuple[bytes, dict[str,
     from fontTools import subset
 
     font = font_file(path, index)
+    font.recalcTimestamp = False
     opts = subset.Options()
     opts.notdef_outline = True
     opts.recalc_bounds = True
+    opts.recalc_timestamp = False
     opts.drop_tables += ["GSUB", "GPOS", "GDEF", "BASE", "DSIG"]
     sub = subset.Subsetter(options=opts)
     sub.populate(text=chars)
@@ -167,6 +169,7 @@ def ttf_subset(path: Path, chars: str, index: int = 0) -> tuple[bytes, dict[str,
 def ttf_full(path: Path, index: int = 0) -> tuple[bytes, dict[str, int]]:
     """完整 TrueType 字体与字符→GID（不改写字形，只读 cmap）。"""
     font = font_file(path, index)
+    font.recalcTimestamp = False
     out = io.BytesIO()
     font.save(out)
     return out.getvalue(), glyph_map(font)

@@ -142,7 +142,7 @@ def zh_cases() -> list[Case]:
                 line2=ZH_LINE2,
                 case=case,
                 variant={"tier1": "none", "tier2_embed": "glyphs", "tier2_system": "font", "tier3": "font"}[case],
-                extra_pages=1 if i % 7 == 3 else 0,
+                extra_pages=0,
                 pages="1",
             )
         )
@@ -170,7 +170,7 @@ def en_cases() -> list[Case]:
                 line2=EN_LINE2,
                 case=case,
                 variant={"tier1": "none", "tier2_embed": "glyphs", "tier2_system": "font", "tier3": "font"}[case],
-                extra_pages=1 if i % 6 == 2 else 0,
+                extra_pages=0,
             )
         )
     return c
@@ -361,7 +361,8 @@ def _simple_font(b, base: str, data: bytes, codes, gmap, adv) -> int:
     ff = b.add_stream(data, "/Length1 %d" % len(data))
     fd = _descriptor(b, base, 32, ff, "FontFile2")
     first, last = min(codes.values()), max(codes.values())
-    widths = [adv.get(gmap.get(chr(c), 0), 500) for c in range(first, last + 1)]
+    by_code = {code: ch_ for ch_, code in codes.items()}
+    widths = [adv.get(gmap.get(by_code[c], 0), 500) if c in by_code else 0 for c in range(first, last + 1)]
     w = b.add(b"[" + b" ".join(str(x).encode() for x in widths) + b"]")
     order = sorted(codes, key=lambda x: codes[x])
     diffs = " ".join(f"{codes[ch_]} /g{gmap.get(ch_, 0)}" for ch_ in order)
@@ -387,13 +388,20 @@ def main() -> int:
         target = (SAMPLES if committed else LARGE) / f"{case.name}.pdf"
         target.write_bytes(data)
         try:
-            rel = str(target.relative_to(ROOT))
+            rel = target.relative_to(ROOT).as_posix()
         except ValueError:
-            rel = str(target)
+            try:
+                rel = target.relative_to(ROOT.parents[2]).as_posix()
+            except ValueError:
+                rel = target.name
         meta.update({"bytes": len(data), "committed": committed, "path": rel})
         manifest.append(meta)
         print(f"{target.name}: {len(data)} bytes{'（不入库）' if not committed else ''}")
-    (SAMPLES / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=1), encoding="utf-8")
+    (SAMPLES / "manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=1) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
     total = len(manifest)
     written = [m for m in manifest if not m.get("skipped")]
     ok = sum(1 for m in written if m.get("committed"))
