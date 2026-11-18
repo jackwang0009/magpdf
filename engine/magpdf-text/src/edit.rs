@@ -11,8 +11,9 @@
 //! 「某一级不适用」用 [`TierSkipped`] 记下原因，继续下一级；三级都不行才返回
 //! [`crate::EditError::NoTier`]。
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use pdfium_sys::{Document, LoadedFont, Page, PageObject};
 
@@ -300,6 +301,56 @@ fn text_object<'p>(page: &'p Page<'_>, handle_id: usize) -> Result<(usize, PageO
     Ok((idx, obj))
 }
 
+/// 嵌入字体程序（FontFile）的进程内缓存上限。完整嵌入的中文字体单份约 10 MB，只留最近几份。
+const MAX_EMBEDDED_FACES: usize = 8;
+
+struct EmbeddedFaceEntry {
+    hash: u64,
+    face: Arc<FontFace>,
+}
+
+fn fnv1a_64(bytes: &[u8]) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for &b in bytes {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h
+}
+
+/// 按字节内容缓存已打开的嵌入 `FontFace`（含懒建立的 `gid_to_char` 反向表）。
+///
+/// 命中时逐字节核对内容，杜绝哈希碰撞；同一份大字体在第 1 级探查完落到第 2 级、
+/// 或同一文档连续改多行时不必重复解析字体与 cmap。
+fn cached_embedded_face(data: Vec<u8>) -> Result<Arc<FontFace>> {
+    static CACHE: OnceLock<Mutex<VecDeque<EmbeddedFaceEntry>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(VecDeque::new()));
+    let hash = fnv1a_64(&data);
+    if let Ok(guard) = cache.lock() {
+        for entry in guard.iter() {
+            if entry.hash == hash && entry.face.data() == data.as_slice() {
+                return Ok(Arc::clone(&entry.face));
+            }
+        }
+    }
+    let face = Arc::new(FontFace::from_bytes(data, 0, "embedded")?);
+    if let Ok(mut guard) = cache.lock() {
+        for entry in guard.iter() {
+            if entry.hash == hash && entry.face.data() == face.data() {
+                return Ok(Arc::clone(&entry.face));
+            }
+        }
+        while guard.len() >= MAX_EMBEDDED_FACES {
+            guard.pop_front();
+        }
+        guard.push_back(EmbeddedFaceEntry {
+            hash,
+            face: Arc::clone(&face),
+        });
+    }
+    Ok(face)
+}
+
 /// 从页面文字对象的字体构造 [`FontMap`]。
 ///
 /// 原版 PDFium 没有 `FPDFFont_GetCharcodeFromUnicode`，这里用嵌入字体程序的 cmap：
@@ -317,7 +368,7 @@ pub fn font_map_from_page_font(font: &pdfium_sys::Font<'_>, sample: &str, needed
                 reason: "读不到嵌入字体程序".into(),
             };
         };
-        let face = match FontFace::from_bytes(data, 0, "embedded") {
+        let face = match cached_embedded_face(data) {
             Ok(f) => f,
             Err(e) => {
                 return FontMap::Unavailable {
@@ -332,8 +383,9 @@ pub fn font_map_from_page_font(font: &pdfium_sys::Font<'_>, sample: &str, needed
     // 同名系统字体的 cmap 与阅读器解析该 BaseFont 时一致，简单改写可以留在第 1 级。
     let base = font.base_name();
     let name = subset::strip_subset_prefix(&base);
-    if let Some(cand) = same_name_font(FontLibrary::shared(), name) {
-        match FontFace::from_path(&cand.path, cand.index) {
+    let lib = FontLibrary::shared();
+    if let Some(cand) = same_name_font(lib, name) {
+        match lib.face(cand) {
             Ok(face) => {
                 // 用页面字体的 glyph_width 判断 Identity-H 还是简单编码。
                 // 同名系统字体被 PDFium 选为替代字体时，宽度与真实字符码一致。
@@ -385,12 +437,11 @@ fn detect_encoding(font: &pdfium_sys::Font<'_>, face: &FontFace, sample: &str) -
 }
 
 fn build_map_from_face(face: &FontFace, encoding: EncodingKind) -> FontMap {
-    let mut charcode_to_unicode = Vec::new();
-    let mut charcode_to_gid = Vec::new();
-    for gid in 0..face.num_glyphs() {
-        let Some(ch) = face.char_for_glyph(gid) else {
-            continue;
-        };
+    let limit = face.num_glyphs();
+    let map = face.glyph_to_char_map();
+    let mut charcode_to_unicode = Vec::with_capacity(map.len());
+    let mut charcode_to_gid = Vec::with_capacity(map.len());
+    for (&gid, &ch) in map.range(..limit) {
         let code = match encoding {
             EncodingKind::Simple if (ch as u32) <= 255 => ch as u32,
             _ => u32::from(gid),
@@ -495,7 +546,7 @@ fn try_tier2(
     let Some(cand) = same_name_font(lib, &name) else {
         return Err(SkipOrErr::Skip(TierSkipped::NoSameNameFont { name }));
     };
-    let face = FontFace::from_path(&cand.path, cand.index)?;
+    let face = lib.face(cand)?;
     let miss = coverage(&face, new_text).missing;
     if !miss.is_empty() {
         return Err(SkipOrErr::Skip(TierSkipped::MissingGlyphs {
@@ -506,12 +557,12 @@ fn try_tier2(
     replace_with_face(doc, page, idx, &obj, &face, new_text)
 }
 
-fn embedded_full_face(font: &pdfium_sys::Font<'_>, new_text: &str) -> Option<FontFace> {
+fn embedded_full_face(font: &pdfium_sys::Font<'_>, new_text: &str) -> Option<Arc<FontFace>> {
     if font.is_embedded() != Some(true) {
         return None;
     }
     let data = font.font_data()?;
-    let face = FontFace::from_bytes(data, 0, "embedded").ok()?;
+    let face = cached_embedded_face(data).ok()?;
     let miss = coverage(&face, new_text).missing;
     if miss.is_empty() {
         // 名字带子集前缀但数据其实覆盖了新字：仍可作为「补字形」来源
@@ -543,7 +594,7 @@ fn try_tier3(
             family: format!("{family:?}"),
         }));
     };
-    let face = FontFace::from_path(&cand.path, cand.index)?;
+    let face = lib.face(cand)?;
     replace_with_face(doc, page, idx, &obj, &face, new_text)
 }
 
@@ -555,24 +606,24 @@ fn covering_match<'a>(
     text: &str,
 ) -> Option<&'a crate::fontmatch::Candidate> {
     if let Some(c) = lib.best_match(family, weight, italic)
-        && face_covers(c, text)
+        && face_covers(lib, c, text)
     {
         return Some(c);
     }
     lib.candidates
         .iter()
         .filter(|c| c.embeddable() && c.family == family)
-        .find(|c| face_covers(c, text))
+        .find(|c| face_covers(lib, c, text))
         .or_else(|| {
             lib.candidates
                 .iter()
                 .filter(|c| c.embeddable())
-                .find(|c| face_covers(c, text))
+                .find(|c| face_covers(lib, c, text))
         })
 }
 
-fn face_covers(cand: &crate::fontmatch::Candidate, text: &str) -> bool {
-    FontFace::from_path(&cand.path, cand.index)
+fn face_covers(lib: &FontLibrary, cand: &crate::fontmatch::Candidate, text: &str) -> bool {
+    lib.face(cand)
         .ok()
         .is_some_and(|f| coverage(&f, text).missing.is_empty())
 }
@@ -917,5 +968,22 @@ mod tests {
             [(0x41, 36), (0x42, 37)],
         );
         assert_eq!(tier1_charcodes(&map, "AB").unwrap(), vec![0x41, 0x42]);
+    }
+
+    #[test]
+    fn cached_embedded_face_reuses_face_and_builds_large_map_fast() {
+        let lib = FontLibrary::shared();
+        let Some(cand) = lib.candidates.first() else {
+            return;
+        };
+        let bytes = std::fs::read(&cand.path).expect("读取系统字体");
+        if cand.index != 0 {
+            return;
+        }
+        let f1 = cached_embedded_face(bytes.clone()).expect("第一次解析");
+        let f2 = cached_embedded_face(bytes).expect("第二次命中缓存");
+        assert!(Arc::ptr_eq(&f1, &f2));
+        let map = build_map_from_face(&f1, EncodingKind::IdentityH);
+        assert!(matches!(map, FontMap::Table { .. }));
     }
 }

@@ -6,9 +6,9 @@
 //!
 //! 内置子集缺失时只用系统字体，报告里会写明（网络下载的字体不入库，避免无谓的体积）。
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
 
@@ -143,12 +143,21 @@ impl Candidate {
     }
 }
 
+/// 系统字体面缓存的上限，避免长寿命进程把整目录的大 TTC 一直留在内存里。
+const MAX_CACHED_FACES: usize = 32;
+
+#[derive(Debug, Default)]
+struct FaceCache {
+    entries: BTreeMap<(PathBuf, u32), Arc<FontFace>>,
+    order: VecDeque<(PathBuf, u32)>,
+}
+
 /// 字体库：候选列表加一个按需加载的缓存。
 #[derive(Debug, Default)]
 pub struct FontLibrary {
     pub candidates: Vec<Candidate>,
-    /// 加载过的字体面（路径, 面索引）→ 字体。
-    cache: BTreeMap<(PathBuf, u32), std::sync::Arc<FontFace>>,
+    /// 加载过的字体面（路径, 面索引）→ 字体。内部可变，供 [`Self::shared`] 直接复用。
+    cache: Mutex<FaceCache>,
 }
 
 impl FontLibrary {
@@ -239,14 +248,30 @@ impl FontLibrary {
             .find(|c| c.name.to_ascii_lowercase() == want)
     }
 
-    /// 加载字体面（带缓存）。
-    pub fn face(&mut self, cand: &Candidate) -> crate::error::Result<std::sync::Arc<FontFace>> {
+    /// 加载字体面（带进程内容量受限缓存）。
+    pub fn face(&self, cand: &Candidate) -> crate::error::Result<Arc<FontFace>> {
         let key = (cand.path.clone(), cand.index);
-        if let Some(f) = self.cache.get(&key) {
-            return Ok(f.clone());
+        if let Ok(guard) = self.cache.lock()
+            && let Some(f) = guard.entries.get(&key)
+        {
+            return Ok(Arc::clone(f));
         }
-        let face = std::sync::Arc::new(FontFace::from_path(&cand.path, cand.index)?);
-        self.cache.insert(key, face.clone());
+        let face = Arc::new(FontFace::from_path(&cand.path, cand.index)?);
+        if let Ok(mut guard) = self.cache.lock() {
+            if let Some(existing) = guard.entries.get(&key) {
+                return Ok(Arc::clone(existing));
+            }
+            while guard.entries.len() >= MAX_CACHED_FACES {
+                if let Some(oldest) = guard.order.pop_front() {
+                    guard.entries.remove(&oldest);
+                } else {
+                    guard.entries.clear();
+                    break;
+                }
+            }
+            guard.order.push_back(key.clone());
+            guard.entries.insert(key, Arc::clone(&face));
+        }
         Ok(face)
     }
 }
@@ -420,5 +445,16 @@ mod tests {
         if single.is_file() {
             assert_eq!(ttc_faces(single), 1);
         }
+    }
+
+    #[test]
+    fn shared_library_face_cache_reuses_arc() {
+        let lib = FontLibrary::shared();
+        let Some(cand) = lib.candidates.first() else {
+            return;
+        };
+        let first = lib.face(cand).expect("第一次加载");
+        let second = lib.face(cand).expect("缓存命中");
+        assert!(Arc::ptr_eq(&first, &second));
     }
 }

@@ -3,6 +3,9 @@
 //! 用 `skrifa` 读；它同时是 `subsetter` 的依赖（同一版本的 `read-fonts`），不额外引入解析器。
 //! 本模块只在改字流程里使用，不参与文字块识别。
 
+use std::collections::BTreeMap;
+use std::sync::OnceLock;
+
 use serde::{Deserialize, Serialize};
 use skrifa::instance::{LocationRef, Size};
 use skrifa::raw::types::Tag;
@@ -43,6 +46,8 @@ pub struct FontFace {
     origin: String,
     /// 字体内部的 PostScript 名（`name` 表 ID 6），用于子集前缀与 BaseFont。
     postscript_name: String,
+    /// 按需一次性建立的 GID → 首选 Unicode 反向映射，避免大字体逐 GID 扫描整张 cmap。
+    gid_to_char: OnceLock<BTreeMap<u16, char>>,
 }
 
 impl std::fmt::Debug for FontFace {
@@ -83,6 +88,7 @@ impl FontFace {
             fs_type,
             origin: origin.to_owned(),
             postscript_name,
+            gid_to_char: OnceLock::new(),
         })
     }
 
@@ -156,24 +162,34 @@ impl FontFace {
         (id != 0 && id < u32::from(self.num_glyphs)).then_some(id as u16)
     }
 
-    /// 反向：字形 ID 对应哪个码点（同一字形可能对应多个码点，取最小的非控制码点）。
-    pub fn char_for_glyph(&self, gid: u16) -> Option<char> {
-        let font = self.font_ref().ok()?;
-        let cmap = font.charmap();
-        let mut best: Option<char> = None;
-        for (code, g) in cmap.mappings() {
-            if g.to_u32() != u32::from(gid) {
-                continue;
-            }
-            let Some(ch) = char::from_u32(code) else {
-                continue;
+    /// 单遍扫描 cmap，建立 GID → 首选码点的反向表（每个 `FontFace` 只建一次）。
+    ///
+    /// 同一字形对应多个码点时按 [`preferred_codepoint`] 挑一个；完整嵌入的大 CJK 字体有两三万个字形，
+    /// 单遍建表是 $O(|\text{cmap}|)$，避免按 GID 逐个重扫 cmap 的二次方开销。
+    pub fn glyph_to_char_map(&self) -> &BTreeMap<u16, char> {
+        self.gid_to_char.get_or_init(|| {
+            let mut map = BTreeMap::new();
+            let Ok(font) = self.font_ref() else {
+                return map;
             };
-            best = Some(match best {
-                Some(prev) => preferred_codepoint(prev, ch),
-                None => ch,
-            });
-        }
-        best
+            for (code, g) in font.charmap().mappings() {
+                let Ok(gid) = u16::try_from(g.to_u32()) else {
+                    continue;
+                };
+                let Some(ch) = char::from_u32(code) else {
+                    continue;
+                };
+                map.entry(gid)
+                    .and_modify(|prev| *prev = preferred_codepoint(*prev, ch))
+                    .or_insert(ch);
+            }
+            map
+        })
+    }
+
+    /// 反向：字形 ID 对应哪个码点（同一字形可能对应多个码点，按 [`preferred_codepoint`] 取）。
+    pub fn char_for_glyph(&self, gid: u16) -> Option<char> {
+        self.glyph_to_char_map().get(&gid).copied()
     }
 
     /// 字形的横向进距，单位是 1000 分之一 em（PDF 的 W 数组单位）。
@@ -329,6 +345,13 @@ mod tests {
             assert!(!face.family_name().is_empty());
             assert!(face.num_glyphs() > 100);
             assert!(face.glyph_for_char('永').is_some(), "{name} 应有汉字字形");
+            let rev = face.glyph_to_char_map();
+            assert!(!rev.is_empty());
+            for ch in [' ', 'A', '永', '方'] {
+                if let Some(gid) = face.glyph_for_char(ch) {
+                    assert_eq!(face.char_for_glyph(gid), Some(ch), "{name} 反查 {ch}");
+                }
+            }
         }
     }
 }
