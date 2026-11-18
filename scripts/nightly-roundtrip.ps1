@@ -15,6 +15,9 @@
     public-pdfium   PDFium 的 testing/resources（chromium/8138），来源 public/pdfium/<子目录>。
                     位置用 -PublicPdfium 或环境变量 MAGPDF_PUBLIC_PDFIUM 给；没给就跳过。
                     流水线上用 scripts/fetch-public-corpus.ps1 取。
+    public-pdfjs    pdf.js 的 test/pdfs（固定提交），来源 public/pdfjs。
+                    位置用 -PublicPdfjs 或环境变量 MAGPDF_PUBLIC_PDFJS 给；没给就跳过。
+                    用 scripts/fetch-public-corpus.ps1 -Corpus pdfjs 取。
     corpus          真实样本的测试文件库，来源是第一级目录名（office-word、design……）。
                     位置用 -Corpus 或环境变量 MAGPDF_CORPUS 给；没给就跳过。
 
@@ -57,6 +60,7 @@
 param(
     [string]$Cli = '',
     [string]$PublicPdfium = '',
+    [string]$PublicPdfjs = '',
     [string]$Corpus = '',
     [string]$OutDir = '',
     [string]$BaselineDir = '',
@@ -148,6 +152,13 @@ try {
         }
     } else {
         Write-Host '没有给 PDFium 公开测试集的位置（-PublicPdfium 或环境变量 MAGPDF_PUBLIC_PDFIUM），这一批跳过。'
+    }
+    $pdfjsDir = if ($PublicPdfjs) { $PublicPdfjs } else { $env:MAGPDF_PUBLIC_PDFJS }
+    if ($pdfjsDir) {
+        $sets += [ordered]@{
+            name = 'public-pdfjs'; title = 'pdf.js 公开测试集'; dir = $pdfjsDir
+            prefix = ''; rootSource = 'public/pdfjs'; source = 'public/pdfjs'
+        }
     }
     $corpusDir = if ($Corpus) { $Corpus } else { $env:MAGPDF_CORPUS }
     if ($corpusDir) {
