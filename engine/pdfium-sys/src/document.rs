@@ -140,6 +140,11 @@ impl<'lib> Document<'lib> {
         }
     }
 
+    /// 文档打开时用的只读原始字节（和 [`Document::reopen`] 共用同一个 `Arc`）；新建的空文档返回 `None`。
+    pub fn shared_bytes(&self) -> Option<Arc<Vec<u8>>> {
+        (!self.data.is_empty()).then(|| Arc::clone(&self.data))
+    }
+
     /// 把这份文档打开时用的数据再打开一遍，得到一份互不相干的文档：它是文件原来的样子，不含打开之后
     /// 做过的任何修改。两份文档共用同一块只读数据，不复制，所以文件再大也只花解析的时间。
     ///

@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 pdfium-sys.workspace = true
+magpdf-content.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 serde.workspace = true

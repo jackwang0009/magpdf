@@ -21,6 +21,7 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
+use std::sync::Arc;
 
 use super::filter::{decode_like_pdfium, decode_like_pdfium_checked};
 use super::lexer::{Lexer, atoi64, atoui, direct_length};
@@ -786,9 +787,9 @@ pub enum EntryLocation {
     InStream { stream: u32, index: u32 },
 }
 
-/// 一个已打开的 PDF。持有整个文件的字节。
+/// 一个已打开的 PDF。持有整个文件的只读字节。
 pub struct PdfDocument {
-    raw: Vec<u8>,
+    raw: Arc<Vec<u8>>,
     /// `%PDF` 在文件里的位置；交叉引用里的偏移都相对它。
     header_offset: usize,
     entries: BTreeMap<u32, Entry>,
@@ -820,6 +821,11 @@ impl std::fmt::Debug for PdfDocument {
 impl PdfDocument {
     /// 从原始字节打开（`CPDF_Parser::StartParseInternal`）。
     pub fn load(raw: Vec<u8>) -> Result<Self> {
+        Self::load_shared(Arc::new(raw))
+    }
+
+    /// 从共享的只读原始字节打开，不复制缓冲区（供引擎保真校验与 `pdfium_sys::Document` 共用同一份内存）。
+    pub fn load_shared(raw: Arc<Vec<u8>>) -> Result<Self> {
         let header_offset = find_header_offset(&raw).ok_or(Error::NotPdf)?;
         if raw.len() < header_offset + HEADER_SIZE {
             return Err(Error::NotPdf);
@@ -842,13 +848,12 @@ impl PdfDocument {
             }
             (loader.table, loader.xref_stream, rebuilt, last_xref)
         };
-        let mut doc = Self::from_table(raw, header_offset, table.clone(), xref_stream);
+        let mut doc = Self::from_table(Arc::clone(&raw), header_offset, table.clone(), xref_stream);
         // 根对象取不到，或者一页都数不出来：重建一次再看。
         if !doc.root_usable() {
             if rebuilt {
                 return Err(XrefError::NoRoot.into());
             }
-            let raw = std::mem::take(&mut doc.raw);
             let table = {
                 let mut loader = Loader {
                     data: &raw[header_offset..],
@@ -872,7 +877,12 @@ impl PdfDocument {
         Ok(doc)
     }
 
-    fn from_table(raw: Vec<u8>, header_offset: usize, table: Table, xref_stream: bool) -> Self {
+    fn from_table(
+        raw: Arc<Vec<u8>>,
+        header_offset: usize,
+        table: Table,
+        xref_stream: bool,
+    ) -> Self {
         Self {
             raw,
             header_offset,

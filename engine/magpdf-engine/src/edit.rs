@@ -10,6 +10,9 @@
 
 use std::collections::BTreeMap;
 
+use magpdf_content::PdfDocument;
+use magpdf_content::pdf::object::{PdfObject, PdfStreamRef};
+use magpdf_content::pdf::pages::{PageInfo, walk_pages};
 use pdfium_sys::{
     DetachedObject, Document, Library, Matrix, ObjectKind, Page, PageObject, Rect, RenderOptions,
     Rgba, SaveFlags,
@@ -173,9 +176,14 @@ fn union(a: Rect, b: Rect) -> Rect {
 pub struct Session<'lib> {
     lib: &'lib Library,
     doc: Document<'lib>,
+    /// 打开加密文档时用的口令；保真校验用同一口令重新打开只读副本。
+    password: Option<String>,
     /// 已经列过对象的页：页序号 → 按层级排列的对象编号。
     ids: BTreeMap<usize, Vec<ObjectId>>,
     next_id: u64,
+    /// 保真校验用的流级检查器，第一次校验时按原始文件字节建：专门拦 PDFium 自己比不出来的两类情况
+    ///（内容流没能完整解码；内容流或页对象与别处共用，生成器就地改写会连带改坏别处）。
+    stream_guard: Option<Option<StreamGuard>>,
     /// 保真校验用的另一份文档，第一次校验时建：文件原来的样子，在它上面试着重写页面，不碰正在用的这份。
     /// `Err` 表示建不出来。
     ///
@@ -227,10 +235,10 @@ impl<'lib> Session<'lib> {
         path: &std::path::Path,
         password: Option<&str>,
     ) -> Result<Self> {
-        Ok(Self::from_document(
-            lib,
-            Document::load_file(lib, path, password)?,
-        ))
+        let doc = Document::load_file(lib, path, password)?;
+        let mut session = Self::from_document(lib, doc);
+        session.password = password.map(str::to_owned);
+        Ok(session)
     }
 
     /// 空文档，用来建测试页或以后的“新建”。
@@ -243,8 +251,10 @@ impl<'lib> Session<'lib> {
         Self {
             lib,
             doc,
+            password: None,
             ids: BTreeMap::new(),
             next_id: 0,
+            stream_guard: None,
             scratch: None,
             fidelity: BTreeMap::new(),
             new_verdicts: Vec::new(),
@@ -355,15 +365,18 @@ impl<'lib> Session<'lib> {
 
     /// 一页能不能修改原有对象（方案 2.3 的保真校验）。返回 `None` 表示可以，`Some` 是原因。
     ///
-    /// 做法：在文档的副本上把这一页的对象全部标记为已修改、重新生成内容流，再重新加载，比较前后
-    /// 对象的个数、种类和包围盒（对象比对），再比较前后渲染出来的画面（像素比对，判定规则同往返测试）。
+    /// 做法：先用自研只读对象层检查两类 PDFium 自己比不出来的情况——
+    /// 1. 这一页的内容流没能完整解码（不认得的过滤器或解码失败，方案 2.3、V17 报告 9.8）；
+    /// 2. 这一页的内容流或页对象与别的页、外部对象（XObject）共用，生成器就地改写会连带改坏别处（方案 2.1）；
+    ///
+    /// 再在文档的副本上把这一页的对象全部标记为已修改、重新生成内容流，重新加载，比较前后对象的个数、
+    /// 种类和包围盒（对象比对），最后比较前后渲染出来的画面（像素比对，判定规则同往返测试）。
     /// PDFium 的生成器写不出来的对象会消失、挪位置或者变色，这样的页一旦改了任何对象，整页的内容流
     /// 都要重写，别的对象也跟着坏，所以只允许在上面叠加内容。结果按页记住，只校验一次。
     ///
-    /// 还看不出来的几类，这里都还没有做：
+    /// 还看不出来的两类，这里还没有做：
     /// - 颜色空间被换算成画面相同的 RGB（灰度写成 `rg`）：像素一样、对象也一样，要靠操作符级比对；
-    /// - 默认隐藏的可选内容图层：像素比对时没有把图层全部打开（方案 2.3 要求打开）；
-    /// - 和别的页共用内容流的页：重写这一页会连带改掉那一页（方案 2.1），而这里只比这一页。
+    /// - 默认隐藏的可选内容图层：像素比对时没有把图层全部打开（方案 2.3 要求打开）。
     ///
     /// 修改命令执行前会自己调用它；也可以提前调用（页面显示之后、引擎空闲时），这样用户第一次修改
     /// 时不用等。
@@ -371,14 +384,29 @@ impl<'lib> Session<'lib> {
         if let Some(known) = self.fidelity.get(&page) {
             return Ok(*known);
         }
+        // 页号越界直接返回错误，不记为保真结论。
+        let _ = self.doc.page_size(page)?;
+
+        let page_count = self.doc.page_count();
+        let shared_bytes = self.doc.shared_bytes();
+        let guard = self
+            .stream_guard
+            .get_or_insert_with(|| StreamGuard::from_doc(shared_bytes, page_count));
+        if let Some(reason) = guard.as_ref().and_then(|g| g.check_page(page)) {
+            self.fidelity.insert(page, Some(reason));
+            self.new_verdicts.push((page, Some(reason)));
+            return Ok(Some(reason));
+        }
+
         if self.scratch.is_none() {
             // 从文件打开的文档：把文件的数据再解析一遍。要校验的页还没有被改过（改之前必须先过校验），
             // 所以文件原来的样子就是它现在的样子；两份文档共用同一块数据，不复制，文件再大也只花解析的
             // 时间。新建的文档没有文件数据，只能把当前的样子存一份出来再读回去。
-            let copy = self.doc.reopen(self.lib, None).unwrap_or_else(|| {
+            let pw = self.password.as_deref();
+            let copy = self.doc.reopen(self.lib, pw).unwrap_or_else(|| {
                 self.doc
                     .save_to_vec(SaveFlags::NO_INCREMENTAL)
-                    .and_then(|bytes| Document::load_bytes(self.lib, bytes, None))
+                    .and_then(|bytes| Document::load_bytes(self.lib, bytes, pw))
             });
             self.scratch = Some(copy.map_err(|_| ()));
         }
@@ -665,6 +693,76 @@ impl<'lib> Session<'lib> {
             self.undo.remove(0);
         }
     }
+}
+
+/// 流级保真检查：读原始 PDF 的页树与流字典，拦下“内容流解不开”与“内容流 / 页对象被多处共用”。
+struct StreamGuard {
+    pdf: PdfDocument,
+    pages: Vec<Option<PageInfo>>,
+    stream_uses: BTreeMap<u32, usize>,
+    page_uses: BTreeMap<u32, usize>,
+}
+
+impl StreamGuard {
+    fn from_doc(bytes: Option<std::sync::Arc<Vec<u8>>>, expected_pages: usize) -> Option<Self> {
+        let pdf = PdfDocument::load_shared(bytes?).ok()?;
+        if pdf.encrypt.is_some() {
+            return None;
+        }
+        let pages = walk_pages(&pdf);
+        if pages.len() != expected_pages {
+            return None;
+        }
+        let mut stream_uses: BTreeMap<u32, usize> = BTreeMap::new();
+        let mut page_uses: BTreeMap<u32, usize> = BTreeMap::new();
+        for info in pages.iter().flatten() {
+            for number in info.contents.stream_numbers() {
+                *stream_uses.entry(number).or_default() += 1;
+            }
+            if info.number != 0 {
+                *page_uses.entry(info.number).or_default() += 1;
+            }
+        }
+        Some(Self {
+            pdf,
+            pages,
+            stream_uses,
+            page_uses,
+        })
+    }
+
+    fn check_page(&self, page: usize) -> Option<&'static str> {
+        let info = self.pages.get(page)?.as_ref()?;
+        for number in info.contents.stream_numbers() {
+            if let Some(PdfObject::Stream(stream)) = self.pdf.object(number)
+                && !self.pdf.decode_stream_checked(&stream).1
+            {
+                return Some("这一页的内容流没能完整解码");
+            }
+        }
+        if info.number != 0 && self.page_uses.get(&info.number).copied().unwrap_or(0) > 1 {
+            return Some("这一页与别的页共用同一个页对象");
+        }
+        for number in info.contents.stream_numbers() {
+            if self.stream_uses.get(&number).copied().unwrap_or(0) > 1 {
+                return Some("这一页的内容流与别处共用");
+            }
+            if let Some(PdfObject::Stream(stream)) = self.pdf.object(number)
+                && stream_also_an_xobject(&self.pdf, &stream)
+            {
+                return Some("这一页的内容流同时被当作外部对象引用");
+            }
+        }
+        None
+    }
+}
+
+fn stream_also_an_xobject(pdf: &PdfDocument, stream: &PdfStreamRef) -> bool {
+    stream.dict.get(b"Subtype").is_some()
+        || matches!(
+            pdf.resolve(stream.dict.get(b"Type")),
+            Some(PdfObject::Name(ref name)) if name.as_slice() == b"XObject"
+        )
 }
 
 /// 包围盒各边允许的偏差（pt）。生成器把坐标写成十进制小数再读回，会有很小的舍入误差。
@@ -1274,5 +1372,115 @@ mod tests {
             session.undo().unwrap();
             assert!(session.undo().is_err());
         });
+    }
+
+    /// 构造最小测试 PDF：对象从 1 号起顺序写出，附带准确的 xref 表。
+    fn build_minimal_pdf(objects: &[Vec<u8>]) -> Vec<u8> {
+        use std::io::Write as _;
+
+        let mut out = b"%PDF-1.4\n".to_vec();
+        let mut offsets = Vec::with_capacity(objects.len());
+        for (i, body) in objects.iter().enumerate() {
+            offsets.push(out.len());
+            writeln!(out, "{} 0 obj", i + 1).unwrap();
+            out.extend_from_slice(body);
+            out.extend_from_slice(b"\nendobj\n");
+        }
+        let xref = out.len();
+        writeln!(out, "xref\n0 {}", objects.len() + 1).unwrap();
+        out.extend_from_slice(b"0000000000 65535 f \n");
+        for off in offsets {
+            writeln!(out, "{off:010} 00000 n ").unwrap();
+        }
+        writeln!(
+            out,
+            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF",
+            objects.len() + 1
+        )
+        .unwrap();
+        out
+    }
+
+    /// 方案 2.3 / V17 9.8：内容流用了 PDFium 不认得的过滤器时，PDFium 看到空页、重写前后画面一样，
+    /// 光靠对象比对和像素比对会放行并把原流覆盖掉；流级检查必须在重写前拦下来。
+    #[test]
+    fn undecodable_content_stream_is_rejected_by_fidelity_check() {
+        use pdfium_sys::Document;
+
+        let _guard = crate::pdfium_lock::lock();
+        let lib = Library::init().expect("PDFium");
+        let stream_data = b"unrecognized compressed payload";
+        let pdf = build_minimal_pdf(&[
+            b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+            b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] /Contents 4 0 R >>".to_vec(),
+            format!(
+                "<< /Filter /BrotliDecode /Length {} >>\nstream\n{}\nendstream",
+                stream_data.len(),
+                std::str::from_utf8(stream_data).unwrap()
+            )
+            .into_bytes(),
+        ]);
+        let doc = Document::load_bytes(&lib, pdf, None).expect("PDFium 能打开");
+        let mut session = Session::from_document(&lib, doc);
+        assert_eq!(
+            session.check_fidelity(0).unwrap(),
+            Some("这一页的内容流没能完整解码")
+        );
+    }
+
+    /// 方案 2.1 / V03 11.4：两页共用同一条内容流时，生成器就地改写第 1 页会把第 2 页连带改坏；
+    /// 保真校验必须拒绝直接修改原有对象。内容流同时带 `/Subtype /Form` 时同理。
+    #[test]
+    fn shared_content_stream_and_xobject_stream_are_rejected_by_fidelity_check() {
+        use pdfium_sys::Document;
+
+        let _guard = crate::pdfium_lock::lock();
+        let lib = Library::init().expect("PDFium");
+        let body = b"0.1 0.2 0.3 rg 10 10 40 20 re f";
+        let shared_pages_pdf = build_minimal_pdf(&[
+            b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+            b"<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_vec(),
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] /Contents 5 0 R >>".to_vec(),
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] /Contents 5 0 R >>".to_vec(),
+            format!(
+                "<< /Length {} >>\nstream\n{}\nendstream",
+                body.len(),
+                std::str::from_utf8(body).unwrap()
+            )
+            .into_bytes(),
+        ]);
+        let doc = Document::load_bytes(&lib, shared_pages_pdf, None).expect("打开双页共用流样本");
+        let mut session = Session::from_document(&lib, doc);
+        let id = session.objects(0).unwrap()[0].id;
+        assert_eq!(
+            session.check_fidelity(0).unwrap(),
+            Some("这一页的内容流与别处共用")
+        );
+        assert!(matches!(
+            session.transform(&[id], Matrix::translation(5.0, 0.0)),
+            Err(EditError::PageNotEditable {
+                page: 0,
+                reason: "这一页的内容流与别处共用"
+            })
+        ));
+
+        let xobj_pdf = build_minimal_pdf(&[
+            b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+            b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] /Contents 4 0 R >>".to_vec(),
+            format!(
+                "<< /Type /XObject /Subtype /Form /BBox [0 0 200 100] /Length {} >>\nstream\n{}\nendstream",
+                body.len(),
+                std::str::from_utf8(body).unwrap()
+            )
+            .into_bytes(),
+        ]);
+        let doc = Document::load_bytes(&lib, xobj_pdf, None).expect("打开兼作 XObject 的样本");
+        let mut session = Session::from_document(&lib, doc);
+        assert_eq!(
+            session.check_fidelity(0).unwrap(),
+            Some("这一页的内容流同时被当作外部对象引用")
+        );
     }
 }

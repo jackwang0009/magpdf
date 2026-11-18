@@ -2012,6 +2012,7 @@ dependencies = [
 name = "magpdf-engine"
 version = "0.1.0"
 dependencies = [
+ "magpdf-content",
  "pdfium-sys",
  "serde",
  "serde_json",
