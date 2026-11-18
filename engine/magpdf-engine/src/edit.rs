@@ -12,6 +12,7 @@ use std::collections::BTreeMap;
 
 use magpdf_content::PdfDocument;
 use magpdf_content::pdf::object::{PdfObject, PdfStreamRef};
+use magpdf_content::pdf::ocg::reveal_view_layers;
 use magpdf_content::pdf::pages::{PageInfo, walk_pages};
 use pdfium_sys::{
     DetachedObject, Document, Library, Matrix, ObjectKind, Page, PageObject, Rect, RenderOptions,
@@ -185,11 +186,14 @@ pub struct Session<'lib> {
     ///（内容流没能完整解码；内容流或页对象与别处共用，生成器就地改写会连带改坏别处）。
     stream_guard: Option<Option<StreamGuard>>,
     /// 保真校验用的另一份文档，第一次校验时建：文件原来的样子，在它上面试着重写页面，不碰正在用的这份。
-    /// `Err` 表示建不出来。
+    /// 文件里有默认隐藏的可选内容组时，这份副本先把 View 下的组打开，像素比对才看得到那些图层
+    /// （方案 2.3）。`Err` 表示建不出来。
     ///
     /// 它和下面的 `fidelity` 都按页序号对应到正在用的文档。原型还没有页面命令（插入、删除、重排）；
     /// 加页面命令的时候，这两处要改成按不随重排变化的页面编号来对。
     scratch: Option<std::result::Result<Document<'lib>, ()>>,
+    /// 隐藏图层打不开时的结论。有它就不再做对象和像素比对：比了也看不到那些图层。
+    hidden_layers: Option<&'static str>,
     /// 校验过的页：`None` 表示可以修改，`Some` 是不能修改的原因。
     fidelity: BTreeMap<usize, Option<&'static str>>,
     /// 刚校验出来、还没有被 [`Session::take_new_verdicts`] 取走的结论，按得出的先后。
@@ -256,6 +260,7 @@ impl<'lib> Session<'lib> {
             next_id: 0,
             stream_guard: None,
             scratch: None,
+            hidden_layers: None,
             fidelity: BTreeMap::new(),
             new_verdicts: Vec::new(),
             undo: Vec::new(),
@@ -374,9 +379,11 @@ impl<'lib> Session<'lib> {
     /// PDFium 的生成器写不出来的对象会消失、挪位置或者变色，这样的页一旦改了任何对象，整页的内容流
     /// 都要重写，别的对象也跟着坏，所以只允许在上面叠加内容。结果按页记住，只校验一次。
     ///
-    /// 还看不出来的两类，这里还没有做：
-    /// - 颜色空间被换算成画面相同的 RGB（灰度写成 `rg`）：像素一样、对象也一样，要靠操作符级比对；
-    /// - 默认隐藏的可选内容图层：像素比对时没有把图层全部打开（方案 2.3 要求打开）。
+    /// 像素比对前会把默认隐藏的可选内容组在 View 用途下打开（方案 2.3）。加密文件写不回、可选内容
+    /// 成员字典的 AnyOff / AllOff / VE 还开不了，这种文件整份按不能改原有对象处理。
+    ///
+    /// 还看不出来的一类：颜色空间被换算成画面相同的 RGB（灰度写成 `rg`）。像素一样、对象也一样，
+    /// 要靠操作符级比对，这里还没有做。
     ///
     /// 修改命令执行前会自己调用它；也可以提前调用（页面显示之后、引擎空闲时），这样用户第一次修改
     /// 时不用等。
@@ -389,9 +396,10 @@ impl<'lib> Session<'lib> {
 
         let page_count = self.doc.page_count();
         let shared_bytes = self.doc.shared_bytes();
+        let guard_bytes = shared_bytes.clone();
         let guard = self
             .stream_guard
-            .get_or_insert_with(|| StreamGuard::from_doc(shared_bytes, page_count));
+            .get_or_insert_with(|| StreamGuard::from_doc(guard_bytes, page_count));
         if let Some(reason) = guard.as_ref().and_then(|g| g.check_page(page)) {
             self.fidelity.insert(page, Some(reason));
             self.new_verdicts.push((page, Some(reason)));
@@ -399,16 +407,12 @@ impl<'lib> Session<'lib> {
         }
 
         if self.scratch.is_none() {
-            // 从文件打开的文档：把文件的数据再解析一遍。要校验的页还没有被改过（改之前必须先过校验），
-            // 所以文件原来的样子就是它现在的样子；两份文档共用同一块数据，不复制，文件再大也只花解析的
-            // 时间。新建的文档没有文件数据，只能把当前的样子存一份出来再读回去。
-            let pw = self.password.as_deref();
-            let copy = self.doc.reopen(self.lib, pw).unwrap_or_else(|| {
-                self.doc
-                    .save_to_vec(SaveFlags::NO_INCREMENTAL)
-                    .and_then(|bytes| Document::load_bytes(self.lib, bytes, pw))
-            });
-            self.scratch = Some(copy.map_err(|_| ()));
+            self.scratch = Some(self.open_scratch(shared_bytes.as_ref()));
+        }
+        if let Some(reason) = self.hidden_layers {
+            self.fidelity.insert(page, Some(reason));
+            self.new_verdicts.push((page, Some(reason)));
+            return Ok(Some(reason));
         }
         let verdict = match &self.scratch {
             Some(Ok(scratch)) => roundtrip_verdict(scratch, page)?,
@@ -417,6 +421,44 @@ impl<'lib> Session<'lib> {
         self.fidelity.insert(page, verdict);
         self.new_verdicts.push((page, verdict));
         Ok(verdict)
+    }
+
+    /// 校验用的文档副本。有隐藏图层时用打开图层之后的字节；打不开就记结论，不再比对。
+    fn open_scratch(
+        &mut self,
+        shared_bytes: Option<&std::sync::Arc<Vec<u8>>>,
+    ) -> std::result::Result<Document<'lib>, ()> {
+        const LAYERS_UNOPENED: &str = "默认隐藏的可选内容图层打不开，没法比较重写前后的画面";
+        let pw = self.password.as_deref();
+        if let Some(bytes) = shared_bytes {
+            match reveal_view_layers(bytes) {
+                Ok(Some(revealed)) => {
+                    return match Document::load_bytes(self.lib, revealed, pw) {
+                        Ok(doc) => Ok(doc),
+                        Err(_) => {
+                            self.hidden_layers = Some(LAYERS_UNOPENED);
+                            Err(())
+                        }
+                    };
+                }
+                Err(_) => {
+                    self.hidden_layers = Some(LAYERS_UNOPENED);
+                    return Err(());
+                }
+                Ok(None) => {}
+            }
+        }
+        // 从文件打开的文档：把文件的数据再解析一遍。要校验的页还没有被改过（改之前必须先过校验），
+        // 所以文件原来的样子就是它现在的样子；两份文档共用同一块数据，不复制，文件再大也只花解析的
+        // 时间。新建的文档没有文件数据，只能把当前的样子存一份出来再读回去。
+        self.doc
+            .reopen(self.lib, pw)
+            .unwrap_or_else(|| {
+                self.doc
+                    .save_to_vec(SaveFlags::NO_INCREMENTAL)
+                    .and_then(|bytes| Document::load_bytes(self.lib, bytes, pw))
+            })
+            .map_err(|_| ())
     }
 
     /// 这一页已经有的校验结论，不做校验。外层的 `None` 表示还没有校验过。
@@ -1481,6 +1523,107 @@ mod tests {
         assert_eq!(
             session.check_fidelity(0).unwrap(),
             Some("这一页的内容流同时被当作外部对象引用")
+        );
+    }
+
+    fn ocg_pdf(content: &[u8]) -> Vec<u8> {
+        build_minimal_pdf(&[
+            b"<< /Type /Catalog /Pages 2 0 R /OCProperties << /OCGs [5 0 R] /D << >> >> >>"
+                .to_vec(),
+            b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] /Resources << /Properties << /H 5 0 R >> >> /Contents 4 0 R >>"
+                .to_vec(),
+            {
+                let mut body = format!("<< /Length {} >>\nstream\n", content.len()).into_bytes();
+                body.extend_from_slice(content);
+                body.extend_from_slice(b"\nendstream");
+                body
+            },
+            b"<< /Type /OCG /Usage << /View << /ViewState /OFF >> >> >>".to_vec(),
+        ])
+    }
+
+    fn red_pixels(bmp: &pdfium_sys::Bitmap) -> usize {
+        let mut count = 0;
+        for y in 0..bmp.height() {
+            for x in 0..bmp.width() {
+                let px = bmp.pixel(x, y);
+                if px[2] > 200 && px[1] < 60 && px[0] < 60 {
+                    count += 1;
+                }
+            }
+        }
+        count
+    }
+
+    /// 方案 2.3：屏幕上默认不画的图层，像素比对前要打开。样本的红框只在打印时出现。
+    #[test]
+    fn revealing_view_layers_shows_marks_that_screen_rendering_skips() {
+        use pdfium_sys::Document;
+
+        let _guard = crate::pdfium_lock::lock();
+        let lib = Library::init().expect("PDFium");
+        let sample = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/corpus/synthetic/struct-ocg-layers.pdf");
+        let bytes = std::fs::read(&sample).expect("样本");
+        let original = Document::load_bytes(&lib, bytes.clone(), None).expect("打开");
+        let screen = original
+            .page(0)
+            .unwrap()
+            .render(pdfium_sys::RenderOptions::default())
+            .unwrap();
+        assert_eq!(red_pixels(&screen), 0, "屏幕渲染不该出现只供打印的红框");
+
+        let revealed = magpdf_content::pdf::ocg::reveal_view_layers(&bytes)
+            .unwrap()
+            .expect("样本有隐藏图层");
+        let opened = Document::load_bytes(&lib, revealed, None).expect("打开图层后的文件");
+        let shown = opened
+            .page(0)
+            .unwrap()
+            .render(pdfium_sys::RenderOptions::default())
+            .unwrap();
+        assert!(
+            red_pixels(&shown) > 30,
+            "打开 View 图层后应看到红框，红色像素 {}",
+            red_pixels(&shown)
+        );
+    }
+
+    /// 隐藏图层里是生成器写得回来的 RGB 路径时，打开图层之后两边画面一致，页仍然可以改。
+    #[test]
+    fn hidden_rgb_path_stays_editable_when_layers_are_opened() {
+        use pdfium_sys::Document;
+
+        let _guard = crate::pdfium_lock::lock();
+        let lib = Library::init().expect("PDFium");
+        let content = b"/OC /H BDC 1 0 0 rg 10 10 30 20 re f EMC\n0 0 0 rg 60 10 30 20 re f";
+        let doc = Document::load_bytes(&lib, ocg_pdf(content), None).expect("打开");
+        let mut session = Session::from_document(&lib, doc);
+        assert_eq!(session.check_fidelity(0).unwrap(), None);
+    }
+
+    /// 隐藏图层里放一块原版生成器写不好的 CMYK 色块，可见部分是一块普通的黑块。
+    /// 图层不打开时两边屏幕上都只有黑块，对象的个数和位置也不变，校验会误放行；
+    /// 打开之后重写前后的画面不一样，必须拒绝修改原有对象。
+    #[test]
+    fn hidden_cmyk_mark_is_rejected_once_layers_are_opened() {
+        use pdfium_sys::Document;
+
+        let _guard = crate::pdfium_lock::lock();
+        let lib = Library::init().expect("PDFium");
+        let content = b"/OC /H BDC 0 1 1 0 k 10 10 40 20 re f EMC\n0 0 0 rg 60 10 30 20 re f";
+        let doc = Document::load_bytes(&lib, ocg_pdf(content), None).expect("打开");
+        let screen = doc
+            .page(0)
+            .unwrap()
+            .render(pdfium_sys::RenderOptions::default())
+            .unwrap();
+        assert_eq!(red_pixels(&screen), 0, "隐藏的 CMYK 色块不该出现在屏幕上");
+        let mut session = Session::from_document(&lib, doc);
+        assert_eq!(
+            session.check_fidelity(0).unwrap(),
+            Some("重新生成内容流后页面的画面变了")
         );
     }
 }

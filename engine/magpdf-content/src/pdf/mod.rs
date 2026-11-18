@@ -12,6 +12,7 @@
 mod filter;
 pub mod lexer;
 pub mod object;
+pub mod ocg;
 pub mod pages;
 pub mod pairs;
 pub mod reader;
