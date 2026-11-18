@@ -210,6 +210,9 @@ class FileResult:
     #: 结构校验的结果；None = 这个文件没有查（没有保存结果，或者结构校验的结果里没有它）。
     struct: StructPair | None = None
     struct_note: str = ""
+    #: manifest.json 里的场景分组（group）和特征标签（tags）；只统计，不进基线。
+    group: str = ""
+    tags: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -221,6 +224,9 @@ class Snapshot:
     meta: dict[str, Any] = field(default_factory=dict)
     has_ops: bool = False
     has_struct: bool = False
+    has_manifest: bool = False
+    manifest_matched: int = 0
+    group_titles: dict[str, str] = field(default_factory=dict)
 
     def page_count(self) -> int:
         return sum(len(f.pages) for f in self.files)
@@ -326,6 +332,50 @@ def _attach_struct(result: FileResult, record: dict[str, Any] | None) -> None:
         result.struct_note = STRUCT_SKIP_LABELS.get(reason, reason)
         return
     result.struct = StructPair(original, saved)
+
+
+def attach_manifests(snapshot: Snapshot, manifests: Iterable[tuple[str, dict[str, Any]]]) -> None:
+    """把各来源目录的 manifest.json（《测试样本收集与脱敏规范》第 6 节）挂到 Snapshot 的文件上。
+
+    `manifests` 的每一项是 `(相对路径前缀, 清单字典)`：清单直接放在语料根目录下时前缀是 `""`，放在子目录
+    `office-word/manifest.json` 里时前缀是 `"office-word/"`。只取 `group`、`tags` 和顶层的 `groups` 说明，
+    不读 `note`、`expected`、`title` 这些人工自由填写的文字。特征统计只看这一次，不进基线，也不参加退步判定。
+    """
+    by_path: dict[str, tuple[str, list[str]]] = {}
+    titles: dict[str, str] = {}
+    has_any = False
+    for prefix, data in manifests:
+        if not isinstance(data, dict) or not isinstance(data.get("files"), list):
+            continue
+        has_any = True
+        groups = data.get("groups")
+        if isinstance(groups, dict):
+            for key, title in groups.items():
+                name = str(key).strip()
+                if name and isinstance(title, str) and title.strip():
+                    titles.setdefault(name, title.strip())
+        norm_prefix = prefix.replace("\\", "/").strip("/")
+        if norm_prefix:
+            norm_prefix += "/"
+        for entry in data["files"]:
+            if not isinstance(entry, dict) or not entry.get("file"):
+                continue
+            rel = norm_prefix + str(entry["file"]).replace("\\", "/").lstrip("/")
+            group = str(entry.get("group") or "").strip()
+            raw_tags = entry.get("tags")
+            tags = list(dict.fromkeys(str(t).strip() for t in raw_tags if str(t).strip())) if isinstance(raw_tags, list) else []
+            by_path[rel] = (group, tags)
+    if not has_any:
+        return
+    matched = 0
+    for file in snapshot.files:
+        hit = by_path.get(file.path)
+        if hit is not None:
+            file.group, file.tags = hit[0], list(hit[1])
+            matched += 1
+    snapshot.has_manifest = True
+    snapshot.manifest_matched = matched
+    snapshot.group_titles = titles
 
 
 def load_run(
@@ -577,6 +627,28 @@ def summarize(files: Iterable[FileResult]) -> dict[str, Summary]:
     for file in files:
         by_source.setdefault(file.source, Summary()).add_file(file)
     return dict(sorted(by_source.items()))
+
+
+def summarize_by_group(files: Iterable[FileResult]) -> dict[str, Summary]:
+    """按 manifest.json 的场景分组（group）汇总，键按分组名排序；没有 group 的文件不计入。"""
+    by_group: dict[str, Summary] = {}
+    for file in files:
+        if file.group:
+            by_group.setdefault(file.group, Summary()).add_file(file)
+    return dict(sorted(by_group.items()))
+
+
+def summarize_by_tag(files: Iterable[FileResult]) -> dict[str, Summary]:
+    """按 manifest.json 的特征标签（tags）汇总，键按标签名排序。
+
+    一个文件可以带多个标签，各标签之间有重叠，不能把各行加起来当合计。
+    """
+    by_tag: dict[str, Summary] = {}
+    for file in files:
+        for tag in dict.fromkeys(file.tags):
+            if tag:
+                by_tag.setdefault(tag, Summary()).add_file(file)
+    return dict(sorted(by_tag.items()))
 
 
 def total_of(summaries: Iterable[Summary]) -> Summary:

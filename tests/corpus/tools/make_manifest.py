@@ -30,6 +30,8 @@ from corpuslib import CATEGORY_BY_DIR, ORIGIN_BY_CATEGORY, cli_info, dump_json, 
 MANIFEST_SCHEMA = 1
 MANUAL_FIELDS = (
     "id",
+    "group",
+    "refs",
     "origin",
     "license",
     "desensitized",
@@ -38,6 +40,8 @@ MANUAL_FIELDS = (
     "reviewedOn",
     "originalDeletedOn",
     "tags",
+    "check",
+    "checkNote",
     "expected",
     "issues",
     "title",
@@ -131,9 +135,9 @@ def main() -> int:
         ordered = {
             k: entry.get(k)
             for k in (
-                "id", "category", "file", "sha256", "size", "pages", "pdfVersion", "origin", "license", "desensitized",
-                "desensitizedBy", "reviewedBy", "reviewedOn", "originalDeletedOn", "tags", "expected", "issues",
-                "title", "note", "pageInfo",
+                "id", "category", "file", "sha256", "size", "pages", "pdfVersion", "group", "refs", "origin", "license",
+                "desensitized", "desensitizedBy", "reviewedBy", "reviewedOn", "originalDeletedOn", "tags", "check",
+                "checkNote", "expected", "issues", "title", "note", "pageInfo",
             )
             if k in entry
         }  # fmt: skip
@@ -142,13 +146,15 @@ def main() -> int:
     for gone in sorted(old_entries):
         print(f"removed from manifest (file no longer present): {gone}")
 
-    manifest = {
+    manifest: dict = {
         "schema": MANIFEST_SCHEMA,
         "directory": directory.name,
         "category": category,
         "description": old.get("description", ""),
-        "files": entries,
     }
+    if "groups" in old:
+        manifest["groups"] = old["groups"]
+    manifest["files"] = entries
     dump_json(manifest, manifest_path)
     missing_pages = sum(1 for e in entries if e["pages"] is None)
     print(f"{manifest_path}: {len(entries)} file(s), {missing_pages} without page count")

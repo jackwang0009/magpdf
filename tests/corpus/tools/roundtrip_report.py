@@ -64,12 +64,15 @@ from roundtrip_model import (  # noqa: E402
     StructSide,
     StructSummary,
     Summary,
+    attach_manifests,
     compare,
     dumps_baseline,
     load_run,
     loads_baseline,
     struct_total_of,
     summarize,
+    summarize_by_group,
+    summarize_by_tag,
     summarize_struct,
     total_of,
 )
@@ -111,6 +114,7 @@ class SetInput:
     calibrate: Path | None = None
     baseline: Path | None = None
     corpus_dir: Path | None = None
+    manifests: list[Path] = field(default_factory=list)
     seconds: dict[str, float] = field(default_factory=dict)
 
 
@@ -226,6 +230,38 @@ def struct_tool_text(meta: dict[str, Any]) -> str:
     return "pikepdf 的 check_pdf_syntax()（和 qpdf --check 做的事差不多，不是同一个命令）"
 
 
+def _load_manifests_for_spec(spec: SetInput) -> list[tuple[str, dict[str, Any]]]:
+    """收集一个语料集的 manifest.json（显式给的 --manifest，或者 corpus_dir 下 schema=1 的清单）。"""
+    found: list[tuple[str, dict[str, Any]]] = []
+    if spec.manifests:
+        base = spec.corpus_dir.resolve() if spec.corpus_dir is not None and spec.corpus_dir.is_dir() else None
+        for path in spec.manifests:
+            data = read_json(path)
+            if not isinstance(data, dict) or not isinstance(data.get("files"), list):
+                raise ValueError(f"{path} 不是样本清单 manifest.json")
+            prefix = ""
+            if base is not None:
+                try:
+                    rel = path.resolve().parent.relative_to(base).as_posix()
+                    prefix = "" if rel == "." else rel + "/"
+                except ValueError:
+                    prefix = ""
+            found.append((prefix, data))
+        return found
+    if spec.corpus_dir is not None and spec.corpus_dir.is_dir():
+        root = spec.corpus_dir.resolve()
+        for path in sorted(root.rglob("manifest.json")):
+            try:
+                data = read_json(path)
+            except (OSError, ValueError):
+                continue
+            if not isinstance(data, dict) or data.get("schema") != 1 or not isinstance(data.get("files"), list):
+                continue
+            rel = path.parent.relative_to(root).as_posix()
+            found.append(("" if rel == "." else rel + "/", data))
+    return found
+
+
 def load_set(spec: SetInput) -> SetReport:
     ops = read_json(spec.ops) if spec.ops is not None and spec.ops.is_file() else None
     struct = read_json(spec.struct) if spec.struct is not None and spec.struct.is_file() else None
@@ -233,6 +269,9 @@ def load_set(spec: SetInput) -> SetReport:
     snapshot = load_run(read_json(spec.roundtrip), ops, struct, **naming)
     if spec.corpus_dir is not None and spec.corpus_dir.is_dir():
         snapshot.meta["corpus"] = corpus_fingerprint(spec.corpus_dir)
+    manifests = _load_manifests_for_spec(spec)
+    if manifests:
+        attach_manifests(snapshot, manifests)
     report = SetReport(spec=spec, snapshot=snapshot)
     if spec.calibrate is not None and spec.calibrate.is_file():
         cal = load_run(read_json(spec.calibrate), None, **naming)
@@ -416,6 +455,19 @@ def ops_brief(page: Page) -> str:
 
 def hint_text(hints: list[str]) -> str:
     return "、".join(HINT_LABELS.get(h, h) for h in hints) if hints else "—"
+
+
+def _summary_has_problem(s: Summary) -> bool:
+    return bool(
+        s.diff
+        or s.ops_diff_pages
+        or s.errored
+        or s.load_failed
+        or s.save_failed
+        or s.reopen_failed
+        or s.crashed
+        or s.timed_out
+    )
 
 
 class Thumbnails:
@@ -754,7 +806,126 @@ class HtmlBuilder:
             "“扣除无对象页”就是把它们从分子分母里都去掉；退步判定用这一列。“比基线”一列只拿基线里有、这次也有的文件算"
             "（第 2 节）。判定“无差异”的阈值见最后一节。合计只作参考：各来源要分开看（方案 13.1）。</p>"
         )
-        return f'<h2 id="summary">1. 按来源汇总（像素比对）</h2><div class="scroll"><table>{head}{"".join(rows)}</table></div>{note}'
+        return (
+            f'<h2 id="summary">1. 按来源汇总（像素比对）</h2><div class="scroll"><table>{head}{"".join(rows)}</table></div>{note}'
+            + self.features_subsection()
+        )
+
+    def has_features(self) -> bool:
+        return any(
+            s.snapshot.has_manifest and (summarize_by_group(s.snapshot.files) or summarize_by_tag(s.snapshot.files))
+            for s in self.report.sets
+        )
+
+    def _feature_table(
+        self,
+        first_col: str,
+        items: list[tuple[str, str | None, Summary]],
+        *,
+        with_desc: bool,
+        has_ops: bool,
+    ) -> str:
+        desc_th = "<th>说明</th>" if with_desc else ""
+        ops_th = "<th class=n>两项都<br>无差异</th><th class=n>两项比例<br>（扣除无对象页）</th>" if has_ops else ""
+        head = (
+            f"<tr><th>{esc(first_col)}</th>{desc_th}<th class=n>文件</th><th class=n>比对页</th><th class=n>无差异</th>"
+            "<th class=n>有差异</th><th class=n>比例<br>（全部比对页）</th><th class=n>有对象的<br>比对页</th>"
+            f"<th class=n>其中<br>无差异</th><th class=n>比例<br>（扣除无对象页）</th>{ops_th}"
+            "<th>差异页的主要线索</th></tr>"
+        )
+        rows: list[str] = []
+        for name, desc, s in items:
+            hints = sorted(s.hints.items(), key=lambda item: (-item[1], item[0]))[:3]
+            hint = "，".join(f"{HINT_LABELS.get(k, k)} {v}" for k, v in hints) or "—"
+            desc_td = f"<td>{esc(desc or '—')}</td>" if with_desc else ""
+            ops_td = (
+                f'<td class="n">{num(s.strict_pass)}</td><td class="n">{pct(s.strict_ratio_nonempty)}</td>'
+                if has_ops
+                else ""
+            )
+            rows.append(
+                f"<tr><td><code>{esc(name)}</code></td>{desc_td}"
+                f'<td class="n">{num(s.files)}</td><td class="n">{num(s.compared)}</td>'
+                f'<td class="n">{num(s.passed)}</td><td class="n">{_alert_num(s.diff)}</td>'
+                f'<td class="n">{pct(s.ratio_all)}</td><td class="n">{num(s.with_objects)}</td>'
+                f'<td class="n">{num(s.passed_with_objects)}</td>'
+                f'<td class="n"><strong>{pct(s.ratio_nonempty)}</strong></td>'
+                f"{ops_td}<td>{esc(hint)}</td></tr>"
+            )
+        return f'<div class="scroll"><table>{head}{"".join(rows)}</table></div>'
+
+    def features_subsection(self) -> str:
+        if not self.has_features():
+            return ""
+        out = [
+            '<h3 id="features">按特征汇总（来自 manifest.json）</h3>',
+            '<p class="sub">读各语料目录的 <code>manifest.json</code>（《测试样本收集与脱敏规范》第 6 节）：'
+            "按场景分组（<code>group</code>，文件互不重叠）和特征标签（<code>tags</code>，一个文件可以带多个标签，"
+            "各行之间有重叠，不能相加）分别统计。只看这一次的结果，不参加退步判定。</p>",
+        ]
+        many = len(self.report.sets) > 1
+        for current in self.report.sets:
+            snap = current.snapshot
+            if not snap.has_manifest:
+                continue
+            by_group = summarize_by_group(snap.files)
+            by_tag = summarize_by_tag(snap.files)
+            if not by_group and not by_tag:
+                continue
+            matched = f"清单匹配 {num(snap.manifest_matched)} / {num(len(snap.files))} 个文件"
+            if many:
+                out.append(f"<h3>{esc(current.spec.title)}（{matched}）</h3>")
+            else:
+                out.append(f'<p class="sub">{matched}。</p>')
+            if by_group:
+                group_items = [(g, snap.group_titles.get(g), s) for g, s in by_group.items()]
+                out.append(
+                    self._feature_table(
+                        "场景分组（group）",
+                        group_items,
+                        with_desc=bool(snap.group_titles),
+                        has_ops=snap.has_ops,
+                    )
+                )
+            if by_tag:
+                if len(by_tag) > 20:
+                    shown = [t for t, s in by_tag.items() if _summary_has_problem(s) or s.files >= 2]
+                    folded = [t for t, s in by_tag.items() if not (_summary_has_problem(s) or s.files >= 2)]
+                else:
+                    shown = list(by_tag)
+                    folded = []
+                shown.sort(
+                    key=lambda t: (
+                        0 if _summary_has_problem(by_tag[t]) else 1,
+                        -by_tag[t].diff,
+                        -by_tag[t].ops_diff_pages,
+                        -by_tag[t].files,
+                        t,
+                    )
+                )
+                if shown:
+                    tag_items = [(t, None, by_tag[t]) for t in shown]
+                    out.append(
+                        self._feature_table(
+                            "特征标签（tags）",
+                            tag_items,
+                            with_desc=False,
+                            has_ops=snap.has_ops,
+                        )
+                    )
+                if folded:
+                    folded_items = [(t, None, by_tag[t]) for t in folded]
+                    out.append(
+                        f"<details><summary>其余只出现在 1 个文件、并且全部无差异的特征标签（{num(len(folded))} 个）</summary>"
+                        + self._feature_table(
+                            "特征标签（tags）",
+                            folded_items,
+                            with_desc=False,
+                            has_ops=snap.has_ops,
+                        )
+                        + "</details>"
+                    )
+        return "".join(out)
 
     # ---- 2. 和基线比较 --------------------------------------------------
 
@@ -1273,6 +1444,8 @@ class HtmlBuilder:
                 )
             )
         kv.append(("隔离与超时", f"每个文件一个子进程；单个文件超时 {first.get('timeout_s')} 秒；同时 {first.get('jobs')} 个子进程"))
+        if (env.get("options") or {}).get("no_diff_images"):
+            kv.append(("差异图", "不出图（不写页面渲染 PNG，报告页面也不内嵌缩略图）"))
         git = env.get("git") or {}
         if git.get("commit"):
             kv.append(("代码", f"{git.get('commit')}{'（' + str(git.get('branch')) + '）' if git.get('branch') else ''}{'，工作区有没提交的改动' if git.get('dirty') else ''}"))
@@ -1294,10 +1467,11 @@ class HtmlBuilder:
         return "".join(out)
 
     def build(self) -> str:
+        feat_nav = '<a href="#features">按特征</a>' if self.has_features() else ""
         body = [
             self.header(),
             self.banner(),
-            '<nav><a href="#summary">1. 按来源汇总</a><a href="#baseline">2. 和基线比较</a><a href="#failed">3. 没通过的页</a>'
+            f'<nav><a href="#summary">1. 按来源汇总</a>{feat_nav}<a href="#baseline">2. 和基线比较</a><a href="#failed">3. 没通过的页</a>'
             '<a href="#ops">4. 操作符级比对</a><a href="#struct">5. 结构校验</a><a href="#files">6. 崩溃、超时、打不开</a>'
             '<a href="#run">7. 怎么跑的</a></nav>',
             self.summary_section(),
@@ -1395,6 +1569,51 @@ def render_markdown(report: Report) -> str:
                     f"| {s.strict_pass} | {pct(s.strict_ratio_nonempty)} | {counts} |"
                 )
 
+    for current in report.sets:
+        snap = current.snapshot
+        if not snap.has_manifest:
+            continue
+        by_group = summarize_by_group(snap.files)
+        by_tag = summarize_by_tag(snap.files)
+        label = f"（{current.spec.title}）" if len(report.sets) > 1 else ""
+        if by_group:
+            ops_col = " | 两项都无差异比例" if snap.has_ops else ""
+            ops_sep = "|---" if snap.has_ops else ""
+            lines += [
+                "",
+                f"按场景分组{label}（manifest.json 的 group）：",
+                "",
+                f"| 分组 | 说明 | 文件 | 有对象的比对页 | 其中像素无差异 | 比例（扣除无对象页）{ops_col} |",
+                f"|---|---|---|---|---|---{ops_sep}|",
+            ]
+            for group, s in by_group.items():
+                desc = snap.group_titles.get(group, "—")
+                ops_val = f" | {pct(s.strict_ratio_nonempty)}" if snap.has_ops else ""
+                lines.append(
+                    f"| `{group}` | {desc} | {s.files} | {s.with_objects} | {s.passed_with_objects} "
+                    f"| {pct(s.ratio_nonempty)}{ops_val} |"
+                )
+        bad_tags = sorted(
+            (t for t, s in by_tag.items() if _summary_has_problem(s)),
+            key=lambda t: (-by_tag[t].diff, -by_tag[t].ops_diff_pages, -by_tag[t].files, t),
+        )
+        if bad_tags:
+            ops_col = " | 有操作符差异的页 | 两项都无差异比例" if snap.has_ops else ""
+            ops_sep = "|---|---" if snap.has_ops else ""
+            lines += [
+                "",
+                f"有差异的特征标签{label}（manifest.json 的 tags，共 {len(bad_tags)} / {len(by_tag)} 个标签）：",
+                "",
+                f"| 标签 | 文件 | 有对象的比对页 | 像素有差异 | 比例（扣除无对象页）{ops_col} |",
+                f"|---|---|---|---|---{ops_sep}|",
+            ]
+            for tag in bad_tags[:25]:
+                s = by_tag[tag]
+                ops_val = f" | {s.ops_diff_pages} | {pct(s.strict_ratio_nonempty)}" if snap.has_ops else ""
+                lines.append(f"| `{tag}` | {s.files} | {s.with_objects} | {s.diff} | {pct(s.ratio_nonempty)}{ops_val} |")
+            if len(bad_tags) > 25:
+                lines.append(f"| …… | 另有 {len(bad_tags) - 25} 个标签 | — | — | —{' | — | —' if snap.has_ops else ''} |")
+
     if any(s.snapshot.has_struct for s in report.sets):
         lines += [
             "",
@@ -1460,6 +1679,11 @@ def summary_json(report: Report, exit_code: int) -> dict[str, Any]:
                 "pages": current.snapshot.page_count(),
                 "has_ops": current.snapshot.has_ops,
                 "has_struct": current.snapshot.has_struct,
+                "has_manifest": current.snapshot.has_manifest,
+                "manifest_matched": current.snapshot.manifest_matched,
+                "group_titles": current.snapshot.group_titles,
+                "by_group": {g: s.to_json() for g, s in summarize_by_group(current.snapshot.files).items()},
+                "by_tag": {t: s.to_json() for t, s in summarize_by_tag(current.snapshot.files).items()},
                 "meta": current.snapshot.meta,
                 "seconds": current.spec.seconds,
                 "total": total_of(summarize(current.snapshot.files).values()).to_json(),
@@ -1569,7 +1793,8 @@ def main(argv: Iterable[str] | None = None) -> int:
     parser.add_argument("--name", default="run", help="语料集的名字（也是基线文件名）")
     parser.add_argument("--source-prefix", default="", help="加在来源名前面，例如 public/pdfium/")
     parser.add_argument("--root-source", default="", help="直接放在输入目录下的文件算哪个来源（默认用输入目录的名字），例如 resources")
-    parser.add_argument("--corpus-dir", type=Path, help="语料目录，用来算语料指纹")
+    parser.add_argument("--corpus-dir", type=Path, help="语料目录，用来算语料指纹、自动读取 manifest.json 的特征标签")
+    parser.add_argument("--manifest", action="append", type=Path, default=[], help="样本清单 manifest.json（可给多次；给了 --corpus-dir 时会自动查找）")
     parser.add_argument("--baseline", type=Path, help="基线文件")
     parser.add_argument("--out", type=Path, required=True, help="写出的 HTML 页面")
     parser.add_argument("--summary", type=Path, help="写出机器可读的摘要 JSON")
@@ -1578,6 +1803,7 @@ def main(argv: Iterable[str] | None = None) -> int:
     parser.add_argument("--max-drop-pp", type=float, default=DEFAULT_MAX_DROP_PP, help="报警线：比例比基线低多少个百分点以上（默认 0.5）")
     parser.add_argument("--fail-on", choices=("any", "alarm", "never"), default="any", help="什么情况退出码非 0：any 有退步就算（默认）；alarm 只有到报警线才算；never 都不算")
     parser.add_argument("--require-baseline", action="store_true", help="有语料集没有基线时退出码 1")
+    parser.add_argument("--no-diff-images", action="store_true", help="页面不内嵌缩略图、也不链接差异图（真实样本不许带出页面图像时用）")
     parser.add_argument("--thumb-width", type=int, default=200, help="内嵌缩略图的宽度（像素）")
     parser.add_argument("--max-thumb-pages", type=int, default=300, help="最多给多少页内嵌缩略图；0 是不内嵌")
     args = parser.parse_args(list(argv) if argv is not None else None)
@@ -1598,6 +1824,7 @@ def main(argv: Iterable[str] | None = None) -> int:
                     diff_dir=args.diff_dir,
                     baseline=args.baseline,
                     corpus_dir=args.corpus_dir,
+                    manifests=list(args.manifest),
                 )
             ]
             env = {}
@@ -1606,6 +1833,11 @@ def main(argv: Iterable[str] | None = None) -> int:
         if not specs:
             print("run.json 里没有语料集", file=sys.stderr)
             return EXIT_ERROR
+        no_diff_images = args.no_diff_images or bool((env.get("options") or {}).get("no_diff_images"))
+        if no_diff_images:
+            for spec in specs:
+                spec.diff_dir = None
+            env.setdefault("options", {})["no_diff_images"] = True
         report = build_report(specs, env, args.max_drop_pp)
     except (OSError, ValueError, KeyError) as e:
         print(f"读输入出错：{e}", file=sys.stderr)
@@ -1614,7 +1846,8 @@ def main(argv: Iterable[str] | None = None) -> int:
     code = exit_code_of(report.level, args.fail_on)
     out_dir = args.out.resolve().parent
     out_dir.mkdir(parents=True, exist_ok=True)
-    page = render_html(report, out_dir, thumb_width=args.thumb_width, max_thumb_pages=args.max_thumb_pages)
+    max_thumbs = 0 if no_diff_images else args.max_thumb_pages
+    page = render_html(report, out_dir, thumb_width=args.thumb_width, max_thumb_pages=max_thumbs)
     args.out.write_text(page, encoding="utf-8", newline="\n")
     if args.markdown is not None:
         args.markdown.parent.mkdir(parents=True, exist_ok=True)

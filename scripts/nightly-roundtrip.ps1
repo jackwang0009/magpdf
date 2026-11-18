@@ -44,6 +44,10 @@
   qpdf 可执行文件。给了，结构校验就改用 `qpdf --check` 这个命令来查（它比默认的 pikepdf 多查线性化、表单域、书签和名称树）；
   没给也可以用环境变量 MAGPDF_QPDF。流水线上没有装 qpdf，不给这个参数。
 
+.PARAMETER NoDiffImages
+  不出差异图：命令行工具不写 `--diff-dir`（不生成未通过页面的三张渲染 PNG），报告页面也不内嵌缩略图。
+  真实样本不许上传或带出文档页面图像时用（也可以设环境变量 MAGPDF_NO_DIFF_IMAGES=1）。
+
 .EXAMPLE
   pwsh scripts/nightly-roundtrip.ps1 -Cli D:\workspace\magpdf-wt\bin\magpdf-cli.exe -PublicPdfium D:\tmp\v03-public\testing\resources
 
@@ -65,6 +69,7 @@ param(
     [switch]$SkipOpsDiff,
     [switch]$SkipStructCheck,
     [switch]$SkipSynthetic,
+    [switch]$NoDiffImages,
     [string]$Qpdf = '',
     [string]$Python = 'python'
 )
@@ -116,6 +121,9 @@ try {
     if ($Qpdf) {
         if (-not (Test-Path $Qpdf -PathType Leaf)) { throw "找不到 qpdf：$Qpdf" }
         $Qpdf = (Resolve-Path $Qpdf).Path
+    }
+    if (-not $NoDiffImages -and "$env:MAGPDF_NO_DIFF_IMAGES" -match '^(?i)(1|true|yes)$') {
+        $NoDiffImages = $true
     }
 
     if (-not $OutDir) { $OutDir = Join-Path $root 'tests\out\nightly' }
@@ -199,7 +207,8 @@ try {
         # 1. 往返
         $roundtripJson = Join-Path $setDir 'roundtrip.json'
         $cliArgs = @('roundtrip', $set.dir, '--isolate', '--jobs', "$Jobs", '--timeout', "$Timeout", '--quiet',
-            '--json', $roundtripJson, '--diff-dir', (Join-Path $setDir 'diff'), '--save-dir', (Join-Path $setDir 'saved'))
+            '--json', $roundtripJson, '--save-dir', (Join-Path $setDir 'saved'))
+        if (-not $NoDiffImages) { $cliArgs += @('--diff-dir', (Join-Path $setDir 'diff')) }
         if ($set.source) { $cliArgs += @('--source', $set.source) }
         $watch = [Diagnostics.Stopwatch]::StartNew()
         & $Cli @cliArgs | Tee-Object -FilePath (Join-Path $setDir 'roundtrip.txt') | ForEach-Object { Write-Host "  $_" }
@@ -259,10 +268,10 @@ try {
             name = $name; title = $set.title; source_prefix = $set.prefix; root_source = $set.rootSource
             corpus_dir = $set.dir
             roundtrip = "$name/roundtrip.json"
-            diff_dir = "$name/diff"
             baseline = (Join-Path $BaselineDir "$name.json")
             seconds = $seconds
         }
+        if (-not $NoDiffImages) { $record.diff_dir = "$name/diff" }
         if ($calibrateJson) { $record.calibrate = "$name/calibrate.json" }
         if ($opsJson) { $record.ops = "$name/ops.json" }
         if ($opsError) { $record.ops_error = $opsError }
@@ -280,7 +289,7 @@ try {
         machine = $machine; os = $os; cpu = $cpu; ci = [bool]$env:GITHUB_ACTIONS
         cli = [ordered]@{ path = $Cli; version = "$cliVersion"; sha256 = $cliHash }
         pdfium_dll_sha256 = $dllHash
-        options = [ordered]@{ jobs = $Jobs; timeout_s = $Timeout; fail_on = $FailOn }
+        options = [ordered]@{ jobs = $Jobs; timeout_s = $Timeout; fail_on = $FailOn; no_diff_images = [bool]$NoDiffImages }
         sets = @($setRecords)
     }
     $run | ConvertTo-Json -Depth 8 | Set-Content -Path $runJson -Encoding utf8
@@ -289,6 +298,7 @@ try {
     $summaryMd = Join-Path $OutDir 'summary.md'
     $reportArgs = @('-X', 'dev', (Join-Path $tools 'roundtrip_report.py'), '--run', $runJson, '--out', $reportHtml,
         '--summary', (Join-Path $OutDir 'summary.json'), '--markdown', $summaryMd, '--baseline-out', $candidateDir, '--fail-on', $FailOn)
+    if ($NoDiffImages) { $reportArgs += '--no-diff-images' }
     if ($RequireBaseline -and -not $UpdateBaseline) { $reportArgs += '--require-baseline' }
     Write-Host ''
     $watch = [Diagnostics.Stopwatch]::StartNew()

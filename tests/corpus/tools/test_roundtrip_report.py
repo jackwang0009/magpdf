@@ -1006,6 +1006,127 @@ class ReportTests(unittest.TestCase):
             code, _ = self.run_main(*common, "--require-baseline")
             self.assertEqual(code, 1, "有一个语料集没有基线")
 
+    def test_manifest_features_grouped_by_group_and_tags_without_leaking_notes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            corpus = root / "corpus"
+            (corpus / "office-word").mkdir(parents=True)
+            (corpus / "design").mkdir(parents=True)
+            for rel in ("office-word/a.pdf", "office-word/b.pdf", "design/c.pdf"):
+                (corpus / rel).write_bytes(b"%PDF-1.4\n%%EOF\n")
+            (corpus / "office-word" / "manifest.json").write_text(
+                json.dumps(
+                    {
+                        "schema": 1,
+                        "directory": "office-word",
+                        "groups": {"text": "文字与字距", "color": "颜色空间"},
+                        "files": [
+                            {
+                                "file": "a.pdf",
+                                "group": "text",
+                                "tags": ["cjk", "TJ", "cjk"],  # 重复标签只算一次
+                                "note": "发货人 SAMPLE CO LTD 敏感备注",
+                                "title": "合同 SAMPLE SECRET",
+                                "expected": "甲方 SAMPLE SECRET",
+                            },
+                            {"file": "b.pdf", "group": "text", "tags": ["cjk", "multi-page"]},
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            (corpus / "design" / "manifest.json").write_text(
+                json.dumps(
+                    {
+                        "schema": 1,
+                        "directory": "design",
+                        "groups": {"color": "颜色空间"},
+                        "files": [
+                            {"file": "c.pdf", "group": "color", "tags": ["cmyk", "smask"] + [f"solo-{i:02d}" for i in range(22)]},
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            # 非 schema=1 的同名文件（如 V08 的列表格式）应当被忽略，不能报错。
+            (corpus / "other").mkdir()
+            (corpus / "other" / "manifest.json").write_text("[]", encoding="utf-8")
+
+            files = [
+                file("office-word/a.pdf", "office-word", [page(0, objects=3)]),
+                file("office-word/b.pdf", "office-word", [page(0, objects=2), diff_page(1, objects=4, hints=("type3",))]),
+                file("design/c.pdf", "design", [page(0, objects=5)]),
+            ]
+            self.write_run(root / "run", files)
+            code, text = self.run_main(
+                "--roundtrip",
+                str(root / "run" / "roundtrip.json"),
+                "--ops",
+                str(root / "run" / "ops.json"),
+                "--corpus-dir",
+                str(corpus),
+                "--out",
+                str(root / "report.html"),
+                "--summary",
+                str(root / "summary.json"),
+                "--markdown",
+                str(root / "summary.md"),
+                "--baseline-out",
+                str(root / "candidate"),
+            )
+            self.assertEqual(code, 0, text)
+            summary = json.loads((root / "summary.json").read_text(encoding="utf-8"))
+            s0 = summary["sets"][0]
+            self.assertTrue(s0["has_manifest"])
+            self.assertEqual(s0["manifest_matched"], 3)
+            self.assertEqual(s0["by_group"]["text"]["files"], 2)
+            self.assertEqual((s0["by_group"]["text"]["with_objects"], s0["by_group"]["text"]["passed_with_objects"]), (3, 2))
+            self.assertEqual(s0["by_group"]["color"]["ratio_nonempty"], 1.0)
+            # a.pdf 上的重复标签 cjk 不能把文件数算成 3。
+            self.assertEqual(s0["by_tag"]["cjk"]["files"], 2)
+            self.assertEqual(s0["by_tag"]["multi-page"]["diff"], 1)
+
+            page_html = (root / "report.html").read_text(encoding="utf-8")
+            self.assertIn('id="features"', page_html)
+            self.assertIn("文字与字距", page_html)
+            # 标签超过 20 个时，单文件且无差异的标签折进 details，有差异的标签留在外面。
+            self.assertIn("其余只出现在 1 个文件、并且全部无差异的特征标签", page_html)
+            for secret in ("SAMPLE CO LTD", "SAMPLE SECRET"):
+                self.assertNotIn(secret, page_html)
+            markdown = (root / "summary.md").read_text(encoding="utf-8")
+            self.assertIn("按场景分组", markdown)
+            self.assertIn("`multi-page`", markdown)
+            for secret in ("SAMPLE CO LTD", "SAMPLE SECRET"):
+                self.assertNotIn(secret, markdown)
+            # 特征标签不进候选基线。
+            self.assertNotIn("by_tag", (root / "candidate" / "run.json").read_text(encoding="utf-8"))
+
+    def test_no_diff_images_strips_thumbnails_and_links(self) -> None:
+        try:
+            import PIL  # noqa: F401, PLC0415
+        except ImportError:
+            self.skipTest("没有装 Pillow")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.write_run(root / "run", self.sample_files(broken=True), with_images=True)
+            args = (
+                "--roundtrip",
+                str(root / "run" / "roundtrip.json"),
+                "--diff-dir",
+                str(root / "run" / "diff"),
+                "--no-diff-images",
+                "--out",
+                str(root / "report.html"),
+            )
+            code, text = self.run_main(*args)
+            self.assertEqual(code, 0, text)
+            page_html = (root / "report.html").read_text(encoding="utf-8")
+            self.assertNotIn("data:image", page_html)
+            self.assertNotIn("s__bad__p001", page_html)
+            self.assertIn("不出图", page_html)
+
 
 if __name__ == "__main__":
     unittest.main()
