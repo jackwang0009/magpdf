@@ -89,6 +89,15 @@ $env:DEPOT_TOOLS_WIN_TOOLCHAIN = '0'   # 不要 Google 内部的 VS 工具链包
 if ($Proxy) {
     $env:HTTP_PROXY = $Proxy; $env:HTTPS_PROXY = $Proxy
     $env:NO_PROXY = 'localhost,127.0.0.1'
+    # Git for Windows 默认装成 http.sslBackend=schannel；本地代理关闭隧道时常不发 TLS close_notify，
+    # schannel 会报 curl 56 server closed abruptly，gclient 里的三十多个子仓库反复中断。走代理时改用 Git 自带的 openssl。
+    if ([Environment]::OSVersion.Platform -eq 'Win32NT') {
+        $n = 0
+        if ($env:GIT_CONFIG_COUNT -match '^\d+$') { $n = [int]$env:GIT_CONFIG_COUNT }
+        Set-Item -Path "Env:GIT_CONFIG_KEY_$n" -Value 'http.sslBackend'
+        Set-Item -Path "Env:GIT_CONFIG_VALUE_$n" -Value 'openssl'
+        $env:GIT_CONFIG_COUNT = "$($n + 1)"
+    }
     Step "代理 $Proxy"
 }
 else { Remove-Item Env:HTTP_PROXY, Env:HTTPS_PROXY -ErrorAction SilentlyContinue }

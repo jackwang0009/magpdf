@@ -19,6 +19,7 @@ coverage/
 /third_party/pdfium/.gclient*
 /third_party/pdfium/.gcs_entries
 /third_party/pdfium/.cipd/
+/third_party/pdfium/_bad_scm/
 
 # 模型文件与 ONNX Runtime：由 models/fetch-models.ps1 按 manifest.json 下载，不入库
 /models/**/*.onnx

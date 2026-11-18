@@ -7,7 +7,7 @@ PDFium 分支本身在 `magpdf-pdfium` 仓库（分支 `mag/main`），挂在这
 
 ```
 third_party/pdfium/
-├── src/                   子模块：magpdf-pdfium 的 mag/main（默认不取；要用时 git submodule update --init third_party/pdfium/src）
+├── src/                   子模块：magpdf-pdfium 的 mag/main（默认不取；要用时 git -c core.autocrlf=false submodule update --init third_party/pdfium/src）
 ├── sync.ps1               同步：depot_tools、.gclient、PDFium、DEPS；整理 upstream / mag/main 分支（用子模块时不动分支）
 ├── build.ps1              gn gen + ninja，产出与 pdfium-binaries 布局一致的 dist/
 ├── apply-patches.ps1      把 patches/<子仓库>/ 下的补丁打到 DEPS 子仓库（幂等）
@@ -70,7 +70,7 @@ third_party/pdfium/
 4. （已做）在主仓库挂成子模块 `third_party/pdfium/src`，记的是远程 `mag/main` 的 `636cfe4701`。子模块只含 PDFium 本体，
    DEPS 子仓库依然由 gclient 管理，所以 `.gclient` 放在子模块的父目录，也就是这个目录（已经在主仓库的 `.gitignore` 里）。
    - 克隆主仓库默认不取子模块，CI 也不取，都不受影响。要从子模块构建：
-     `git submodule update --init third_party/pdfium/src`（`.gitmodules` 里写了浅克隆，只取那一个提交）。
+     `git -c core.autocrlf=false submodule update --init third_party/pdfium/src`（`.gitmodules` 里写了浅克隆，只取那一个提交；带 `-c core.autocrlf=false` 防止全局开着 `core.autocrlf` 的机器把测试 PDF 检出成 CRLF）。
    - 取下来之后，`sync.ps1`、`build.ps1` 不给目录时用的就是它（先后顺序见第 3 节）。`sync.ps1` 在子模块上不整理分支，
      停在哪个提交由主仓库记着，只拉 DEPS、打补丁。
    - 要在子模块里改 PDFium（提交、变基），先 `git -C third_party/pdfium/src fetch --unshallow` 把历史取全；
@@ -110,9 +110,10 @@ cargo test --workspace
 从子模块构建是同样三步，目录不用给：
 
 ```powershell
-git submodule update --init third_party/pdfium/src    # 只做一次
-pwsh third_party/pdfium/sync.ps1 -NoHistory -Jobs 8   # 结果：third_party\pdfium\.gclient，DEPS 在 third_party\pdfium\src 里
-pwsh third_party/pdfium/build.ps1 -Jobs 12            # 结果：third_party\pdfium\src\out\Release\dist
+git -c core.autocrlf=false submodule update --init third_party/pdfium/src   # 只做一次
+git -C third_party/pdfium/src config core.autocrlf false
+pwsh third_party/pdfium/sync.ps1 -Proxy http://127.0.0.1:7897 -NoHistory -Jobs 8   # 结果：third_party\pdfium\.gclient，DEPS 在 third_party\pdfium\src 里
+pwsh third_party/pdfium/build.ps1 -Jobs 12                                  # 结果：third_party\pdfium\src\out\Release\dist
 ```
 
 两个脚本不给目录时按这个顺序找：环境变量（`sync.ps1` 是 `PDFIUM_ROOT`，`build.ps1` 是 `PDFIUM_SRC`）；
