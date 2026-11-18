@@ -294,6 +294,11 @@ pub struct FileResult {
     pub status: FileStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    /// 隔离模式下子进程崩溃或输出无法解析时，标准错误的末尾；与 `error` 分开放，避免屏幕进度或汇总把可能含文档内容的原文打出来。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stderr: Option<String>,
     /// 自研对象层打不开这份文件的原因。PDFium 能打开时，全部页面退回生成器。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub object_layer_error: Option<String>,
@@ -320,6 +325,8 @@ impl FileResult {
             pages: 0,
             status,
             error: Some(error.to_string()),
+            exit_code: None,
+            stderr: None,
             object_layer_error: None,
             timings: Timings::default(),
             output: None,

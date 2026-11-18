@@ -44,6 +44,9 @@ pub struct SourceStats {
     pub load_failed: usize,
     pub crashed: usize,
     pub timed_out: usize,
+    /// 崩溃或超时文件在打开文档时已读出的页数之和（没有打开就崩溃的文件为 0）。
+    #[serde(default)]
+    pub crash_pages: usize,
     /// PDFium 能打开、自研对象层打不开的文件（全部页面回退）。
     pub object_layer_failed: usize,
     pub bytes: u64,
@@ -103,8 +106,14 @@ impl SourceStats {
         match file.status {
             FileStatus::Ok => {}
             FileStatus::LoadFailed => self.load_failed += 1,
-            FileStatus::Crashed => self.crashed += 1,
-            FileStatus::TimedOut => self.timed_out += 1,
+            FileStatus::Crashed => {
+                self.crashed += 1;
+                self.crash_pages += file.pages;
+            }
+            FileStatus::TimedOut => {
+                self.timed_out += 1;
+                self.crash_pages += file.pages;
+            }
         }
         if file.status != FileStatus::Ok {
             return;
@@ -383,6 +392,8 @@ mod tests {
             pages: pages.len(),
             status: FileStatus::Ok,
             error: None,
+            exit_code: None,
+            stderr: None,
             object_layer_error: None,
             timings: Timings::default(),
             output: None,

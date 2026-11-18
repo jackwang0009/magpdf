@@ -18,11 +18,21 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use clap::{Args, ValueEnum};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use self::isolate::{ChildOutcome, run_child};
 use self::model::{CheckStatus, Config, EditMix, ExpectedMode, FileResult, FileStatus, Route};
 use self::report::SourceStats;
+
+/// `--json` 结果的种类标记，和 `roundtrip` 对齐写在最前面。
+const REPORT_KIND: &str = "magpdf-content-roundtrip";
+
+/// `--json` 结果的格式版本（与 `roundtrip` 对齐，V14 每晚往返报告第 10 节）。
+///
+/// - 1：最初的格式，没有 `kind`、`format`；崩溃文件的 `error` 后面接着“；stderr：…”。
+/// - 2：加了 `kind`、`format`、`tool.pdfium_library`；子进程打开文档后先报一行页数，崩溃或超时文件保留页数；
+///   子进程标准错误的末尾单独放在 `stderr`，不拼进 `error`。
+const REPORT_FORMAT: u32 = 2;
 
 #[derive(Args, Debug)]
 pub struct ContentArgs {
@@ -106,6 +116,8 @@ impl Mode {
 
 #[derive(Debug, Serialize)]
 struct Report<'a> {
+    kind: &'static str,
+    format: u32,
     tool: Tool,
     options: ReportOptions<'a>,
     started_unix_s: u64,
@@ -119,11 +131,25 @@ struct Report<'a> {
 struct Tool {
     name: &'static str,
     version: &'static str,
-    /// 编译时链接的导入库版本。运行时实际装载的是可执行文件旁边的 `pdfium.dll`，见 `pdfium_dll`。
+    /// 编译时链接的导入库版本。运行时实际装载的库路径见 `pdfium_library`。
     pdfium: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pdfium_library: Option<String>,
     pdfium_dll: Option<DllInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     label: Option<String>,
+}
+
+/// 子进程（`--worker`）标准输出的第一行：文档打开后立刻写出并刷新。
+/// 后面处理页面时崩溃或超时，父进程从这一行拿到页数。
+#[derive(Debug, Serialize, Deserialize)]
+struct LoadedLine {
+    loaded: Loaded,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Loaded {
+    page_count: usize,
 }
 
 /// 可执行文件旁边那份 `pdfium.dll`（Windows 先从这里装载）。同一个可执行文件换一份 DLL 重跑时，
@@ -242,10 +268,13 @@ pub fn run(args: &ContentArgs) -> Result<()> {
 
     if let Some(json_path) = &args.json {
         let report = Report {
+            kind: REPORT_KIND,
+            format: REPORT_FORMAT,
             tool: Tool {
                 name: "magpdf-cli content-roundtrip",
                 version: env!("CARGO_PKG_VERSION"),
                 pdfium: pdfium_sys::Library::linked_version(),
+                pdfium_library: pdfium_sys::Library::loaded_path().map(|p| p.display().to_string()),
                 pdfium_dll: loaded_dll_info(),
                 label: args.label.clone(),
             },
@@ -289,15 +318,17 @@ fn loaded_dll_info() -> Option<DllInfo> {
     })
 }
 
-/// 子进程：处理一个文件，把 `FileResult` 的 JSON 写到标准输出。
+/// 子进程：打开文档后先写一行页数并刷新，再把完整的 `FileResult` JSON 写到最后一行。
 fn run_worker(args: &ContentArgs) -> Result<()> {
+    use std::io::Write as _;
+
     let lib = pdfium_sys::Library::init()?;
     let rel = args
         .rel
         .clone()
         .unwrap_or_else(|| args.input.display().to_string());
     let source = args.source.clone().unwrap_or_default();
-    let result = run::run_file(
+    let result = run::run_file_with_on_loaded(
         &lib,
         &args.input,
         &rel,
@@ -305,8 +336,21 @@ fn run_worker(args: &ContentArgs) -> Result<()> {
         &config_from(args),
         args.save_dir.as_deref(),
         args.diff_dir.as_deref(),
+        |page_count| {
+            let mut out = std::io::stdout().lock();
+            let header = LoadedLine {
+                loaded: Loaded { page_count },
+            };
+            if serde_json::to_writer(&mut out, &header).is_ok() {
+                let _ = writeln!(out);
+                let _ = out.flush();
+            }
+        },
     );
-    serde_json::to_writer(std::io::stdout().lock(), &result)?;
+    let mut out = std::io::stdout().lock();
+    serde_json::to_writer(&mut out, &result)?;
+    writeln!(out)?;
+    out.flush()?;
     Ok(())
 }
 
@@ -427,34 +471,82 @@ fn run_one_isolated(
     if let Some(dir) = &args.diff_dir {
         cmd.arg("--diff-dir").arg(dir);
     }
+    let file_bytes = std::fs::metadata(&entry.path).map_or(0, |m| m.len());
     let failed = |status: FileStatus, error: String| {
         let mut r = FileResult::failed(entry.rel.clone(), entry.source.clone(), status, error);
-        r.bytes = std::fs::metadata(&entry.path).map_or(0, |m| m.len());
+        r.bytes = file_bytes;
         r
     };
-    match run_child(&mut cmd, timeout) {
-        ChildOutcome::Finished(stdout) => match serde_json::from_slice::<FileResult>(&stdout) {
-            Ok(result) => result,
-            Err(e) => failed(FileStatus::Crashed, format!("子进程输出无法解析：{e}")),
-        },
-        ChildOutcome::Crashed { code, stderr } => failed(
-            FileStatus::Crashed,
-            format!(
-                "子进程异常退出（{}）{}",
-                code.map_or_else(|| "被终止".to_owned(), |c| format!("0x{:08X}", c as u32)),
-                if stderr.is_empty() {
-                    String::new()
-                } else {
-                    format!("；stderr：{stderr}")
+    let (loaded_pages, mut result) = match run_child(&mut cmd, timeout) {
+        ChildOutcome::Finished { stdout, stderr } => {
+            let (loaded, parsed) = parse_worker_output(&stdout);
+            let res = match parsed {
+                Ok(result) => result,
+                Err(e) => {
+                    let mut r = failed(FileStatus::Crashed, format!("子进程输出无法解析：{e}"));
+                    r.stderr = stderr;
+                    r
                 }
-            ),
+            };
+            (loaded, res)
+        }
+        ChildOutcome::Crashed {
+            stdout,
+            code,
+            stderr,
+        } => {
+            let (loaded, _) = parse_worker_output(&stdout);
+            let mut r = failed(
+                FileStatus::Crashed,
+                format!(
+                    "子进程异常退出（{}）",
+                    code.map_or_else(|| "被终止".to_owned(), |c| format!("0x{:08X}", c as u32)),
+                ),
+            );
+            r.exit_code = code;
+            r.stderr = stderr;
+            (loaded, r)
+        }
+        ChildOutcome::TimedOut { stdout } => {
+            let (loaded, _) = parse_worker_output(&stdout);
+            let r = failed(
+                FileStatus::TimedOut,
+                format!("超过 {} s 未完成，已终止", timeout.as_secs()),
+            );
+            (loaded, r)
+        }
+        ChildOutcome::SpawnFailed(e) => (
+            None,
+            failed(FileStatus::Crashed, format!("启动子进程失败：{e}")),
         ),
-        ChildOutcome::TimedOut => failed(
-            FileStatus::TimedOut,
-            format!("超过 {} s 未完成，已终止", timeout.as_secs()),
-        ),
-        ChildOutcome::SpawnFailed(e) => failed(FileStatus::Crashed, format!("启动子进程失败：{e}")),
+    };
+    if result.pages == 0
+        && let Some(pages) = loaded_pages
+    {
+        result.pages = pages;
     }
+    result
+}
+
+/// 解析子进程输出：第一行可以是 [`LoadedLine`]（页数），最后一行是完整的 `FileResult`。
+fn parse_worker_output(stdout: &[u8]) -> (Option<usize>, std::result::Result<FileResult, String>) {
+    let mut loaded = None;
+    let mut last: Option<&[u8]> = None;
+    for line in stdout.split(|b| *b == b'\n') {
+        let line = line.trim_ascii();
+        if line.is_empty() {
+            continue;
+        }
+        if let Ok(header) = serde_json::from_slice::<LoadedLine>(line) {
+            loaded = Some(header.loaded.page_count);
+        }
+        last = Some(line);
+    }
+    let result = match last {
+        Some(line) => serde_json::from_slice::<FileResult>(line).map_err(|e| e.to_string()),
+        None => Err("子进程没有输出".to_owned()),
+    };
+    (loaded, result)
 }
 
 /// 枚举值在命令行上的写法。
@@ -633,6 +725,77 @@ mod tests {
         assert!(
             line.contains("崩溃") && line.contains("[子进程异常退出]"),
             "{line}"
+        );
+    }
+
+    #[test]
+    fn worker_output_keeps_loaded_pages_and_separates_stderr() {
+        let header = serde_json::to_string(&LoadedLine {
+            loaded: Loaded { page_count: 5 },
+        })
+        .unwrap();
+        let (pages, res) = parse_worker_output(format!("{header}\n").as_bytes());
+        assert_eq!(pages, Some(5));
+        assert!(res.is_err());
+
+        let ok = FileResult::failed("a.pdf", "s", FileStatus::Ok, "");
+        let body = serde_json::to_string(&ok).unwrap();
+        let (pages, res) = parse_worker_output(format!("{header}\n{body}\n").as_bytes());
+        assert_eq!(pages, Some(5));
+        assert_eq!(res.unwrap(), ok);
+
+        let mut crashed = FileResult::failed(
+            "c.pdf",
+            "s",
+            FileStatus::Crashed,
+            "子进程异常退出（0x80000003）",
+        );
+        crashed.pages = 5;
+        crashed.exit_code = Some(-2147483645);
+        crashed.stderr = isolate::stderr_tail(b"panicked at secret text");
+        let line = progress_line(1, 1, &crashed, Duration::ZERO);
+        assert!(!line.contains("secret text"), "{line}");
+        let json = serde_json::to_value(&crashed).unwrap();
+        assert_eq!(json["error"], "子进程异常退出（0x80000003）");
+        assert_eq!(json["stderr"], "panicked at secret text");
+        assert_eq!(json["pages"], 5);
+        assert_eq!(report::total(&[crashed]).crash_pages, 5);
+    }
+
+    #[test]
+    fn report_starts_with_kind_and_format() {
+        let by_source = std::collections::BTreeMap::new();
+        let total = SourceStats::default();
+        let cfg = Config::default();
+        let rep = Report {
+            kind: REPORT_KIND,
+            format: REPORT_FORMAT,
+            tool: Tool {
+                name: "magpdf-cli content-roundtrip",
+                version: "0.1.0",
+                pdfium: "159.0.8138.0",
+                pdfium_library: Some(r"C:\x\pdfium.dll".to_owned()),
+                pdfium_dll: None,
+                label: None,
+            },
+            options: ReportOptions {
+                input: "in".to_owned(),
+                mode: "roundtrip",
+                isolate: true,
+                timeout_s: 120,
+                jobs: 4,
+                config: &cfg,
+            },
+            started_unix_s: 0,
+            elapsed_ms: 0,
+            by_source: &by_source,
+            total: &total,
+            files: &[],
+        };
+        let text = serde_json::to_string(&rep).unwrap();
+        assert!(
+            text.starts_with(r#"{"kind":"magpdf-content-roundtrip","format":2,"tool":{"#),
+            "{text}"
         );
     }
 }

@@ -116,6 +116,21 @@ pub fn run_file(
     save_dir: Option<&Path>,
     diff_dir: Option<&Path>,
 ) -> FileResult {
+    run_file_with_on_loaded(lib, path, rel, source, config, save_dir, diff_dir, |_| {})
+}
+
+/// 处理一个文件；PDFium 打开文档后先调用 `on_loaded(页数)`，供隔离模式子进程提前上报页数。
+#[allow(clippy::too_many_arguments)]
+pub fn run_file_with_on_loaded(
+    lib: &Library,
+    path: &Path,
+    rel: &str,
+    source: &str,
+    config: &Config,
+    save_dir: Option<&Path>,
+    diff_dir: Option<&Path>,
+    mut on_loaded: impl FnMut(usize),
+) -> FileResult {
     let mut timings = Timings::default();
 
     let t = Instant::now();
@@ -150,9 +165,9 @@ pub fn run_file(
                 return failed;
             }
         };
-        (0..pdfium.page_count())
-            .map(|i| probe_page(&pdfium, i))
-            .collect()
+        let count = pdfium.page_count();
+        on_loaded(count);
+        (0..count).map(|i| probe_page(&pdfium, i)).collect()
     };
     let page_count = work.len();
 
@@ -410,6 +425,8 @@ pub fn run_file(
         pages: page_count,
         status: FileStatus::Ok,
         error: None,
+        exit_code: None,
+        stderr: None,
         object_layer_error,
         timings,
         output: Some(OutputStats {

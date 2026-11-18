@@ -10,14 +10,20 @@ use std::time::{Duration, Instant};
 /// 子进程的结局。
 #[derive(Debug)]
 pub enum ChildOutcome {
-    /// 正常退出，标准输出的全部内容。
-    Finished(Vec<u8>),
+    /// 正常退出，标准输出与标准错误末尾。
+    Finished {
+        stdout: Vec<u8>,
+        stderr: Option<String>,
+    },
     /// 异常退出（PDFium 崩溃等）。
     Crashed {
+        stdout: Vec<u8>,
         code: Option<i32>,
-        stderr: String,
+        stderr: Option<String>,
     },
-    TimedOut,
+    TimedOut {
+        stdout: Vec<u8>,
+    },
     SpawnFailed(String),
 }
 
@@ -55,9 +61,13 @@ pub fn run_child(cmd: &mut Command, timeout: Duration) -> ChildOutcome {
     let stdout = out_reader.join().unwrap_or_default();
     let stderr = err_reader.join().unwrap_or_default();
     match status {
-        None => ChildOutcome::TimedOut,
-        Some(status) if status.success() => ChildOutcome::Finished(stdout),
+        None => ChildOutcome::TimedOut { stdout },
+        Some(status) if status.success() => ChildOutcome::Finished {
+            stdout,
+            stderr: stderr_tail(&stderr),
+        },
         Some(status) => ChildOutcome::Crashed {
+            stdout,
             code: status.code(),
             stderr: stderr_tail(&stderr),
         },
@@ -72,13 +82,18 @@ fn read_all(reader: Option<impl Read>) -> Vec<u8> {
     buf
 }
 
-/// 标准错误的最后 300 个字符，压成一行。
-pub fn stderr_tail(stderr: &[u8]) -> String {
+/// 标准错误的最后 300 个字符，压成一行；为空时返回 `None`。
+/// 放进结果的 `stderr` 字段，不拼到 `error` 里，避免屏幕进度或汇总带出文档内容。
+pub fn stderr_tail(stderr: &[u8]) -> Option<String> {
     let text = String::from_utf8_lossy(stderr);
-    let flat = text.trim().replace(['\r', '\n'], " ");
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    let flat = text.replace(['\r', '\n'], " ");
     let chars: Vec<char> = flat.chars().collect();
     let start = chars.len().saturating_sub(300);
-    chars[start..].iter().collect()
+    Some(chars[start..].iter().collect())
 }
 
 #[cfg(test)]
@@ -87,12 +102,13 @@ mod tests {
 
     #[test]
     fn stderr_tail_keeps_the_end_on_one_line() {
-        assert_eq!(stderr_tail(b"  a\r\nb\n"), "a  b");
+        assert_eq!(stderr_tail(b"  a\r\nb\n").as_deref(), Some("a  b"));
         let long = "x".repeat(400) + "END";
-        let tail = stderr_tail(long.as_bytes());
+        let tail = stderr_tail(long.as_bytes()).unwrap();
         assert_eq!(tail.chars().count(), 300);
         assert!(tail.ends_with("END"));
-        assert_eq!(stderr_tail(b""), "");
+        assert_eq!(stderr_tail(b""), None);
+        assert_eq!(stderr_tail(b" \r\n "), None);
     }
 
     #[test]
