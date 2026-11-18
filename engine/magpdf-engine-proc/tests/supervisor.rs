@@ -254,3 +254,98 @@ async fn test_hooks_are_off_unless_asked_for() {
     supervisor.shutdown().await;
     let _ = std::fs::remove_file(recovery);
 }
+
+fn process_alive(pid: u32) -> bool {
+    let out = Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+        .output()
+        .expect("运行 tasklist");
+    let text = String::from_utf8_lossy(&out.stdout);
+    text.contains(&format!("\"{pid}\""))
+}
+
+/// V06 11.5：引擎自己卡死（不读管道）、同时主进程被强制结束（来不及跑 Drop）时，
+/// 靠 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` 由内核把卡死的引擎一并收掉。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_hung_engine_exits_when_its_host_is_force_killed() {
+    if let Ok(pid_file) = std::env::var("MAGPDF_SUPERVISOR_HELPER_PID_FILE") {
+        let mut cfg = launch("job-helper");
+        cfg.extra_args = vec!["--test-hooks".to_owned()];
+        // 心跳拉长，保证卡住期间不会由辅助主进程自己重启引擎。
+        cfg.heartbeat_interval = Duration::from_secs(120);
+        cfg.heartbeat_timeout = Duration::from_secs(120);
+        let (supervisor, _events, _) = Supervisor::start(cfg).await.unwrap();
+        let engine_pid = supervisor.engine_pid().unwrap();
+        let sup_for_stall = supervisor.clone();
+        tokio::spawn(async move {
+            let _ = sup_for_stall
+                .request(method::BENCH_STALL, json!({ "ms": 120_000 }))
+                .await;
+        });
+        // 给请求一点时间进到引擎主循环并卡住。
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        std::fs::write(pid_file, engine_pid.to_string()).unwrap();
+        tokio::time::sleep(Duration::from_secs(120)).await;
+        return;
+    }
+
+    let pid_file = std::env::temp_dir().join(format!(
+        "magpdf-job-helper-engine-{}.pid",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&pid_file);
+    let current_test_bin = std::env::current_exe().expect("当前测试可执行文件");
+    let mut host = Command::new(current_test_bin)
+        .args([
+            "--exact",
+            "a_hung_engine_exits_when_its_host_is_force_killed",
+            "--nocapture",
+        ])
+        .env("MAGPDF_SUPERVISOR_HELPER_PID_FILE", &pid_file)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("启动辅助主进程");
+
+    let wait_ready = Instant::now() + Duration::from_secs(20);
+    let engine_pid: u32 = loop {
+        if let Ok(text) = std::fs::read_to_string(&pid_file)
+            && let Ok(pid) = text.trim().parse::<u32>()
+        {
+            break pid;
+        }
+        assert!(Instant::now() < wait_ready, "辅助主进程没有写出引擎 PID");
+        tokio::time::sleep(Duration::from_millis(30)).await;
+    };
+    assert!(process_alive(engine_pid), "强杀主进程前引擎应当活着");
+
+    // 强制终止辅助主进程（相当于 `TerminateProcess`，不跑任何析构函数）。
+    let host_pid = host.id();
+    let killed = Command::new("taskkill")
+        .args(["/PID", &host_pid.to_string(), "/F"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .unwrap();
+    assert!(killed.success());
+    let _ = host.wait();
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while process_alive(engine_pid) {
+        if Instant::now() >= deadline {
+            let _ = Command::new("taskkill")
+                .args(["/PID", &engine_pid.to_string(), "/F"])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+            let _ = std::fs::remove_file(&pid_file);
+            panic!("主进程被强杀后，卡死的引擎进程 {engine_pid} 没有退出");
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let _ = std::fs::remove_file(&pid_file);
+    let _ = std::fs::remove_file(
+        std::env::temp_dir().join(format!("magpdf-supervisor-{host_pid}-job-helper.json")),
+    );
+}

@@ -11,6 +11,7 @@
 //! 文档类请求原样转发，这里不解析业务字段（《接口协议》第 2 节）。
 
 use std::collections::{HashMap, VecDeque};
+use std::os::windows::io::AsRawHandle;
 use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -149,9 +150,75 @@ impl Shared {
     }
 }
 
-/// 一个正在运行的引擎：进程和它的读写循环。丢弃时结束进程。
+/// “句柄关闭即结束进程”的 Windows 作业对象（V06 11.5）。
+///
+/// 正常情况下引擎看到命名管道断开会自行退出；但如果引擎正在 `bench.stall` 或 PDFium 死循环里卡死，
+/// 同时主进程崩溃或被强制结束（`TerminateProcess`），管道那一招管不了。把引擎放进带
+/// `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` 的作业对象后，主进程一死，内核关闭这个句柄就会连带终止引擎。
+struct KillOnCloseJob(windows::Win32::Foundation::HANDLE);
+
+// SAFETY: 作业对象句柄是内核对象，跨线程持有和在任意线程 `CloseHandle` 都是安全的。
+unsafe impl Send for KillOnCloseJob {}
+// SAFETY: 只在 `Drop` 里关闭，没有并发可变访问。
+unsafe impl Sync for KillOnCloseJob {}
+
+impl KillOnCloseJob {
+    fn assign(child: &Child) -> Option<Self> {
+        use windows::Win32::Foundation::{CloseHandle, HANDLE};
+        use windows::Win32::System::JobObjects::{
+            AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+            SetInformationJobObject,
+        };
+
+        // SAFETY: 匿名作业对象，不传安全属性和名字；返回的句柄由本结构负责关闭。
+        let job = unsafe { CreateJobObjectW(None, None) }.ok()?;
+        let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        // SAFETY: `job` 有效，`info` 的大小和类型与 `JobObjectExtendedLimitInformation` 匹配。
+        let configured = unsafe {
+            SetInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformation,
+                (&raw const info).cast(),
+                u32::try_from(size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>()).unwrap_or(0),
+            )
+        };
+        if let Err(err) = configured {
+            tracing::debug!("配置引擎作业对象失败，退回只靠管道和 Child::kill：{err}");
+            // SAFETY: `job` 刚由 `CreateJobObjectW` 创建，尚未交给别处。
+            unsafe {
+                let _ = CloseHandle(job);
+            }
+            return None;
+        }
+        let proc_handle = HANDLE(child.as_raw_handle());
+        // SAFETY: `job` 与刚启动的 `child` 进程句柄都有效；Windows 8+ 原生支持嵌套作业。
+        if let Err(err) = unsafe { AssignProcessToJobObject(job, proc_handle) } {
+            tracing::debug!("把引擎放进作业对象失败，退回只靠管道和 Child::kill：{err}");
+            // SAFETY: `job` 刚创建且未放入进程，直接关闭。
+            unsafe {
+                let _ = CloseHandle(job);
+            }
+            return None;
+        }
+        Some(Self(job))
+    }
+}
+
+impl Drop for KillOnCloseJob {
+    fn drop(&mut self) {
+        // SAFETY: `self.0` 由 `CreateJobObjectW` 返回且只在这里关闭一次；关闭即触发内核清理其中的进程。
+        unsafe {
+            let _ = windows::Win32::Foundation::CloseHandle(self.0);
+        }
+    }
+}
+
+/// 一个正在运行的引擎：进程、它的作业对象和读写循环。丢弃时结束进程。
 struct Running {
     child: Child,
+    _job: Option<KillOnCloseJob>,
     io: JoinHandle<()>,
 }
 
@@ -340,10 +407,12 @@ async fn start_engine(
         command.env("PATH", path);
     }
     let child = command.spawn().map_err(HostError::Spawn)?;
+    let job = KillOnCloseJob::assign(&child);
     let pid = child.id();
     // 从这里起，任何一步失败都要把进程收掉：交给 Running 的 Drop。
     let mut running = Running {
         child,
+        _job: job,
         io: tokio::spawn(async {}),
     };
 
