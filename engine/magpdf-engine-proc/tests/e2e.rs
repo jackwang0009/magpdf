@@ -525,13 +525,13 @@ fn by_id(objects: &[Value], id: u64) -> &Value {
 
 /// 列对象、点选、变换、删除、改填充色、撤销和重做，都经管道走一遍（《接口协议》6.4、6.5、6.8）。
 ///
-/// 样本用灰度色块那一份：它的页面用原版 PDFium 重写之后画面不变，所以允许修改。
-/// 提单样本里有 CMYK 色块，原版 PDFium 下不让改，见下一个用例。
+/// 样本用全是 RGB 色块的那一份：它的页面用原版 PDFium 重写之后对象、画面、颜色空间都不变，所以允许修改。
+/// 布局一样的灰度那一份，原版 PDFium 会把灰度写成 RGB，只能叠加内容；提单样本里有 CMYK 色块，同样不让改，见下一个用例。
 #[tokio::test]
 async fn edit_commands_change_the_document_and_can_be_undone() {
     let mut engine = Engine::start(None).await;
     engine.hello().await;
-    let doc_id = engine.open("color-devicegray.pdf").await;
+    let doc_id = engine.open("color-devicergb.pdf").await;
 
     let objects = engine.objects(doc_id).await;
     let total = objects.len();
@@ -783,7 +783,7 @@ impl Engine {
 async fn fidelity_is_checked_ahead_of_time_and_on_request() {
     let mut engine = Engine::start(None).await;
     engine.hello().await;
-    let doc_id = engine.open("color-devicegray.pdf").await;
+    let doc_id = engine.open("color-devicergb.pdf").await;
     let ok = json!({ "docId": doc_id, "pageId": 0, "status": "ok" });
 
     // 刚打开，页面还没有显示过：不校验。
@@ -828,7 +828,7 @@ async fn fidelity_is_checked_ahead_of_time_and_on_request() {
     assert_eq!(engine.buffered_fidelity_results(), 0);
 
     // 没显示过、也没点名校验的页，第一条修改命令会先校验它，结论一样推送。
-    let fresh = engine.open("color-devicegray.pdf").await;
+    let fresh = engine.open("color-devicergb.pdf").await;
     assert_ne!(fresh, doc_id);
     let id = engine.objects(fresh).await[0]["id"].as_u64().unwrap();
     engine
@@ -879,8 +879,8 @@ async fn fidelity_is_checked_ahead_of_time_and_on_request() {
 async fn layered_tiles_split_a_page_into_a_base_and_an_object_layer() {
     let mut engine = Engine::start(None).await;
     engine.hello().await;
-    // 300×200 pt 的一页，上排三个灰度色块。1 倍缩放下第一个色块的中心在像素 (50, 50)，第二个在 (130, 50)。
-    let doc_id = engine.open("color-devicegray.pdf").await;
+    // 300×200 pt 的一页，上排三个 RGB 色块。1 倍缩放下第一个色块的中心在像素 (50, 50)，第二个在 (130, 50)。
+    let doc_id = engine.open("color-devicergb.pdf").await;
     let objects = engine.objects(doc_id).await;
     let first = objects[0]["id"].as_u64().unwrap();
     assert_eq!(objects[0]["bbox"], json!([20.0, 120.0, 80.0, 180.0]));

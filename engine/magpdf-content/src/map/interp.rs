@@ -40,6 +40,10 @@ const PARAM_BUF: usize = 16;
 /// 填充色的来历最多记这么多个操作符。
 const FILL_HISTORY_LIMIT: usize = 16;
 
+const DEVICE_GRAY: &str = "DeviceGray";
+const DEVICE_RGB: &str = "DeviceRGB";
+const DEVICE_CMYK: &str = "DeviceCMYK";
+
 /// 解释的结果。
 #[derive(Debug)]
 pub(super) struct Outcome {
@@ -149,6 +153,9 @@ struct State {
     /// 超过 1024 个时 PDFium 会整批丢掉，这里不跟着数，一律当作可能去掉。
     clip_paths: ClipTrack,
     fill: FillHistory,
+    /// 当前的填充、描边颜色空间（[`Resources::colorspace_label`] 的写法）。
+    fill_space: String,
+    stroke_space: String,
     at_line_start: bool,
     /// 上一个定位操作符之后最近一次产生了对象的显示。
     last_show: Option<usize>,
@@ -171,6 +178,8 @@ impl Default for State {
                 from_default: true,
                 overflow: false,
             },
+            fill_space: DEVICE_GRAY.to_owned(),
+            stroke_space: DEVICE_GRAY.to_owned(),
             at_line_start: true,
             last_show: None,
         }
@@ -476,26 +485,52 @@ impl Interp<'_> {
                 }
             }
 
-            // ---- 填充色（只记来历，改色之后要设回去） ----
-            b"g" => self.fill_absolute(operands..range.end),
+            // ---- 填充色（记来历，改色之后要设回去；也记颜色空间） ----
+            b"g" => {
+                self.fill_absolute(operands..range.end);
+                self.state.fill_space = DEVICE_GRAY.to_owned();
+            }
             b"rg" => {
                 if count == 3 {
                     self.fill_absolute(operands..range.end);
+                    self.state.fill_space = DEVICE_RGB.to_owned();
                 }
             }
             b"k" => {
                 if count == 4 {
                     self.fill_absolute(operands..range.end);
+                    self.state.fill_space = DEVICE_CMYK.to_owned();
                 }
             }
             b"cs" => {
-                if self.colorspace_resolves(&self.string(0)) {
+                let name = self.string(0);
+                if self.colorspace_resolves(&name) {
                     self.fill_absolute(operands..range.end);
+                    self.state.fill_space = self.colorspace_tag(&name);
                 } else {
                     self.fill_relative(operands..range.end);
                 }
             }
             b"sc" | b"scn" => self.fill_relative(operands..range.end),
+
+            // ---- 描边色（只记颜色空间） ----
+            b"G" => self.state.stroke_space = DEVICE_GRAY.to_owned(),
+            b"RG" => {
+                if count == 3 {
+                    self.state.stroke_space = DEVICE_RGB.to_owned();
+                }
+            }
+            b"K" => {
+                if count == 4 {
+                    self.state.stroke_space = DEVICE_CMYK.to_owned();
+                }
+            }
+            b"CS" => {
+                let name = self.string(0);
+                if self.colorspace_resolves(&name) {
+                    self.state.stroke_space = self.colorspace_tag(&name);
+                }
+            }
 
             // ---- 文字 ----
             b"BT" => {
@@ -848,6 +883,26 @@ impl Interp<'_> {
         }
     }
 
+    /// `cs`/`CS` 设成的颜色空间（调用前已经确认 [`Self::colorspace_resolves`]）。设备颜色空间在
+    /// 资源里有 `DefaultGray` 之类时用它，和 PDFium 的 `FindColorSpace` 一样。
+    fn colorspace_tag(&self, name: &[u8]) -> String {
+        let lookup = match name {
+            b"Pattern" => return "Pattern".to_owned(),
+            b"DeviceGray" | b"DeviceRGB" | b"DeviceCMYK" => {
+                let mut default = b"Default".to_vec();
+                default.extend_from_slice(&name[6..]);
+                match self.resources.colorspace_label(&default) {
+                    Some(label) => return label,
+                    None => return String::from_utf8_lossy(name).into_owned(),
+                }
+            }
+            other => other,
+        };
+        self.resources
+            .colorspace_label(lookup)
+            .unwrap_or_else(|| String::from_utf8_lossy(lookup).into_owned())
+    }
+
     // ---- 文字 ----
 
     /// 重新定位：笔回到行首。
@@ -980,6 +1035,8 @@ impl Interp<'_> {
             ctm: self.state.ctm,
             fill: self.state.fill.clone(),
             droppable_clip,
+            fill_space: self.state.fill_space.clone(),
+            stroke_space: self.state.stroke_space.clone(),
             detail,
         });
         index
@@ -1442,6 +1499,39 @@ mod tests {
         assert!(out.objects[0].fill.ops.is_empty() && out.objects[0].fill.from_default);
         assert!(out.objects[1].fill.from_default);
         assert_eq!(out.objects[1].fill.ops.len(), 1);
+    }
+
+    #[test]
+    fn colorspaces_follow_pdfium_rules() {
+        let out = run(b"0 0 1 1 re f \
+            0.5 g 1 0 0 RG 0 0 1 1 re B \
+            1 0 rg 0 0 0 1 k 0 0 1 1 re f \
+            /CS0 cs /Nope CS 0 0 1 1 re b \
+            q 0 0 1 RG /Pattern cs Q 0 0 1 1 re B \
+            0 0 0 1 K /DeviceRGB CS 0 0 1 1 re S");
+        let spaces = |i: usize| {
+            let o = &out.objects[i];
+            (o.fill_space.as_str(), o.stroke_space.as_str())
+        };
+        assert_eq!(spaces(0), ("DeviceGray", "DeviceGray"), "默认是灰度");
+        assert_eq!(spaces(1), ("DeviceGray", "DeviceRGB"));
+        assert_eq!(spaces(2).0, "DeviceCMYK", "操作数个数不对的 rg 被忽略");
+        assert_eq!(
+            spaces(3),
+            ("CS0", "DeviceRGB"),
+            "假的资源没有标签时用资源名；找不到的 CS 被忽略"
+        );
+        assert_eq!(spaces(4), ("CS0", "DeviceRGB"), "Q 恢复颜色空间");
+        assert_eq!(spaces(5).1, "DeviceRGB");
+        assert_eq!(out.objects[0].painted_spaces(), (Some("DeviceGray"), None));
+        assert_eq!(out.objects[5].painted_spaces(), (None, Some("DeviceRGB")));
+
+        let text = run(b"BT /F1 12 Tf 0 0 0 1 k 0 0 1 RG 2 Tr (a) Tj 3 Tr (b) Tj ET");
+        assert_eq!(
+            text.objects[0].painted_spaces(),
+            (Some("DeviceCMYK"), Some("DeviceRGB"))
+        );
+        assert_eq!(text.objects[1].painted_spaces(), (None, None), "Tr 3 不画");
     }
 
     #[test]

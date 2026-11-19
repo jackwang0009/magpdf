@@ -239,7 +239,30 @@ pub struct MappedObject {
     /// 剪切不止一条路径、路径带曲线，或者对象是渐变（PDFium 不检查渐变）。“是不是矩形”“是不是只剩
     /// 一条”都往宽里算，不会漏；到底去没去掉，还要拿 PDFium 报的外接矩形来比。
     pub droppable_clip: Option<Rect>,
+    /// 对象出现时的填充、描边颜色空间（[`resources::Resources::colorspace_label`] 的写法）。
+    /// 保真校验拿它比较重写前后的颜色空间：灰度写成 `rg` 之类画面一样、颜色空间已经变了的情况。
+    pub fill_space: String,
+    pub stroke_space: String,
     pub detail: Detail,
+}
+
+impl MappedObject {
+    /// 画这个对象实际用到的填充色、描边色的颜色空间。渐变、表单、图像不算（它们的颜色不来自
+    /// 当前的填充色和描边色；图像蒙版例外，这里看不出是不是蒙版，不比）；Type3 文字的颜色由字形
+    /// 自己决定，也不比。
+    pub fn painted_spaces(&self) -> (Option<&str>, Option<&str>) {
+        match &self.detail {
+            Detail::Path(path) => (
+                (path.fill != FillRule::None).then_some(self.fill_space.as_str()),
+                path.stroke.then_some(self.stroke_space.as_str()),
+            ),
+            Detail::Text(text) if !text.type3 => (
+                matches!(text.render_mode, 0 | 2 | 4 | 6).then_some(self.fill_space.as_str()),
+                matches!(text.render_mode, 1 | 2 | 5 | 6).then_some(self.stroke_space.as_str()),
+            ),
+            _ => (None, None),
+        }
+    }
 }
 
 /// 一页的对应结果。

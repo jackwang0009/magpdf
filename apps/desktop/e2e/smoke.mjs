@@ -19,7 +19,7 @@
  *   MAGPDF_DESKTOP_BIN   被测的可执行文件，默认 target/release/magpdf-desktop.exe
  *   MAGPDF_E2E_PDF       看渲染、缩放、恢复用的 PDF，默认 tests/corpus/synthetic/freight-bl-composite.pdf。
  *                        它的第 1 页在原版 PDFium 下只能叠加内容，在修过生成器的构建下可以修改，两种都认
- *   MAGPDF_E2E_EDIT_PDF  做修改用的 PDF，第 1 页必须能修改，默认 tests/corpus/synthetic/color-devicegray.pdf
+ *   MAGPDF_E2E_EDIT_PDF  做修改用的 PDF，第 1 页必须能修改，默认 tests/corpus/synthetic/color-devicergb.pdf
  *   MAGPDF_E2E_WINDOW    被测程序的窗口大小，写成 宽x高（屏幕像素，比如 1920x1040）；不设就用程序默认的大小。
  *                        量帧间隔时用它换一个大一些的画布
  *   MAGPDF_E2E_DRAG_MS   量帧间隔时拖多久（毫秒），默认 2000。超过 2000 时结果里多一项 overBySecond：
@@ -59,7 +59,7 @@ const samplePdf = resolve(
   process.env.MAGPDF_E2E_PDF ?? join(repo, 'tests/corpus/synthetic/freight-bl-composite.pdf'),
 );
 const editPdf = resolve(
-  process.env.MAGPDF_E2E_EDIT_PDF ?? join(repo, 'tests/corpus/synthetic/color-devicegray.pdf'),
+  process.env.MAGPDF_E2E_EDIT_PDF ?? join(repo, 'tests/corpus/synthetic/color-devicergb.pdf'),
 );
 const outDir = join(repo, 'tests/out/e2e');
 

@@ -62,6 +62,12 @@ pub trait Resources {
     fn colorspace(&self, name: &[u8]) -> Option<Option<u32>>;
     /// `/Pattern` 资源里有没有可用的图案（`PatternType` 是 1 或 2）。
     fn pattern(&self, name: &[u8]) -> bool;
+    /// `/ColorSpace` 资源里的颜色空间写成一个可比较的标签：族名，ICCBased 带分量数，Separation、
+    /// DeviceN 带色名，Indexed 带底色空间。资源名不进标签，生成器改了资源名也比得上。
+    /// 没有这个名字或加载不了时返回 `None`。
+    fn colorspace_label(&self, _name: &[u8]) -> Option<String> {
+        None
+    }
 }
 
 /// 没有任何资源。
@@ -335,6 +341,75 @@ impl Resources for DocResources<'_> {
             self.direct(dict, b"PatternType").and_then(|v| v.as_int()),
             Some(1 | 2)
         )
+    }
+
+    fn colorspace_label(&self, name: &[u8]) -> Option<String> {
+        let obj = self.find(b"ColorSpace", name)?;
+        colorspace_info(self.doc, &obj, 0)?;
+        Some(describe_colorspace(self.doc, &obj, 0))
+    }
+}
+
+/// [`Resources::colorspace_label`] 的写法。调用前已经用 [`colorspace_info`] 确认加载得了。
+pub(crate) fn describe_colorspace(doc: &PdfDocument, obj: &PdfObject, depth: u32) -> String {
+    let stock_label = |name: &[u8]| match name {
+        b"G" | b"DeviceGray" => "DeviceGray".to_owned(),
+        b"RGB" | b"DeviceRGB" => "DeviceRGB".to_owned(),
+        b"CMYK" | b"DeviceCMYK" => "DeviceCMYK".to_owned(),
+        other => String::from_utf8_lossy(other).into_owned(),
+    };
+    if depth > 8 {
+        return String::new();
+    }
+    match obj {
+        PdfObject::Name(name) => stock_label(name),
+        PdfObject::Array(items) => {
+            let family = items
+                .first()
+                .and_then(|f| doc.deref(f))
+                .and_then(|f| f.as_name().map(<[u8]>::to_vec))
+                .unwrap_or_default();
+            let item = |i: usize| items.get(i).and_then(|v| doc.deref(v));
+            match family.as_slice() {
+                _ if items.len() == 1 => stock_label(&family),
+                b"ICCBased" => {
+                    let n = match item(1) {
+                        Some(PdfObject::Stream(s)) => s
+                            .dict
+                            .get(b"N")
+                            .and_then(|v| doc.deref(v))
+                            .and_then(|v| v.as_int())
+                            .unwrap_or(0),
+                        _ => 0,
+                    };
+                    format!("ICCBased/{n}")
+                }
+                b"Indexed" | b"I" => {
+                    let base = item(1)
+                        .map_or_else(String::new, |b| describe_colorspace(doc, &b, depth + 1));
+                    format!("Indexed/{base}")
+                }
+                b"Separation" => {
+                    let colorant = item(1)
+                        .and_then(|c| c.as_name().map(|n| String::from_utf8_lossy(n).into_owned()))
+                        .unwrap_or_default();
+                    format!("Separation/{colorant}")
+                }
+                b"DeviceN" => {
+                    let names: Vec<String> = item(1)
+                        .and_then(|n| n.as_array().map(<[PdfObject]>::to_vec))
+                        .unwrap_or_default()
+                        .iter()
+                        .filter_map(|n| {
+                            n.as_name().map(|n| String::from_utf8_lossy(n).into_owned())
+                        })
+                        .collect();
+                    format!("DeviceN/{}", names.join(","))
+                }
+                other => String::from_utf8_lossy(other).into_owned(),
+            }
+        }
+        _ => String::new(),
     }
 }
 
@@ -639,6 +714,56 @@ mod tests {
     }
 
     const EXP_1_TO_3: &str = "<< /FunctionType 2 /Domain [0 1] /C0 [0 0 0] /C1 [1 1 1] /N 1 >>";
+
+    #[test]
+    fn colorspace_labels_name_the_family_not_the_resource() {
+        let icc = stream("/N 4", "x");
+        let doc = PdfDocument::load(build(
+            &[
+                (1, CATALOG),
+                (2, PAGES),
+                (3, PAGE),
+                (
+                    9,
+                    "<< /Icc [/ICCBased 10 0 R] /Spot [/Separation /PANTONE#20185 /DeviceCMYK 11 0 R] \
+                    /Duo [/DeviceN [/Cyan /Spot] /DeviceCMYK 11 0 R] /Pal [/Indexed /DeviceRGB 1 <000000FFFFFF>] \
+                    /Lab [/Lab << /WhitePoint [1 1 1] >>] /DefaultRGB [/ICCBased 10 0 R] /Bad [/ICCBased 11 0 R] >>",
+                ),
+                (10, icc.as_str()),
+                (11, EXP_1_TO_3),
+            ],
+            "",
+        ))
+        .unwrap();
+        let resources = PdfDict::from_entries([(b"ColorSpace".to_vec(), PdfObject::Ref(9, 0))]);
+        let res = DocResources::new(&doc, Some(resources));
+        assert_eq!(res.colorspace_label(b"Icc").as_deref(), Some("ICCBased/4"));
+        assert_eq!(
+            res.colorspace_label(b"Spot").as_deref(),
+            Some("Separation/PANTONE 185")
+        );
+        assert_eq!(
+            res.colorspace_label(b"Duo").as_deref(),
+            Some("DeviceN/Cyan,Spot")
+        );
+        assert_eq!(
+            res.colorspace_label(b"Pal").as_deref(),
+            Some("Indexed/DeviceRGB")
+        );
+        assert_eq!(res.colorspace_label(b"Lab").as_deref(), Some("Lab"));
+        assert_eq!(res.colorspace_label(b"Bad"), None, "加载不了");
+        assert_eq!(res.colorspace_label(b"Missing"), None);
+
+        // 资源里有 DefaultRGB 时，`/DeviceRGB cs` 用的是它。
+        let map = crate::map::map_content(
+            crate::content::Content::from_single(
+                4,
+                b"/DeviceRGB cs 1 0 0 sc 0 0 1 1 re f".to_vec(),
+            ),
+            &res,
+        );
+        assert_eq!(map.objects[0].fill_space, "ICCBased/4");
+    }
 
     #[test]
     fn axial_shading_needs_one_input() {

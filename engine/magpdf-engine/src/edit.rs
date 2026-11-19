@@ -11,6 +11,7 @@
 use std::collections::BTreeMap;
 
 use magpdf_content::PdfDocument;
+use magpdf_content::map::map_page;
 use magpdf_content::pdf::object::{PdfObject, PdfStreamRef};
 use magpdf_content::pdf::ocg::reveal_view_layers;
 use magpdf_content::pdf::pages::{PageInfo, walk_pages};
@@ -382,8 +383,8 @@ impl<'lib> Session<'lib> {
     /// （方案 2.3）。隐藏图层打不开的文件（加了密，或者有“组关闭才显示”的可选内容成员字典），整份
     /// 按不能改原有对象处理。
     ///
-    /// 还看不出来的一类：颜色空间被换算成画面相同的 RGB（灰度写成 `rg`）。像素一样、对象也一样，
-    /// 要靠操作符级比对，这里还没有做。
+    /// 最后比颜色空间（操作符级比对的一项）：灰度、CMYK、专色被换算成画面相同的 RGB 时，对象和像素
+    /// 都一样，要比内容流里设色的操作符。图形状态参数（叠印等）和文字状态的操作符级比对还没有做。
     ///
     /// 修改命令执行前会自己调用它；也可以提前调用（页面显示之后、引擎空闲时），这样用户第一次修改
     /// 时不用等。
@@ -421,7 +422,12 @@ impl<'lib> Session<'lib> {
                     Some(revealed) => roundtrip_verdict(revealed, page)?,
                     None => None,
                 },
-            },
+            }
+            .or_else(|| {
+                // 上面已经在 `default` 上重写过这一页，这里接着比它写出来的颜色空间。
+                let guard = self.stream_guard.as_ref().and_then(Option::as_ref);
+                colorspace_verdict(guard, &scratch.default, page)
+            }),
             _ => Some("校验用的文档副本建不出来"),
         };
         self.fidelity.insert(page, verdict);
@@ -892,6 +898,55 @@ fn roundtrip_verdict(scratch: &Document<'_>, page: usize) -> Result<Option<&'sta
         return Ok(Some("重新生成内容流后页面的画面变了"));
     }
     Ok(None)
+}
+
+/// 操作符级比对里的颜色空间一项（方案 2.3）：PDFium 把灰度、CMYK、专色换算成画面相同的 RGB
+/// 写回时，对象和像素都一样，只有内容流里设色的操作符变了。把原文件的这一页和副本里重写过的这一页
+/// 各用自研的解释器读一遍（对象下标和 PDFium 的一一对应），逐个对象比画它时用的填充、描边颜色空间。
+///
+/// 没有原始字节可读（新建的文档、加密文件）时不比；原页上画的颜色都是 DeviceRGB 时没有可丢的，也不比，
+/// 省掉存一份副本。解释器读不下去、两边对象个数对不上的，按比不了处理，不能改。
+fn colorspace_verdict(
+    guard: Option<&StreamGuard>,
+    scratch: &Document<'_>,
+    page: usize,
+) -> Option<&'static str> {
+    const UNCOMPARABLE: &str = "重新生成内容流后没法逐个对象比较颜色空间";
+    let guard = guard?;
+    let info = guard.pages.get(page)?.as_ref()?;
+    let before = map_page(&guard.pdf, info);
+    let lossy = before.objects.iter().any(|object| {
+        let (fill, stroke) = object.painted_spaces();
+        [fill, stroke]
+            .into_iter()
+            .flatten()
+            .any(|space| space != "DeviceRGB")
+    });
+    if before.blocked.is_none() && !lossy {
+        return None;
+    }
+    if before.blocked.is_some() {
+        return Some(UNCOMPARABLE);
+    }
+    let Ok(saved) = scratch.save_to_vec(SaveFlags::NO_INCREMENTAL) else {
+        return Some(UNCOMPARABLE);
+    };
+    let Ok(pdf) = PdfDocument::load(saved) else {
+        return Some(UNCOMPARABLE);
+    };
+    let Some(Some(info)) = walk_pages(&pdf).into_iter().nth(page) else {
+        return Some(UNCOMPARABLE);
+    };
+    let after = map_page(&pdf, &info);
+    if after.blocked.is_some() || after.objects.len() != before.objects.len() {
+        return Some(UNCOMPARABLE);
+    }
+    let changed = before
+        .objects
+        .iter()
+        .zip(&after.objects)
+        .any(|(a, b)| a.kind != b.kind || a.painted_spaces() != b.painted_spaces());
+    changed.then_some("重新生成内容流后对象的颜色空间变了")
 }
 
 /// `page_box` 是页面的可见区域（PDF 用户空间），用来认出铺满页面的底块。
@@ -1649,6 +1704,84 @@ mod tests {
             session.check_fidelity(0).unwrap(),
             Some("默认隐藏的可选内容图层打不开，没法比较重写前后的画面")
         );
+    }
+
+    fn single_page_pdf(content: &[u8], resources: &str, extra: &[&[u8]]) -> Vec<u8> {
+        let mut objects = vec![
+            b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+            b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+            format!(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] /Resources {resources} /Contents 4 0 R >>"
+            )
+            .into_bytes(),
+            {
+                let mut body = format!("<< /Length {} >>\nstream\n", content.len()).into_bytes();
+                body.extend_from_slice(content);
+                body.extend_from_slice(b"\nendstream");
+                body
+            },
+        ];
+        objects.extend(extra.iter().map(|o| o.to_vec()));
+        build_minimal_pdf(&objects)
+    }
+
+    /// 生成器把这一页重写之后，第 `z` 个对象画填充时用的颜色空间（另起一份文档量，不经过保真校验）。
+    fn rewritten_fill_space(lib: &Library, pdf: &[u8], z: usize) -> String {
+        let doc = pdfium_sys::Document::load_bytes(lib, pdf.to_vec(), None).unwrap();
+        {
+            let page = doc.page(0).unwrap();
+            for object in page.objects() {
+                object.mark_modified().unwrap();
+            }
+            page.generate_content().unwrap();
+        }
+        let saved = doc
+            .save_to_vec(pdfium_sys::SaveFlags::NO_INCREMENTAL)
+            .unwrap();
+        let pdf = magpdf_content::PdfDocument::load(saved).unwrap();
+        let info = magpdf_content::pdf::pages::walk_pages(&pdf)
+            .remove(0)
+            .unwrap();
+        let map = magpdf_content::map::map_page(&pdf, &info);
+        map.objects[z].fill_space.clone()
+    }
+
+    /// 灰度写成画面相同的 RGB：对象、像素都一样，靠颜色空间比对拦下。生成器保住了灰度的构建（V03 修补版）
+    /// 上这一页仍然可以改。
+    #[test]
+    fn gray_rewritten_as_rgb_is_caught_by_the_colorspace_check() {
+        use pdfium_sys::Document;
+
+        let _guard = crate::pdfium_lock::lock();
+        let lib = Library::init().expect("PDFium");
+        let pdf = single_page_pdf(b"0.5 g 10 10 40 20 re f", "<< >>", &[]);
+        let written = rewritten_fill_space(&lib, &pdf, 0);
+        let doc = Document::load_bytes(&lib, pdf, None).unwrap();
+        let mut session = Session::from_document(&lib, doc);
+        let verdict = session.check_fidelity(0).unwrap();
+        if written == "DeviceGray" {
+            assert_eq!(verdict, None);
+        } else {
+            assert_eq!(written, "DeviceRGB", "生成器的写法");
+            assert_eq!(verdict, Some("重新生成内容流后对象的颜色空间变了"));
+        }
+    }
+
+    /// 原页上画的颜色全是 DeviceRGB：没有可丢的颜色空间，不另存副本，照样可以改。
+    #[test]
+    fn rgb_only_page_passes_the_colorspace_check() {
+        use pdfium_sys::Document;
+
+        let _guard = crate::pdfium_lock::lock();
+        let lib = Library::init().expect("PDFium");
+        let pdf = single_page_pdf(
+            b"1 0 0 rg 10 10 40 20 re f 0 0 1 RG 2 w 60 10 40 20 re S",
+            "<< >>",
+            &[],
+        );
+        let doc = Document::load_bytes(&lib, pdf, None).unwrap();
+        let mut session = Session::from_document(&lib, doc);
+        assert_eq!(session.check_fidelity(0).unwrap(), None);
     }
 
     /// 隐藏图层里放一块原版生成器写不好的 CMYK 色块，可见部分是一块普通的黑块。
