@@ -1,0 +1,44 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Pages /Kids [4 0 R] /Count 1 >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+3 0 obj
+<<  /Length 382 >>
+stream
+0.8 0.2 0.2 rg 20 120 60 60 re f
+0.2 0.6 0.3 rg 100 120 60 60 re f
+0.2 0.3 0.8 rg 180 120 60 60 re f
+0 0 0 RG 4 w 20 40 60 60 re S
+0.5 0.1 0.6 RG 100 40 60 60 re S
+0.9 0.8 0.3 rg 0.3 0.3 0.3 RG 180 40 60 60 re B
+BT /F1 10 Tf 0.3 0.3 0.3 rg 20 20 Td (DeviceRGB fill rg / stroke RG) Tj ET
+BT /F1 7 Tf 0 0 0 rg 10 188 Td (color-devicergb: rg/RG only; editable under stock PDFium) Tj ET
+endstream
+endobj
+4 0 obj
+<< /Type /Page /Parent 1 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 2 0 R >> >> /Contents 3 0 R >>
+endobj
+5 0 obj
+<< /Type /Catalog /Pages 1 0 R >>
+endobj
+6 0 obj
+<< /Title (color-devicergb) /Subject (MagPDF synthetic test sample) /Producer (MagPDF synthetic corpus generator \(tests/corpus/synthetic/generate.py\)) >>
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000000015 00000 n 
+0000000072 00000 n 
+0000000169 00000 n 
+0000000603 00000 n 
+0000000729 00000 n 
+0000000778 00000 n 
+trailer
+<< /Size 7 /Root 5 0 R /Info 6 0 R /ID [<81F413927D07B5BD343F1D7F9F29581D> <81F413927D07B5BD343F1D7F9F29581D>]  >>
+startxref
+949
+%%EOF

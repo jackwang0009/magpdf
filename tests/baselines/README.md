@@ -7,7 +7,7 @@
 
 | 文件 | 语料 | 来源 |
 |---|---|---|
-| `roundtrip/synthetic.json` | `tests/corpus/synthetic/`，60 份自制样本 | `synthetic` |
+| `roundtrip/synthetic.json` | `tests/corpus/synthetic/`，61 份自制样本 | `synthetic` |
 | `roundtrip/public-pdfium.json` | PDFium 的 `testing/resources`（`chromium/8138`，346 个 PDF，不入库，`scripts/fetch-public-corpus.ps1` 取） | `public/pdfium/resources`、`pixel`、`javascript`、`xfa` |
 | `roundtrip/corpus.json`（还没有） | 真实样本的测试文件库 | 第一级目录名（`office-word`、`design`……） |
 
@@ -87,6 +87,8 @@ git add tests/baselines/roundtrip/synthetic.json tests/baselines/roundtrip/publi
 现在入库的两份基线是在开发机上用 `main` @ `c193e81` 的命令行工具、配原版预编译库生成的。2026-11-17 流水线第一次在 GitHub 上跑
 （镜像 `win25-vs2026`），产物里的 `baseline-candidate/` 和这两份除了 `meta` 逐项相同，所以没有换。以后 GitHub 换了镜像、结果变了，
 再用产物里的候选基线换（见 `docs/p0/V14-每晚往返与分类报告.md` 第 9 节末尾的补记）。
+2026-11-19 自制样本加了 S-0061（`color-devicergb.pdf`），`synthetic.json` 在开发机上按第 2 条重新生成：只多了这一份文件的一行，
+原有 60 份的每一页都没有变，`meta` 里的提交记的是 `2c70ce6`（工作树里还有没提交的样本改动）。
 
 要同时盯两种 PDFium（原版和 `mag/main`）时，各用一个目录：`-BaselineDir tests/baselines/roundtrip-<名字>`。
 

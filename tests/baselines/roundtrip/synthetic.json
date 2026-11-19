@@ -3,15 +3,15 @@
  "format": 1,
  "set": "synthetic",
  "meta": {
-  "cli_sha256": "72aa2520a7701a533349cd0137e217815d844cde74adbee221ce30f15b08f5cd",
+  "cli_sha256": "1b70721bf7ea4726209abb0b23683c4e7c772d00be4e484d549efba4b47fb60a",
   "cli_version": "0.1.0",
-  "commit": "c193e81842f148445e74163acc17a76cd475244e",
+  "commit": "2c70ce6f5663710758518789469309542698f35b",
   "corpus": {
-   "bytes": 109390,
-   "files": 60,
-   "sha256": "0680a3e4e4c3cbdcd48389c3806da940dbc89f08a008bb67855ff713499f83ed"
+   "bytes": 110631,
+   "files": 61,
+   "sha256": "7dc3984d8cdb7bb84366415f3910a5a1843419f993850b3c2c7c97be9883c33b"
   },
-  "generated": "2026-11-12T16:38:30+08:00",
+  "generated": "2026-11-19T16:20:54+08:00",
   "has_ops": true,
   "machine": "JACK",
   "pdfium_dll_sha256": "71a3e63e6ab8f5746a0fc9de9bc3d0c0dc07eb60990dfd37d9db7fc891821943",
@@ -37,6 +37,9 @@
   ]},
   {"path": "color-devicen.pdf", "source": "synthetic", "status": "ok", "pages": [
    {"page": 1, "pixel": "diff", "objects": 6, "diff_pixels": 73440, "largest_region": 16800, "ops": {"color": 6}}
+  ]},
+  {"path": "color-devicergb.pdf", "source": "synthetic", "status": "ok", "pages": [
+   {"page": 1, "pixel": "pass", "objects": 8, "ops": {}}
   ]},
   {"path": "color-iccbased-embedded.pdf", "source": "synthetic", "status": "ok", "pages": [
    {"page": 1, "pixel": "diff", "objects": 6, "diff_pixels": 59200, "largest_region": 22400, "ops": {"color": 5}}

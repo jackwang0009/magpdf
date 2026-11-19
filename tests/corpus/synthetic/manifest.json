@@ -3168,6 +3168,56 @@
           }
         ]
       }
+    },
+    {
+      "id": "S-0061",
+      "category": "S",
+      "file": "color-devicergb.pdf",
+      "sha256": "83df6ce8fe5a750e338d847c2cac96fce937d9cc8451e593bbcb7f16e02260c9",
+      "size": 1241,
+      "pages": 1,
+      "origin": "self",
+      "license": "project",
+      "desensitized": "na",
+      "desensitizedBy": null,
+      "reviewedBy": null,
+      "reviewedOn": null,
+      "originalDeletedOn": null,
+      "tags": [
+        "devicergb",
+        "fill",
+        "stroke",
+        "fidelity-editable"
+      ],
+      "expected": "三个色块、三个描边框和一行文字，全部用 rg / RG，没有灰度、CMYK 和专色。原版生成器把颜色写成 RGB，这一页重写前后对象、画面、颜色空间都不变，保真校验应当放行；编辑命令、分层渲染的端到端测试用它当“能改”的页。布局和 color-devicegray 一样，那一份在原版 PDFium 下因为灰度被写成 RGB 而只能叠加内容。",
+      "issues": [],
+      "title": "DeviceRGB 填充与描边（rg / RG），布局同 color-devicegray",
+      "group": "color",
+      "refs": [
+        "方案 2.3 保真校验",
+        "P0 计划 V06",
+        "V06 报告 12.2"
+      ],
+      "pdfVersion": "1.4",
+      "generator": "tests/corpus/synthetic/generate.py",
+      "check": "pass",
+      "checkNote": null,
+      "expect": {
+        "pages": 1,
+        "pageInfo": [
+          {
+            "width": 300,
+            "height": 200,
+            "rotation": 0,
+            "objects": 8,
+            "text": 2,
+            "path": 6,
+            "image": 0,
+            "shading": 0,
+            "form": 0
+          }
+        ]
+      }
     }
   ]
 }
