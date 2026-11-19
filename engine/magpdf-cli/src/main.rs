@@ -7,6 +7,7 @@ mod edit_line;
 mod fidelity;
 mod image;
 mod ocr;
+mod ops_diff;
 mod perf;
 mod roundtrip;
 mod text_blocks;
@@ -63,6 +64,8 @@ enum Command {
     Fidelity(fidelity::FidelityArgs),
     /// 自研内容流读写的往返对比（V17）
     ContentRoundtrip(content::ContentArgs),
+    /// 两份 PDF 逐页做操作符级比对，和保真校验用的同一套（不需要 PDFium）
+    OpsDiff(ops_diff::OpsDiffArgs),
     /// `roundtrip --isolate` 的子进程入口：处理单个文件并把 JSON 结果写到标准输出
     #[command(hide = true)]
     RoundtripWorker(roundtrip::WorkerArgs),
@@ -111,6 +114,9 @@ fn main() -> Result<()> {
     if let Command::ContentRoundtrip(args) = cli.command {
         return content::run(&args);
     }
+    if let Command::OpsDiff(args) = &cli.command {
+        return ops_diff::run(args);
+    }
     let lib = Library::init()?;
     match cli.command {
         Command::Info { file, json } => info(&lib, &file, json),
@@ -126,6 +132,7 @@ fn main() -> Result<()> {
         Command::Fidelity(args) => fidelity::run(&lib, &args),
         Command::RoundtripWorker(args) => roundtrip::run_worker(&lib, &args),
         Command::ContentRoundtrip(args) => content::run(&args),
+        Command::OpsDiff(args) => ops_diff::run(&args),
         Command::EditLine(args) => edit_line::run(&lib, args),
         Command::TextBlocks(args) => text_blocks::run(&lib, args),
         Command::Ocr(args) => ocr::ocr(&lib, args),

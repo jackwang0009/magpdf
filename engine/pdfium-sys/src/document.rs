@@ -394,6 +394,23 @@ impl<'lib> Document<'lib> {
         Ok(writer.out)
     }
 
+    /// 把 `source` 的第 `index` 页复制一份，追加到这份文档末尾（`FPDF_ImportPagesByIndex`）。页面字典、
+    /// 内容流、资源连同继承来的属性一起复制，`source` 上重新生成过的内容流复制的是生成之后的样子。
+    pub fn import_page(&self, source: &Document<'_>, index: usize) -> Result<()> {
+        let count = source.page_count();
+        let page = c_int::try_from(index)
+            .ok()
+            .filter(|_| index < count)
+            .ok_or(Error::PageIndex { index, count })?;
+        let at = c_int::try_from(self.page_count()).map_err(|_| Error::ImportPages)?;
+        // SAFETY: 两份文档的句柄都有效；页号数组在调用期间有效，长度是 1。
+        let ok = unsafe { raw::FPDF_ImportPagesByIndex(self.handle, source.handle, &page, 1, at) };
+        if ok == 0 {
+            return Err(Error::ImportPages);
+        }
+        Ok(())
+    }
+
     pub fn save_to_file(&self, path: &Path, flags: SaveFlags) -> Result<()> {
         let bytes = self.save_to_vec(flags)?;
         std::fs::write(path, bytes)?;

@@ -27,12 +27,14 @@
 use std::collections::VecDeque;
 use std::ops::Range;
 
-use super::resources::{FontLookup, Resources, XObjectKind};
+use super::ops::OpParams;
+use super::resources::{FontLookup, GsParam, Resources, XObjectKind};
 use super::{
     CLIP_SLACK, Detail, FillHistory, FillRule, ImageDetail, MappedObject, Matrix, ObjKind,
     PathDetail, Rect, ShadingGroup, ShowKind, TextDetail, Unmatched,
 };
 use crate::content::inline::{InlineOutcome, dict_int, handle_begin_image};
+use crate::content::parser::dict_get;
 use crate::content::parser::{Element, Number, Obj, StreamParser, name_decode};
 
 /// `kParamBufSize`。
@@ -156,6 +158,8 @@ struct State {
     /// 当前的填充、描边颜色空间（[`Resources::colorspace_label`] 的写法）。
     fill_space: String,
     stroke_space: String,
+    /// 操作符级比对要的其余状态。
+    params: OpParams,
     at_line_start: bool,
     /// 上一个定位操作符之后最近一次产生了对象的显示。
     last_show: Option<usize>,
@@ -180,6 +184,7 @@ impl Default for State {
             },
             fill_space: DEVICE_GRAY.to_owned(),
             stroke_space: DEVICE_GRAY.to_owned(),
+            params: OpParams::default(),
             at_line_start: true,
             last_show: None,
         }
@@ -468,12 +473,17 @@ impl Interp<'_> {
                 }
             }
             b"cm" => self.state.ctm = self.matrix().then(self.state.ctm),
-            b"J" => self.state.line_cap = self.integer(0).unwrap_or(0),
+            b"J" => {
+                self.state.line_cap = self.integer(0).unwrap_or(0);
+                if count > 0 {
+                    self.state.params.line_cap = self.number(0) as i64;
+                }
+            }
             b"gs" => {
                 if let Some(gs) = self.resources.ext_gstate(&self.string(0)) {
-                    if let Some((name, size)) = gs.font {
-                        self.state.font_size = size;
-                        self.state.font = match self.resources.font(&name) {
+                    if let Some((name, size)) = &gs.font {
+                        self.state.font_size = *size;
+                        self.state.font = match self.resources.font(name) {
                             FontLookup::Stock => Some(false),
                             FontLookup::Loaded { type3 } => Some(type3),
                             FontLookup::Failed => None,
@@ -482,8 +492,29 @@ impl Interp<'_> {
                     if let Some(cap) = gs.line_cap {
                         self.state.line_cap = cap;
                     }
+                    self.apply_gs_params(&gs.params);
                 }
             }
+            // ---- 只有操作符级比对要的图形状态 ----
+            b"w" if count > 0 => self.state.params.line_width = f64::from(self.number(0)),
+            b"j" if count > 0 => self.state.params.line_join = self.number(0) as i64,
+            b"M" if count > 0 => self.state.params.miter_limit = f64::from(self.number(0)),
+            b"d" if count == 2 => {
+                let dash: Vec<f64> = match self.param(1).map(|p| &p.value) {
+                    Some(ParamValue::Object(Some(Obj::Array(items)))) => {
+                        items.iter().map(|v| f64::from(v.get_number())).collect()
+                    }
+                    _ => Vec::new(),
+                };
+                let phase = if dash.is_empty() {
+                    0.0
+                } else {
+                    f64::from(self.number(0))
+                };
+                self.state.params.dash = (dash, phase);
+            }
+            b"i" if count > 0 => self.state.params.flatness = f64::from(self.number(0)),
+            b"ri" if count > 0 => self.state.params.intent = self.string(0),
 
             // ---- 填充色（记来历，改色之后要设回去；也记颜色空间） ----
             b"g" => {
@@ -552,7 +583,13 @@ impl Interp<'_> {
                 self.state.tm = self.matrix();
                 self.line_reset();
             }
-            b"Td" | b"TD" | b"T*" => self.line_reset(),
+            b"Td" | b"T*" => self.line_reset(),
+            b"TD" => {
+                if count == 2 {
+                    self.state.params.leading = -f64::from(self.number(0));
+                }
+                self.line_reset();
+            }
             b"Tf" => {
                 self.state.font_size = self.number(0);
                 match self.resources.font(&self.string(1)) {
@@ -560,7 +597,17 @@ impl Interp<'_> {
                     FontLookup::Loaded { type3 } => self.state.font = Some(type3),
                     FontLookup::Failed => {}
                 }
+                self.state.params.font = if count >= 2 {
+                    self.resources.font_label(&self.string(1))
+                } else {
+                    "Missing".to_owned()
+                };
             }
+            b"Tc" if count > 0 => self.state.params.char_spacing = f64::from(self.number(0)),
+            b"Tw" if count > 0 => self.state.params.word_spacing = f64::from(self.number(0)),
+            b"Tz" if count > 0 => self.state.params.horizontal_scale = f64::from(self.number(0)),
+            b"TL" if count > 0 => self.state.params.leading = f64::from(self.number(0)),
+            b"Ts" if count > 0 => self.state.params.rise = f64::from(self.number(0)),
             b"Tr" => {
                 if let Some(mode @ 0..=7) = Some(self.integer(0).unwrap_or(0)) {
                     self.state.render_mode = mode;
@@ -572,6 +619,10 @@ impl Interp<'_> {
                 self.show_string(ShowKind::NextLineShow, range, operands);
             }
             b"\"" => {
+                if count == 3 {
+                    self.state.params.word_spacing = f64::from(self.number(2));
+                    self.state.params.char_spacing = f64::from(self.number(1));
+                }
                 self.line_reset();
                 self.show_string(ShowKind::NextLineShowSpaced, range, operands);
             }
@@ -587,6 +638,7 @@ impl Interp<'_> {
                         inline: false,
                         width: 0,
                         height: 0,
+                        mask: self.resources.image_mask(&self.string(0)),
                     });
                     self.push_object(ObjKind::Image, operands..range.end, range, detail);
                 }
@@ -606,6 +658,7 @@ impl Interp<'_> {
                         inline: true,
                         width: dict_int(&dict, b"Width"),
                         height: dict_int(&dict, b"Height"),
+                        mask: matches!(dict_get(&dict, b"ImageMask"), Some(Obj::Bool(true))),
                     });
                     let whole = operands..parser.pos();
                     self.push_object(
@@ -883,6 +936,72 @@ impl Interp<'_> {
         }
     }
 
+    /// `gs` 里操作符级比对要的条目（`ops_diff.py` 的 `_apply` 里 `gs` 那一段）。
+    fn apply_gs_params(&mut self, entries: &[(Vec<u8>, GsParam)]) {
+        let has_fill_overprint = entries.iter().any(|(k, _)| k == b"op");
+        let ctm = self.state.ctm;
+        let p = &mut self.state.params;
+        for (key, value) in entries {
+            let number = match value {
+                GsParam::Number(n) => *n,
+                _ => 0.0,
+            };
+            let flag = matches!(value, GsParam::Bool(true));
+            let name = match value {
+                GsParam::Name(n) => n.clone(),
+                _ => Vec::new(),
+            };
+            match key.as_slice() {
+                b"ca" => p.fill_alpha = number,
+                b"CA" => p.stroke_alpha = number,
+                b"BM" => p.blend = name,
+                b"SMask" => {
+                    p.smask = match value {
+                        GsParam::Text(t) => t.clone(),
+                        _ => "Unknown".to_owned(),
+                    };
+                    p.smask_ctm = (p.smask != "None").then_some(ctm);
+                }
+                b"OP" => {
+                    p.overprint_stroke = flag;
+                    if !has_fill_overprint {
+                        p.overprint_fill = flag;
+                    }
+                }
+                b"op" => p.overprint_fill = flag,
+                b"OPM" => p.overprint_mode = number as i64,
+                b"TK" => p.knockout = flag,
+                b"FL" => p.flatness = number,
+                b"RI" => p.intent = name,
+                b"LW" => p.line_width = number,
+                b"LC" => p.line_cap = number as i64,
+                b"LJ" => p.line_join = number as i64,
+                b"ML" => p.miter_limit = number,
+                b"D" => {
+                    if let GsParam::Dash(dash, phase) = value {
+                        p.dash = (dash.clone(), *phase);
+                    }
+                }
+                b"Font" => {
+                    if let GsParam::Text(t) = value {
+                        p.font = t.clone();
+                    }
+                }
+                other => {
+                    let text = match value {
+                        GsParam::Text(t) => t.clone(),
+                        GsParam::Number(n) => format!("{n:.4}"),
+                        GsParam::Bool(b) => b.to_string(),
+                        GsParam::Name(n) => format!("/{}", String::from_utf8_lossy(n)),
+                        GsParam::Dash(d, phase) => format!("{d:?} {phase}"),
+                        GsParam::Ignored => continue,
+                    };
+                    p.gs_other.insert(other.to_vec(), text);
+                }
+            }
+        }
+    }
+
     /// `cs`/`CS` 设成的颜色空间（调用前已经确认 [`Self::colorspace_resolves`]）。设备颜色空间在
     /// 资源里有 `DefaultGray` 之类时用它，和 PDFium 的 `FindColorSpace` 一样。
     fn colorspace_tag(&self, name: &[u8]) -> String {
@@ -933,6 +1052,27 @@ impl Interp<'_> {
         }
     }
 
+    /// 字号 × 水平缩放 × `Tm` × CTM 的线性部分。
+    fn text_linear(&self) -> [f64; 4] {
+        let size = f64::from(self.state.font_size);
+        let scaled = Matrix {
+            a: size * self.state.params.horizontal_scale / 100.0,
+            d: size,
+            ..Matrix::IDENTITY
+        }
+        .then(Matrix {
+            e: 0.0,
+            f: 0.0,
+            ..self.state.tm
+        })
+        .then(Matrix {
+            e: 0.0,
+            f: 0.0,
+            ..self.state.ctm
+        });
+        [scaled.a, scaled.b, scaled.c, scaled.d]
+    }
+
     /// `Handle_ShowText`（`'`、`"` 先换行再走这里）。
     fn show_string(&mut self, kind: ShowKind, op: Range<usize>, operands: usize) {
         let non_empty = !self.string(0).is_empty();
@@ -979,6 +1119,7 @@ impl Interp<'_> {
             render_mode: self.state.render_mode,
             type3,
             font_size: self.state.font_size,
+            lin: self.text_linear(),
         });
         let index = self.push_object(ObjKind::Text, operands..op.end, op, detail);
         self.state.last_show = Some(index);
@@ -1037,6 +1178,7 @@ impl Interp<'_> {
             droppable_clip,
             fill_space: self.state.fill_space.clone(),
             stroke_space: self.state.stroke_space.clone(),
+            params: self.state.params.clone(),
             detail,
         });
         index
@@ -1234,6 +1376,7 @@ mod tests {
             ExtGState {
                 line_cap: Some(1),
                 font: None,
+                ..Default::default()
             },
         );
         assert_eq!(interpret(b"/GS0 gs 10 10 m h S", &f).objects.len(), 1);
@@ -1351,6 +1494,7 @@ mod tests {
             ExtGState {
                 line_cap: None,
                 font: Some((Vec::new(), 10.0)),
+                ..Default::default()
             },
         );
         let out = interpret(b"/GS0 gs (abc) Tj", &f);
@@ -1457,7 +1601,8 @@ mod tests {
             Detail::Image(ImageDetail {
                 inline: true,
                 width: 2,
-                height: 2
+                height: 2,
+                mask: false,
             })
         );
         // 数据里出现 `EI`：按宽高算出的长度跳过，不会提前结束。

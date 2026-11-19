@@ -19,6 +19,8 @@ pub enum Error {
     GenerateContent,
     #[error("保存文档失败")]
     Save,
+    #[error("从另一份文档导入页面失败")]
+    ImportPages,
     #[error("页面对象操作失败")]
     PageObject,
     #[error("加载文字页失败")]

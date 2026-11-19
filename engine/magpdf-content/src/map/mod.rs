@@ -8,6 +8,7 @@
 //! 这一层只做**字节层面的解释**：不解析字体度量，不计算包围盒（几何以 PDFium 为准）。
 
 mod interp;
+pub mod ops;
 pub mod resources;
 
 use std::ops::Range;
@@ -186,6 +187,8 @@ pub struct TextDetail {
     pub render_mode: i32,
     pub type3: bool,
     pub font_size: f32,
+    /// 字号 × 水平缩放 × `Tm` × CTM 的线性部分 `[a b c d]`：字的大小和方向（操作符级比对用）。
+    pub lin: [f64; 4],
 }
 
 /// 图像对象。
@@ -196,6 +199,8 @@ pub struct ImageDetail {
     /// 内联图像字典里写的宽高（`Do` 的图像这里是 0）。
     pub width: i32,
     pub height: i32,
+    /// 图像蒙版（`/ImageMask true`）：用当前的填充色画。
+    pub mask: bool,
 }
 
 /// 渐变对象所在的 `q … Q` 组：组里只有它一个对象、它的剪切全部是组里建立的。
@@ -243,15 +248,22 @@ pub struct MappedObject {
     /// 保真校验拿它比较重写前后的颜色空间：灰度写成 `rg` 之类画面一样、颜色空间已经变了的情况。
     pub fill_space: String,
     pub stroke_space: String,
+    /// 对象出现时生效的图形状态参数和文字状态（[`ops::compare_pages`] 用）。
+    pub params: ops::OpParams,
     pub detail: Detail,
 }
 
 impl MappedObject {
-    /// 画这个对象实际用到的填充色、描边色的颜色空间。渐变、表单、图像不算（它们的颜色不来自
-    /// 当前的填充色和描边色；图像蒙版例外，这里看不出是不是蒙版，不比）；Type3 文字的颜色由字形
-    /// 自己决定，也不比。
+    /// 画这个对象实际用到的填充色、描边色的颜色空间。表单里的内容继承当前的填充色和描边色，两样都算；
+    /// 图像蒙版用填充色；别的图像和渐变的颜色不来自当前的颜色，不算；Type3 文字的颜色由字形自己决定，
+    /// 也不比。
     pub fn painted_spaces(&self) -> (Option<&str>, Option<&str>) {
         match &self.detail {
+            Detail::Form => (
+                Some(self.fill_space.as_str()),
+                Some(self.stroke_space.as_str()),
+            ),
+            Detail::Image(image) if image.mask => (Some(self.fill_space.as_str()), None),
             Detail::Path(path) => (
                 (path.fill != FillRule::None).then_some(self.fill_space.as_str()),
                 path.stroke.then_some(self.stroke_space.as_str()),

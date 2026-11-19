@@ -39,7 +39,7 @@ pub enum FontLookup {
     Failed,
 }
 
-/// ExtGState 里影响“建不建对象”的两项。
+/// ExtGState 里影响“建不建对象”的两项，以及操作符级比对要的全部条目。
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ExtGState {
     /// `/LC`：线帽。
@@ -47,6 +47,22 @@ pub struct ExtGState {
     /// `/Font [名字 字号]`：PDFium 把数组第一项当成资源名去找字体（第一项按规范是字体字典的引用，
     /// 这时名字为空，结果是备用字体）。
     pub font: Option<(Vec<u8>, f32)>,
+    /// 字典里除 `/Type` 以外的每个条目，按文件里的先后（操作符级比对用，见 [`GsParam`]）。
+    pub params: Vec<(Vec<u8>, GsParam)>,
+}
+
+/// ExtGState 一个条目的值，照 `tests/corpus/tools/ops_diff.py` 的读法：数、开关、名字、虚线，
+/// 其余的（软蒙版、字体、不单列的条目）写成一段描述。描述里没有对象号（保存之后对象号会变），
+/// 流和字符串只取内容的摘要。
+#[derive(Debug, Clone, PartialEq)]
+pub enum GsParam {
+    Number(f64),
+    Bool(bool),
+    Name(Vec<u8>),
+    Dash(Vec<f64>, f64),
+    Text(String),
+    /// 写法不对、`ops_diff.py` 也不认的条目（`/Font`、`/D` 不是两项的数组）：不改状态。
+    Ignored,
 }
 
 /// 页面资源的查询接口。测试里用假的实现。
@@ -68,6 +84,174 @@ pub trait Resources {
     fn colorspace_label(&self, _name: &[u8]) -> Option<String> {
         None
     }
+    /// `Tf` 引用的字体写成 `子类型:BaseFont`，资源里没有或不是字典时是 `Missing`。
+    fn font_label(&self, _name: &[u8]) -> String {
+        "Missing".to_owned()
+    }
+    /// `Do` 引用的图像是不是图像蒙版（`/ImageMask true`）。
+    fn image_mask(&self, _name: &[u8]) -> bool {
+        false
+    }
+}
+
+/// ExtGState 一个条目按 [`GsParam`] 的读法取值。
+fn gs_param(doc: &PdfDocument, key: &[u8], value: &PdfObject) -> GsParam {
+    let resolved = doc.resolve(Some(value)).unwrap_or(PdfObject::Null);
+    let number = |v: &PdfObject| v.as_f64().unwrap_or(0.0);
+    let name = |v: &PdfObject| match v {
+        PdfObject::Name(n) | PdfObject::Str(n) => n.clone(),
+        _ => Vec::new(),
+    };
+    match key {
+        b"ca" | b"CA" | b"FL" | b"LW" | b"ML" | b"OPM" | b"LC" | b"LJ" => {
+            GsParam::Number(number(&resolved))
+        }
+        b"OP" | b"op" | b"TK" => GsParam::Bool(match &resolved {
+            PdfObject::Bool(b) => *b,
+            PdfObject::Int(i) => *i != 0,
+            PdfObject::Real(r) => *r != 0.0,
+            PdfObject::Null => false,
+            _ => true,
+        }),
+        b"BM" => GsParam::Name(match &resolved {
+            PdfObject::Array(items) => items
+                .first()
+                .and_then(|b| doc.resolve(Some(b)))
+                .map(|b| name(&b))
+                .unwrap_or_default(),
+            other => name(other),
+        }),
+        b"RI" => GsParam::Name(name(&resolved)),
+        b"SMask" => GsParam::Text(describe_smask(doc, &resolved)),
+        b"D" => match &resolved {
+            PdfObject::Array(items) if items.len() == 2 => {
+                let dash: Vec<f64> = match doc.resolve(Some(&items[0])) {
+                    Some(PdfObject::Array(values)) => values
+                        .iter()
+                        .map(|v| doc.resolve(Some(v)).as_ref().map_or(0.0, number))
+                        .collect(),
+                    _ => Vec::new(),
+                };
+                let phase = doc.resolve(Some(&items[1])).as_ref().map_or(0.0, number);
+                if dash.is_empty() {
+                    GsParam::Dash(Vec::new(), 0.0)
+                } else {
+                    GsParam::Dash(dash, phase)
+                }
+            }
+            _ => GsParam::Ignored,
+        },
+        b"Font" => match &resolved {
+            PdfObject::Array(items) if items.len() == 2 => {
+                let font = doc.resolve(Some(&items[0]));
+                GsParam::Text(describe_font(doc, font.as_ref()))
+            }
+            _ => GsParam::Ignored,
+        },
+        _ => GsParam::Text(describe_value(doc, &resolved, 0)),
+    }
+}
+
+/// 字节的摘要（FNV-1a 64 位）：只用来判断两边的内容是不是一样，不进报告。
+pub(crate) fn digest(bytes: &[u8]) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for &b in bytes {
+        hash ^= u64::from(b);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    format!("{hash:016x}")
+}
+
+/// 一个 PDF 对象的值（`ops_diff.py` 的 `describe_value`）：引用解开，流取解码后内容的摘要和字典里除
+/// 长度、过滤器以外的条目，字典按键排序，字符串只取摘要。
+pub(crate) fn describe_value(doc: &PdfDocument, obj: &PdfObject, depth: u32) -> String {
+    if depth > 6 {
+        return "…".to_owned();
+    }
+    let sorted = |dict: &PdfDict, skip: &[&[u8]]| {
+        let mut entries: Vec<(&[u8], &PdfObject)> =
+            dict.iter().filter(|(k, _)| !skip.contains(k)).collect();
+        entries.sort_by(|a, b| a.0.cmp(b.0));
+        entries
+            .into_iter()
+            .map(|(k, v)| {
+                let v = doc.resolve(Some(v)).unwrap_or(PdfObject::Null);
+                format!(
+                    "{}={}",
+                    String::from_utf8_lossy(k),
+                    describe_value(doc, &v, depth + 1)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    match obj {
+        PdfObject::Stream(stream) => format!(
+            "stream({};{})",
+            sorted(&stream.dict, &[b"Length", b"Filter", b"DecodeParms"]),
+            digest(&doc.decode_stream(stream))
+        ),
+        PdfObject::Dict(dict) => format!("<<{}>>", sorted(dict, &[])),
+        PdfObject::Array(items) => format!(
+            "[{}]",
+            items
+                .iter()
+                .map(|v| {
+                    let v = doc.resolve(Some(v)).unwrap_or(PdfObject::Null);
+                    describe_value(doc, &v, depth + 1)
+                })
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        PdfObject::Name(n) => format!("/{}", String::from_utf8_lossy(n)),
+        PdfObject::Bool(b) => b.to_string(),
+        PdfObject::Int(i) => i.to_string(),
+        PdfObject::Real(r) => format!("{r:.4}"),
+        PdfObject::Str(s) => format!("({})", digest(s)),
+        PdfObject::Null => "null".to_owned(),
+        PdfObject::Ref(..) => "ref".to_owned(),
+    }
+}
+
+/// 软蒙版（`ops_diff.py` 的 `describe_smask`）：类型、蒙版组的内容，有没有底色和传递函数。
+fn describe_smask(doc: &PdfDocument, obj: &PdfObject) -> String {
+    match obj {
+        PdfObject::Null | PdfObject::Name(_) => "None".to_owned(),
+        PdfObject::Dict(dict) => {
+            let get = |key: &[u8]| dict.get(key).and_then(|v| doc.resolve(Some(v)));
+            let mut parts = vec![match get(b"S") {
+                Some(PdfObject::Name(n)) => String::from_utf8_lossy(&n).into_owned(),
+                _ => "?".to_owned(),
+            }];
+            parts.push(match get(b"G") {
+                Some(PdfObject::Stream(group)) => digest(&doc.decode_stream(&group)),
+                _ => "no-group".to_owned(),
+            });
+            if let Some(bc) = get(b"BC") {
+                parts.push(format!("BC={}", describe_value(doc, &bc, 0)));
+            }
+            if let Some(tr) = get(b"TR") {
+                parts.push(format!(
+                    "TR={}",
+                    digest(describe_value(doc, &tr, 0).as_bytes())
+                ));
+            }
+            parts.join(":")
+        }
+        _ => "Unknown".to_owned(),
+    }
+}
+
+/// 字体写成 `子类型:BaseFont`（`ops_diff.py` 的 `describe_font`）。
+fn describe_font(doc: &PdfDocument, obj: Option<&PdfObject>) -> String {
+    let Some(PdfObject::Dict(dict)) = obj else {
+        return "Missing".to_owned();
+    };
+    let name = |key: &[u8]| match dict.get(key).and_then(|v| doc.resolve(Some(v))) {
+        Some(PdfObject::Name(n)) => String::from_utf8_lossy(&n).into_owned(),
+        _ => if key == b"Subtype" { "?" } else { "-" }.to_owned(),
+    };
+    format!("{}:{}", name(b"Subtype"), name(b"BaseFont"))
 }
 
 /// 没有任何资源。
@@ -322,7 +506,30 @@ impl Resources for DocResources<'_> {
             }
             _ => None,
         };
-        Some(ExtGState { line_cap, font })
+        let params = dict
+            .iter()
+            .filter(|(key, _)| *key != b"Type")
+            .map(|(key, value)| (key.to_vec(), gs_param(self.doc, key, value)))
+            .collect();
+        Some(ExtGState {
+            line_cap,
+            font,
+            params,
+        })
+    }
+
+    fn font_label(&self, name: &[u8]) -> String {
+        describe_font(self.doc, self.find(b"Font", name).as_ref())
+    }
+
+    fn image_mask(&self, name: &[u8]) -> bool {
+        match self.find(b"XObject", name) {
+            Some(PdfObject::Stream(stream)) => matches!(
+                self.direct(&stream.dict, b"ImageMask"),
+                Some(PdfObject::Bool(true))
+            ),
+            _ => false,
+        }
     }
 
     fn colorspace(&self, name: &[u8]) -> Option<Option<u32>> {
