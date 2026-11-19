@@ -5,7 +5,8 @@
 //! PDFium 一个进程只能有一个 `Library`，也不是线程安全的：不隔离时全部文件在本进程里顺序处理；
 //! `--isolate` 时每个文件起一个子进程（同时跑 `--jobs` 个），PDFium 崩溃或卡死只影响当前文件。
 
-mod isolate;
+/// `fidelity --isolate` 也用它。
+pub mod isolate;
 pub mod model;
 mod report;
 mod run;

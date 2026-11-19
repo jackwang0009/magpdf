@@ -8,7 +8,10 @@
     2. magpdf-cli roundtrip --calibrate：校准轮，不重写内容流，应当全部无差异（-SkipCalibrate 跳过）
     3. tests/corpus/tools/ops_diff.py：操作符级比对（-SkipOpsDiff 跳过）
     4. tests/corpus/tools/struct_check.py：结构校验，原件和保存结果各查一遍；只统计，不进基线，不算退步（-SkipStructCheck 跳过）
-  然后用 tests/corpus/tools/roundtrip_report.py 生成报告页面，并和 tests/baselines/roundtrip/<语料集>.json 比较。
+    5. magpdf-cli fidelity --isolate：保真校验，每一页能不能修改原有对象（方案 2.3；-SkipFidelity 跳过）
+  然后用 tests/corpus/tools/roundtrip_report.py 生成报告页面，并和 tests/baselines/roundtrip/<语料集>.json 比较；
+  保真校验的结论用 tests/corpus/tools/fidelity_report.py 和 tests/baselines/fidelity/<语料集>.json 比较，摘要接在
+  summary.md 后面。原来能改的页变成只能叠加内容，算“有退步”（退出码 3）。
 
   语料集：
     synthetic       tests/corpus/synthetic，来源 synthetic
@@ -26,7 +29,8 @@
     summary.json、summary.md            机器可读的摘要、Markdown 摘要
     run.json、timings.json              这一次的输入和环境、各步耗时
     baseline-candidate/<语料集>.json    这一次的结果，按基线的格式写出
-    <语料集>/roundtrip.json、calibrate.json、ops.json、struct.json、diff/、saved/
+    baseline-candidate/fidelity/<语料集>.json   保真校验的结论，按基线的格式写出
+    <语料集>/roundtrip.json、calibrate.json、ops.json、struct.json、fidelity.json、diff/、saved/
 
   退出码：0 没有退步（或者没有基线）；2 到了报警线；3 有退步但没到报警线；1 脚本或工具出错。
   规则见 tests/baselines/README.md。
@@ -38,7 +42,11 @@
   any（默认）：有退步退出码就非 0；alarm：只有到报警线才非 0；never：只出报告。
 
 .PARAMETER UpdateBaseline
-  跑完之后把这一次的结果写成新的基线（tests/baselines/roundtrip/）。报告页面照常是和旧基线比的，退出码 0。
+  跑完之后把这一次的结果写成新的基线（tests/baselines/roundtrip/，保真校验的写到 tests/baselines/fidelity/）。
+  报告页面照常是和旧基线比的，退出码 0。
+
+.PARAMETER FidelityBaselineDir
+  保真校验结论的基线目录，默认 tests/baselines/fidelity。
 
 .PARAMETER RequireBaseline
   有语料集没有基线时退出码 1（流水线上用，免得基线被删了还一路绿）。
@@ -64,6 +72,7 @@ param(
     [string]$Corpus = '',
     [string]$OutDir = '',
     [string]$BaselineDir = '',
+    [string]$FidelityBaselineDir = '',
     [int]$Jobs = 0,
     [int]$Timeout = 60,
     [ValidateSet('any', 'alarm', 'never')] [string]$FailOn = 'any',
@@ -72,6 +81,7 @@ param(
     [switch]$SkipCalibrate,
     [switch]$SkipOpsDiff,
     [switch]$SkipStructCheck,
+    [switch]$SkipFidelity,
     [switch]$SkipSynthetic,
     [switch]$NoDiffImages,
     [string]$Qpdf = '',
@@ -134,6 +144,8 @@ try {
     $OutDir = Get-FullPath $OutDir
     if (-not $BaselineDir) { $BaselineDir = Join-Path $root 'tests\baselines\roundtrip' }
     $BaselineDir = Get-FullPath $BaselineDir
+    if (-not $FidelityBaselineDir) { $FidelityBaselineDir = Join-Path $root 'tests\baselines\fidelity' }
+    $FidelityBaselineDir = Get-FullPath $FidelityBaselineDir
     if ($Jobs -le 0) { $Jobs = [Math]::Max(1, [Math]::Min(8, [int][Math]::Floor([Environment]::ProcessorCount / 2))) }
 
     # ---- 语料集 ----
@@ -275,6 +287,18 @@ try {
             $steps["$name.struct_check"] = $seconds.struct_check
         }
 
+        # 5. 保真校验：每一页能不能修改原有对象。命令行工具本身出错才让整轮失败；单个文件崩溃记在结果里。
+        $fidelityJson = $null
+        if (-not $SkipFidelity) {
+            $fidelityJson = Join-Path $setDir 'fidelity.json'
+            $watch = [Diagnostics.Stopwatch]::StartNew()
+            & $Cli fidelity $set.dir --isolate --jobs "$Jobs" --timeout "$($Timeout * 2)" --quiet --json $fidelityJson |
+                Set-Content -Path (Join-Path $setDir 'fidelity.txt') -Encoding utf8
+            if ($LASTEXITCODE -ne 0) { throw "magpdf-cli fidelity 退出码 $LASTEXITCODE（$name）" }
+            $seconds.fidelity = Get-Seconds $watch
+            $steps["$name.fidelity"] = $seconds.fidelity
+        }
+
         $record = [ordered]@{
             name = $name; title = $set.title; source_prefix = $set.prefix; root_source = $set.rootSource
             corpus_dir = $set.dir
@@ -288,6 +312,7 @@ try {
         if ($opsError) { $record.ops_error = $opsError }
         if ($structJson) { $record.struct = "$name/struct.json" }
         if ($structError) { $record.struct_error = $structError }
+        if ($fidelityJson) { $record.fidelity = "$name/fidelity.json" }
         $setRecords += $record
     }
 
@@ -317,6 +342,36 @@ try {
     $code = $LASTEXITCODE
     $steps['report'] = Get-Seconds $watch
     if (-not (Test-Path $reportHtml)) { throw "报告页面没有生成（roundtrip_report.py 退出码 $code）" }
+
+    # 保真校验的结论和基线比。几个退出码合成一个：1 出错 > 2 报警 > 3 有退步 > 0。
+    $codes = @($code)
+    if (-not $SkipFidelity) {
+        $metaJson = Join-Path $OutDir 'fidelity-meta.json'
+        [ordered]@{
+            generated = $started.ToString('yyyy-MM-ddTHH:mm:sszzz'); commit = "$commit"; machine = $machine
+            cli_sha256 = $cliHash; pdfium_dll_sha256 = $dllHash
+        } | ConvertTo-Json | Set-Content -Path $metaJson -Encoding utf8
+        $watch = [Diagnostics.Stopwatch]::StartNew()
+        foreach ($set in $sets) {
+            $name = $set.name
+            $fidArgs = @('-X', 'dev', (Join-Path $tools 'fidelity_report.py'), '--set', $name,
+                '--result', (Join-Path $OutDir "$name\fidelity.json"),
+                '--baseline', (Join-Path $FidelityBaselineDir "$name.json"),
+                '--candidate', (Join-Path $candidateDir "fidelity\$name.json"),
+                '--markdown', (Join-Path $OutDir "$name\fidelity.md"),
+                '--meta-json', $metaJson, '--fail-on', $FailOn)
+            if ($UpdateBaseline) { $fidArgs += '--update-baseline' }
+            elseif ($RequireBaseline) { $fidArgs += '--require-baseline' }
+            & $Python @fidArgs | Out-Null
+            $codes += $LASTEXITCODE
+            $fidMd = Join-Path $OutDir "$name\fidelity.md"
+            if (Test-Path $fidMd) {
+                Add-Content -Path $summaryMd -Value ('', (Get-Content $fidMd -Raw -Encoding utf8)) -Encoding utf8
+            }
+        }
+        $steps['fidelity_report'] = Get-Seconds $watch
+    }
+    $code = if ($codes -contains 1) { 1 } elseif ($codes -contains 2) { 2 } elseif ($codes -contains 3) { 3 } else { 0 }
 
     $timings = [ordered]@{
         kind = 'magpdf-roundtrip-nightly-timings'; format = 1

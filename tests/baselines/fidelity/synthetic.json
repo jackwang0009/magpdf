@@ -1,0 +1,207 @@
+{
+ "format": 1,
+ "kind": "magpdf-fidelity-baseline",
+ "meta": {
+  "cli_sha256": "917495e7af6f60ec0d1d7d1cebdaa83751324233b3127bafbadf60f90191728d",
+  "commit": "17cc424a50f57d7ddd3e8947c0412dab8e98ceb4",
+  "generated": "2026-11-19T17:44:44+08:00",
+  "machine": "JACK",
+  "pdfium_dll_sha256": "71a3e63e6ab8f5746a0fc9de9bc3d0c0dc07eb60990dfd37d9db7fc891821943",
+  "pdfium_version": "159.0.8138.0"
+ },
+ "set": "synthetic",
+ "files": [
+  {"path": "color-calrgb-calgray.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后页面的画面变了"}
+  ]},
+  {"path": "color-devicecmyk.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后页面的画面变了"}
+  ]},
+  {"path": "color-devicegray.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "color-devicen.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后页面的画面变了"}
+  ]},
+  {"path": "color-devicergb.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "color-iccbased-embedded.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后页面的画面变了"}
+  ]},
+  {"path": "color-iccbased-fallback.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后页面的画面变了"}
+  ]},
+  {"path": "color-indexed.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后页面的画面变了"}
+  ]},
+  {"path": "color-lab.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后页面的画面变了"}
+  ]},
+  {"path": "color-separation.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后页面的画面变了"}
+  ]},
+  {"path": "freight-bl-composite.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后页面的画面变了"}
+  ]},
+  {"path": "freight-label-composite.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后页面的画面变了"}
+  ]},
+  {"path": "gs-alpha.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "gs-blend-modes.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "gs-line-params.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后页面的画面变了"}
+  ]},
+  {"path": "gs-overprint.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后页面的画面变了"}
+  ]},
+  {"path": "gs-smask-ctm.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后页面的画面变了"}
+  ]},
+  {"path": "gs-smask-luminosity.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后页面的画面变了"}
+  ]},
+  {"path": "gs-stacked-other-keys.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后页面的画面变了"}
+  ]},
+  {"path": "gs-text-knockout.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的位置变了"}
+  ]},
+  {"path": "gs-transparency-group.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "pattern-shading-fill.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后页面的画面变了"}
+  ]},
+  {"path": "pattern-tiling.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后页面的画面变了"}
+  ]},
+  {"path": "shading-axial.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的个数变了"}
+  ]},
+  {"path": "shading-functions.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的个数变了"}
+  ]},
+  {"path": "shading-mesh.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的个数变了"}
+  ]},
+  {"path": "shading-radial.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的个数变了"}
+  ]},
+  {"path": "shading-stitching-background.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的个数变了"}
+  ]},
+  {"path": "struct-annots-appearance.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "struct-cm-nested-transforms.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "struct-empty-pages.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true},
+   {"page": 2, "editable": true},
+   {"page": 3, "editable": true},
+   {"page": 4, "editable": true}
+  ]},
+  {"path": "struct-form-xobject-nested.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "struct-form-xobject-reused.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "struct-image-xobject-masks.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "struct-incremental-update.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "struct-inline-image.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的个数变了"}
+  ]},
+  {"path": "struct-many-objects-clip.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "struct-marked-content.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "struct-mediabox-cropbox.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"},
+   {"page": 2, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"},
+   {"page": 3, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"},
+   {"page": 4, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "struct-missing-resources.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "struct-multi-stream-bt.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "struct-multi-stream-q.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "struct-ocg-layers.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "struct-page-rotate.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"},
+   {"page": 2, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"},
+   {"page": 3, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "struct-page-tree-inherited.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"},
+   {"page": 2, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "struct-stream-length-wrong.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "struct-xref-bad-offsets.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "struct-xref-missing.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "struct-xref-stream-objstm.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "struct-xref-stream-plain.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "text-cid-cjk-nonembedded.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的位置变了"}
+  ]},
+  {"path": "text-cid-truetype-identity.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "text-clip-modes.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的个数变了"}
+  ]},
+  {"path": "text-positioning-ops.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的位置变了"}
+  ]},
+  {"path": "text-render-modes.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "text-standard14.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的位置变了"}
+  ]},
+  {"path": "text-tc-tw.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的位置变了"}
+  ]},
+  {"path": "text-tj-kerning.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "text-truetype-embedded.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "text-type3-multistream.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的个数变了"}
+  ]},
+  {"path": "text-type3.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的个数变了"}
+  ]}
+ ]
+}

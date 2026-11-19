@@ -1,0 +1,1063 @@
+{
+ "format": 1,
+ "kind": "magpdf-fidelity-baseline",
+ "meta": {
+  "cli_sha256": "917495e7af6f60ec0d1d7d1cebdaa83751324233b3127bafbadf60f90191728d",
+  "commit": "17cc424a50f57d7ddd3e8947c0412dab8e98ceb4",
+  "generated": "2026-11-19T17:44:44+08:00",
+  "machine": "JACK",
+  "pdfium_dll_sha256": "71a3e63e6ab8f5746a0fc9de9bc3d0c0dc07eb60990dfd37d9db7fc891821943",
+  "pdfium_version": "159.0.8138.0"
+ },
+ "set": "public-pdfium",
+ "files": [
+  {"path": "344775293.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "363015187.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "about_blank.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的图形状态参数变了"}
+  ]},
+  {"path": "actual_text_rtl.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "annot_javascript.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "annotation_fileattachment.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的图形状态参数变了"}
+  ]},
+  {"path": "annotation_highlight_long_content.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的图形状态参数变了"}
+  ]},
+  {"path": "annotation_highlight_rollover_ap.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "annotation_highlight_square_with_ap.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "annotation_ink_multiple.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的图形状态参数变了"}
+  ]},
+  {"path": "annotation_markup_multiline_no_ap.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "annotation_stamp_with_ap.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的位置变了"}
+  ]},
+  {"path": "annotiter.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true},
+   {"page": 2, "editable": true},
+   {"page": 3, "editable": true}
+  ]},
+  {"path": "annots.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"},
+   {"page": 2, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "annots_action_handling.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"},
+   {"page": 2, "editable": true}
+  ]},
+  {"path": "arabic.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "arabic_actual_text_ordering.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true},
+   {"page": 2, "editable": true},
+   {"page": 3, "editable": true},
+   {"page": 4, "editable": true}
+  ]},
+  {"path": "bad_annots_entry.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bad_dict_keys.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bad_page_type.pdf", "status": "crashed", "error": "子进程异常退出（0x80000003）", "pages": []},
+  {"path": "bigtable_mini.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "black.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bookmarks.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"},
+   {"page": 2, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bookmarks_circular.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"},
+   {"page": 2, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bookmarks_color.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"},
+   {"page": 2, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bookmarks_style.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"},
+   {"page": 2, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "brotli_decodeparms.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_1029.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_1055869.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_1058653.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_1124998.pdf", "status": "error", "error": "打开文档失败：Password", "pages": []},
+  {"path": "bug_113.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_1139.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_1206.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_1229106.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "这一页与别的页共用同一个页对象"},
+   {"page": 2, "editable": false, "reason": "这一页与别的页共用同一个页对象"},
+   {"page": 3, "editable": false, "reason": "这一页与别的页共用同一个页对象"},
+   {"page": 4, "editable": false, "reason": "这一页与别的页共用同一个页对象"}
+  ]},
+  {"path": "bug_1265.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_1296920.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_1301.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_1302355.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_1302455.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_1324189.pdf", "status": "error", "error": "打开文档失败：Format", "pages": []},
+  {"path": "bug_1324503.pdf", "status": "error", "error": "打开文档失败：Format", "pages": []},
+  {"path": "bug_1327884.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_1328389.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_1333298.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_1388_2.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_1396264.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_1399.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_1477093.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_1506.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "这一页与别的页共用同一个页对象"},
+   {"page": 2, "editable": false, "reason": "这一页与别的页共用同一个页对象"},
+   {"page": 3, "editable": false, "reason": "这一页与别的页共用同一个页对象"},
+   {"page": 4, "editable": true}
+  ]},
+  {"path": "bug_1549.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后页面的画面变了"}
+  ]},
+  {"path": "bug_1558.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_1574.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_1591.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的个数变了"}
+  ]},
+  {"path": "bug_1646.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_1658.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_1768.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_1769.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_182.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_1893.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_1919.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_2034.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_213.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_2132.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_216.pdf", "status": "error", "error": "第 1 页：加载页面失败：Other(0)", "pages": []},
+  {"path": "bug_298.pdf", "status": "error", "error": "打开文档失败：Format", "pages": []},
+  {"path": "bug_306123.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_325_a.pdf", "status": "error", "error": "打开文档失败：Format", "pages": []},
+  {"path": "bug_325_b.pdf", "status": "error", "error": "打开文档失败：Format", "pages": []},
+  {"path": "bug_343.pdf", "status": "error", "error": "打开文档失败：Format", "pages": []},
+  {"path": "bug_343075986.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_344.pdf", "status": "error", "error": "打开文档失败：Format", "pages": []},
+  {"path": "bug_355.pdf", "status": "error", "error": "打开文档失败：Format", "pages": []},
+  {"path": "bug_360.pdf", "status": "error", "error": "打开文档失败：Format", "pages": []},
+  {"path": "bug_378120423.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_384770169.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_399689604.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_40162073.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_402562387.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_410996566.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_420508260.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_42270471.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_42271133.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_424613308.pdf", "status": "error", "error": "打开文档失败：Password", "pages": []},
+  {"path": "bug_425244539.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_431824298.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_444176962.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_451265.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_451830.pdf", "status": "error", "error": "打开文档失败：Format", "pages": []},
+  {"path": "bug_452455.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_454695.pdf", "status": "error", "error": "打开文档失败：Format", "pages": []},
+  {"path": "bug_455199.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_457855936.pdf", "status": "error", "error": "打开文档失败：Format", "pages": []},
+  {"path": "bug_459580.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_461845674.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_481363.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_487928.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_488948351.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_491161396.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_491516663.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_498010830_shared_annots.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true},
+   {"page": 2, "editable": true}
+  ]},
+  {"path": "bug_498010830_shared_widget.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true},
+   {"page": 2, "editable": true}
+  ]},
+  {"path": "bug_504416752.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_507316.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true},
+   {"page": 2, "editable": true},
+   {"page": 3, "editable": true}
+  ]},
+  {"path": "bug_509964646.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_517126568.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_544880.pdf", "status": "error", "error": "第 1 页：加载页面失败：Other(0)", "pages": []},
+  {"path": "bug_547706.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后页面的画面变了"}
+  ]},
+  {"path": "bug_551248.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_551460.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的个数变了"}
+  ]},
+  {"path": "bug_552046.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_554790604.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_555784.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_57.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_572871.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true},
+   {"page": 2, "editable": true},
+   {"page": 3, "editable": true}
+  ]},
+  {"path": "bug_583.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的个数变了"}
+  ]},
+  {"path": "bug_601362.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_602650.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_620428.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_631912.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_634394.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_634716.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_642.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的个数变了"}
+  ]},
+  {"path": "bug_644.pdf", "status": "error", "error": "打开文档失败：Password", "pages": []},
+  {"path": "bug_650.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_664284.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_674771.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_679649.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_680376.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "这一页与别的页共用同一个页对象"},
+   {"page": 2, "editable": false, "reason": "这一页与别的页共用同一个页对象"},
+   {"page": 3, "editable": false, "reason": "这一页与别的页共用同一个页对象"},
+   {"page": 4, "editable": false, "reason": "这一页与别的页共用同一个页对象"}
+  ]},
+  {"path": "bug_707673.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_709793.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_713197.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_717.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_750568.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"},
+   {"page": 2, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"},
+   {"page": 3, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"},
+   {"page": 4, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_757705.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_765384.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_773229.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_779.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_781804.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_782596.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_821454.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_828049.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_861842.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_889099.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_890322.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_896366.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_900552.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "bug_901654.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后页面的画面变了"}
+  ]},
+  {"path": "bug_901654_2.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后页面的画面变了"}
+  ]},
+  {"path": "bug_905142.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_921.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_925981.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"},
+   {"page": 2, "editable": true}
+  ]},
+  {"path": "bug_972518.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "bug_xrefv4_loop.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "calculate.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "circular_viewer_ref.pdf", "status": "ok", "pages": []},
+  {"path": "click_form.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "clip_path.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "combobox_form.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "control_characters.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "cropped_no_overlap.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "cropped_text.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "这一页的内容流与别处共用"},
+   {"page": 2, "editable": false, "reason": "这一页的内容流与别处共用"},
+   {"page": 3, "editable": false, "reason": "这一页的内容流与别处共用"},
+   {"page": 4, "editable": false, "reason": "这一页的内容流与别处共用"}
+  ]},
+  {"path": "dashed_lines.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "docmdp.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "document_aactions.pdf", "status": "error", "error": "第 2 页：加载页面失败：Other(0)", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "embedded_attachments.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "embedded_attachments_invalid_data.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "embedded_attachments_invalid_types.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "embedded_attachments_with_af.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "embedded_attachments_with_desc.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "embedded_images.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "empty_xref.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "encrypted.pdf", "status": "error", "error": "打开文档失败：Password", "pages": []},
+  {"path": "encrypted_hello_world_r2.pdf", "status": "error", "error": "打开文档失败：Password", "pages": []},
+  {"path": "encrypted_hello_world_r2_bad_okey.pdf", "status": "error", "error": "打开文档失败：Password", "pages": []},
+  {"path": "encrypted_hello_world_r3.pdf", "status": "error", "error": "打开文档失败：Password", "pages": []},
+  {"path": "encrypted_hello_world_r3_bad_okey.pdf", "status": "error", "error": "打开文档失败：Password", "pages": []},
+  {"path": "encrypted_hello_world_r5.pdf", "status": "error", "error": "打开文档失败：Password", "pages": []},
+  {"path": "encrypted_hello_world_r6.pdf", "status": "error", "error": "打开文档失败：Password", "pages": []},
+  {"path": "feature_linearized_loading.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后页面的画面变了"},
+   {"page": 2, "editable": false, "reason": "重新生成内容流后页面的画面变了"}
+  ]},
+  {"path": "find_text_consecutive.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "font_matrix.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "font_weight.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "form_object.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "form_object_with_image.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "form_object_with_path.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "form_object_with_text.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "freetext_annotation_without_da.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "get_page_aaction.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true},
+   {"page": 2, "editable": true}
+  ]},
+  {"path": "goto_action.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "gotoe_action.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "hebrew_mirrored.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "hello_world.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "hello_world_2_pages.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "这一页的内容流与别处共用"},
+   {"page": 2, "editable": false, "reason": "这一页的内容流与别处共用"}
+  ]},
+  {"path": "hello_world_2_pages_custom_object.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "这一页的内容流与别处共用"},
+   {"page": 2, "editable": false, "reason": "这一页的内容流与别处共用"}
+  ]},
+  {"path": "hello_world_2_pages_shared_resources_dict.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "这一页的内容流与别处共用"},
+   {"page": 2, "editable": false, "reason": "这一页的内容流与别处共用"}
+  ]},
+  {"path": "hello_world_2_pages_split_streams.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "这一页的内容流与别处共用"},
+   {"page": 2, "editable": false, "reason": "这一页的内容流与别处共用"}
+  ]},
+  {"path": "hello_world_brotli.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "这一页的内容流没能完整解码"}
+  ]},
+  {"path": "hello_world_brotli_with_length1.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "这一页的内容流没能完整解码"}
+  ]},
+  {"path": "hello_world_compressed_stream.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "hello_world_pieceinfo.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "hello_world_split_streams.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "hello_world_with_invisible_spaces.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "image_clipped.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "ink_annot.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "javascript/xfa_specific/bug_1042915.pdf", "status": "ok", "pages": []},
+  {"path": "javascript/xfa_specific/bug_1042956.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "javascript/xfa_specific/bug_1043510.pdf", "status": "ok", "pages": []},
+  {"path": "javascript/xfa_specific/bug_1238_2.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "javascript/xfa_specific/resolve_nodes_1.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "javascript/xfa_specific/resolve_nodes_2.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "jpeg_reduced_size.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "jpeg_reduced_size_with_smask.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "jpeg_unaligned_no_reduce.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "jpx_lzw.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "js.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "latin_extended.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "launch_action.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "line_annot.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "linearized.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "这一页的内容流没能完整解码"},
+   {"page": 2, "editable": false, "reason": "这一页的内容流没能完整解码"},
+   {"page": 3, "editable": false, "reason": "这一页的内容流没能完整解码"}
+  ]},
+  {"path": "linearized_bug_1055.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true},
+   {"page": 2, "editable": true},
+   {"page": 3, "editable": true}
+  ]},
+  {"path": "links_highlights_annots.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "listbox_form.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "many_rectangles.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "many_rectangles_brotli.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "这一页的内容流没能完整解码"}
+  ]},
+  {"path": "marked_content_id.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的图形状态参数变了"}
+  ]},
+  {"path": "matte.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "multiple_form_types.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "multiple_graphics_states.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "named_action.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "named_dests.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"},
+   {"page": 2, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "named_dests_old_style.pdf", "status": "error", "error": "第 2 页：加载页面失败：Other(0)", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "named_dests_old_style_indirect.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true},
+   {"page": 2, "editable": true},
+   {"page": 3, "editable": true}
+  ]},
+  {"path": "no_page_count.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "这一页与别的页共用同一个页对象"},
+   {"page": 2, "editable": false, "reason": "这一页与别的页共用同一个页对象"},
+   {"page": 3, "editable": false, "reason": "这一页与别的页共用同一个页对象"},
+   {"page": 4, "editable": false, "reason": "这一页与别的页共用同一个页对象"},
+   {"page": 5, "editable": false, "reason": "这一页与别的页共用同一个页对象"},
+   {"page": 6, "editable": false, "reason": "这一页与别的页共用同一个页对象"}
+  ]},
+  {"path": "non_hex_file_id.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "nonesuch_action.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "page_labels.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的图形状态参数变了"},
+   {"page": 2, "editable": true},
+   {"page": 3, "editable": true},
+   {"page": 4, "editable": true},
+   {"page": 5, "editable": true},
+   {"page": 6, "editable": true},
+   {"page": 7, "editable": true}
+  ]},
+  {"path": "page_tree_empty_node.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true},
+   {"page": 2, "editable": true}
+  ]},
+  {"path": "parser_rebuildxref_correct.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "parser_rebuildxref_error_notrailer.pdf", "status": "error", "error": "打开文档失败：Format", "pages": []},
+  {"path": "pattern_fill.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后页面的画面变了"}
+  ]},
+  {"path": "pattern_fill_uncolored.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后页面的画面变了"}
+  ]},
+  {"path": "pattern_stroke.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后页面的画面变了"}
+  ]},
+  {"path": "pattern_stroke_uncolored.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后页面的画面变了"}
+  ]},
+  {"path": "pdf20_minimal.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "pixel/bug_1087.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "pixel/bug_1287409.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "pixel/bug_1308.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的图形状态参数变了"}
+  ]},
+  {"path": "pixel/bug_1484283.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "pixel/bug_2122.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "pixel/bug_2123.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "pixel/bug_2152.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "pixel/bug_304.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "pixel/bug_332462378.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "pixel/bug_335309995.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "pixel/bug_345274934.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "pixel/bug_349972030.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "pixel/bug_42271010.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "pixel/bug_440028542.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的个数变了"}
+  ]},
+  {"path": "pixel/bug_512557.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "pixel/bug_603518.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "pixel/bug_828206.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "pixel/bug_830221.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "pixel/bug_867501.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "pixel/bug_925736.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "pixel/direct_content_stream.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "pixel/freetext_annotation_without_da.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "pixel/generation_numbers1.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "pixel/generation_numbers2.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "pixel/xfa_specific/barcode_test.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "pixel/xfa_specific/dynamic_list_box_allow_multiple_selection.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "pixel/xfa_specific/dynamic_password_field_background_fill.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "pixel/xfa_specific/dynamic_table_color_and_width.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "pixel/xfa_specific/resolve_nodes_0.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "pixel/xfa_specific/standard_symbols.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true},
+   {"page": 2, "editable": true}
+  ]},
+  {"path": "pixel/xfa_specific/static_list_box_caption.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "pixel/xfa_specific/static_password_field_rotate.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true},
+   {"page": 2, "editable": true}
+  ]},
+  {"path": "pixel/xfa_specific/xfa_node_caption.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "polygon_annot.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "raw_type_text.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "rectangles.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "rectangles_brotli.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "这一页的内容流没能完整解码"}
+  ]},
+  {"path": "rectangles_double_flipped.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "rectangles_multi_page_xfa.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"},
+   {"page": 2, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"},
+   {"page": 3, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"},
+   {"page": 4, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"},
+   {"page": 5, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "rectangles_multi_pages.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"},
+   {"page": 2, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"},
+   {"page": 3, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"},
+   {"page": 4, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"},
+   {"page": 5, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "rectangles_object_zero.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "rectangles_with_leaky_ctm.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "redact_annot.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "redirect.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "repeat_viewer_ref.pdf", "status": "ok", "pages": []},
+  {"path": "rotated_image.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "rotated_text.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "rotated_text_90.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "shared_form_xobject_matrix.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "signature_no_sub_filter.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "signature_reason.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "simple_thumbnail.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true},
+   {"page": 2, "editable": true}
+  ]},
+  {"path": "simple_xfa.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "split_streams.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "tagged_actual_text.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "tagged_alt_text.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "tagged_expansion.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "tagged_marked_content.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "tagged_mcr_multipage.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"},
+   {"page": 2, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "tagged_mcr_objr.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "tagged_nested.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "tagged_table.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "tagged_table_bad_elem.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "tagged_table_bad_parent.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "text_color.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "text_font.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "text_form.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "text_form_color.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "text_form_multiline.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "text_form_multiple.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "text_form_negative_fontsize.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "text_in_page_marked.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "text_in_page_marked_indirect.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "text_large_ascent_descent.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "text_render_mode.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "thumbnail_with_empty_stream.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "thumbnail_with_no_filters.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "trailer_as_hexstring.pdf", "status": "error", "error": "打开文档失败：Format", "pages": []},
+  {"path": "trailer_end_trailing_space.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "trailer_unterminated.pdf", "status": "error", "error": "打开文档失败：Format", "pages": []},
+  {"path": "two_signatures.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "unsupported_feature.pdf", "status": "error", "error": "第 2 页：加载页面失败：Other(0)", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "uri_action.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "uri_action_nonascii.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "use_outlines.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "utf-8.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "version_in_catalog.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "vertical_text.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "viewer_pref_types.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "viewer_ref.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "这一页与别的页共用同一个页对象"},
+   {"page": 2, "editable": false, "reason": "这一页与别的页共用同一个页对象"},
+   {"page": 3, "editable": false, "reason": "这一页与别的页共用同一个页对象"},
+   {"page": 4, "editable": false, "reason": "这一页与别的页共用同一个页对象"},
+   {"page": 5, "editable": false, "reason": "这一页与别的页共用同一个页对象"}
+  ]},
+  {"path": "weblinks.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "weblinks_across_lines.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "whitespace.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]},
+  {"path": "xfa/email_recommended.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "xfa/xfa_break_before_after.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "xfa/xfa_combobox.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "xfa/xfa_date_time_edit.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "xfa/xfa_image_edit.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "xfa/xfa_multiline_textfield.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "xref_free_objects.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": true}
+  ]},
+  {"path": "zero_length_stream.pdf", "status": "ok", "pages": [
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
+  ]}
+ ]
+}
