@@ -81,4 +81,4 @@ export type { EngineSessionOptions } from './engine/engineSession';
 // 界面外壳
 export { EditorShell } from './shell/EditorShell';
 export type { EditorShellProps } from './shell/EditorShell';
-export type { EditorHost, HostNotice } from './shell/editorHost';
+export type { EditorHost, HostNotice, RecoverableDocument, RecoveryHost } from './shell/editorHost';

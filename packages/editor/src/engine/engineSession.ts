@@ -31,7 +31,12 @@ import type { Matrix } from '../document/pageSpace';
 import type { DocumentSnapshot, ObjectType, PageObject } from '../document/types';
 import type { Rect } from '../geometry';
 import { format, t } from '../i18n';
-import type { EditorHost, HostNotice } from '../shell/editorHost';
+import type {
+  EditorHost,
+  HostNotice,
+  RecoverableDocument,
+  RecoveryHost,
+} from '../shell/editorHost';
 import type { EditorStore } from '../store/editorStore';
 import { EngineTileProvider } from './engineTileProvider';
 import { engineIds, objectId, pageOfObject } from './objectIds';
@@ -48,6 +53,10 @@ export interface EngineSessionOptions {
   readonly pickDocument: () => Promise<DocInfo | null>;
   /** 主进程知道的、已经开着的文档：启动时命令行给的，或者界面重新加载之前打开的。 */
   readonly listDocuments: () => Promise<readonly DocInfo[]>;
+  /** 上次没有正常退出时开着的文档（崩溃恢复）。不给就不问。 */
+  readonly recoverableDocuments?: () => Promise<readonly RecoverableDocument[]>;
+  /** 重新打开选中的那几份，返回打开了的；之后主进程不再报可恢复的文档。 */
+  readonly recoverDocuments?: (ids: readonly string[]) => Promise<readonly DocInfo[]>;
 }
 
 /** 一页在界面这边的记录。 */
@@ -113,10 +122,22 @@ export class EngineSession implements EditorHost {
   private loadSequence = 0;
   private disposed = false;
 
+  readonly recovery?: RecoveryHost;
+
   constructor(options: EngineSessionOptions) {
     this.options = options;
     this.transport = options.transport;
     this.store = options.store;
+    const { recoverableDocuments, recoverDocuments } = options;
+    if (recoverableDocuments && recoverDocuments) {
+      this.recovery = {
+        list: recoverableDocuments,
+        resolve: async (ids) => {
+          const reopened = await recoverDocuments(ids);
+          for (const info of reopened) await this.adopt(info);
+        },
+      };
+    }
     this.unsubscribeEvents = this.transport.onEvent((event) => this.onEvent(event));
     this.unsubscribeStore = this.store.subscribe((state, previous) => {
       if (state.documents === previous.documents) return;

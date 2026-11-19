@@ -10,6 +10,7 @@
 mod app;
 mod console;
 mod host;
+mod leftover;
 mod shared_tiles;
 
 use std::fs;

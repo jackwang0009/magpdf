@@ -2,7 +2,78 @@ import { useState } from 'react';
 import { t } from '../i18n';
 import type { BenchmarkResult } from '../canvas/benchmark';
 import { formatMs } from '../canvas/frameStats';
-import type { HostNotice } from './editorHost';
+import type { HostNotice, RecoverableDocument } from './editorHost';
+
+export interface RecoveryDialogProps {
+  readonly documents: readonly RecoverableDocument[];
+  /** 用户答复了：要重新打开的那几份（可以是空的） */
+  readonly onResolve: (ids: readonly string[]) => void;
+}
+
+/** 崩溃恢复（《交互设计》6.9）：列出上次开着的文档，逐个勾选要不要重新打开。 */
+export function RecoveryDialog({ documents, onResolve }: RecoveryDialogProps) {
+  const [chosen, setChosen] = useState<ReadonlySet<string>>(
+    () => new Set(documents.map((d) => d.id)),
+  );
+  const toggle = (id: string) =>
+    setChosen((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  return (
+    <div
+      className="mg-dialog-backdrop"
+      role="alertdialog"
+      aria-modal="true"
+      aria-label={t.recovery.title}
+    >
+      <div className="mg-dialog mg-notice mg-recovery">
+        <header className="mg-dialog-title">{t.recovery.title}</header>
+        <p className="mg-notice-message">{t.recovery.message}</p>
+        <table className="mg-recovery-table">
+          <thead>
+            <tr>
+              <th />
+              <th>{t.recovery.name}</th>
+              <th>{t.recovery.modified}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {documents.map((doc) => (
+              <tr key={doc.id}>
+                <td>
+                  <input
+                    type="checkbox"
+                    aria-label={doc.name}
+                    checked={chosen.has(doc.id)}
+                    onChange={() => toggle(doc.id)}
+                  />
+                </td>
+                <td>{doc.name}</td>
+                <td>{doc.modifiedMs ? new Date(doc.modifiedMs).toLocaleString('zh-CN') : ''}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="mg-dialog-actions">
+          <button
+            type="button"
+            onClick={() => onResolve(documents.filter((d) => chosen.has(d.id)).map((d) => d.id))}
+            disabled={chosen.size === 0}
+            autoFocus
+          >
+            {t.recovery.reopen}
+          </button>
+          <button type="button" onClick={() => onResolve([])}>
+            {t.recovery.discard}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export interface NoticeDialogProps {
   /** 要告诉用户的事；一次显示一条，点“知道了”再显示下一条 */

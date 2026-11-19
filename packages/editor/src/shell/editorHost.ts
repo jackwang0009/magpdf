@@ -18,6 +18,24 @@ export interface EditorHost {
   documentEditor(documentId: string): DocumentEditor | undefined;
   /** 宿主有事要告诉用户（引擎重启了、文档没能恢复）。返回取消订阅的函数。 */
   onNotice(listener: (notice: HostNotice) => void): () => void;
+  /** 崩溃恢复（方案 9.3、《交互设计》6.9）。宿主没有这一项时外壳不问。 */
+  readonly recovery?: RecoveryHost;
+}
+
+/** 上次没有正常退出时开着的一份文档。 */
+export interface RecoverableDocument {
+  readonly id: string;
+  /** 文件名，不带目录 */
+  readonly name: string;
+  /** 上次修改的时间，Unix 毫秒 */
+  readonly modifiedMs: number;
+}
+
+export interface RecoveryHost {
+  /** 可以恢复的文档；没有就是空的。外壳启动时问一次。 */
+  list(): Promise<readonly RecoverableDocument[]>;
+  /** 用户答复了：重新打开 `ids` 这几份，其余的放弃。之后不再问。 */
+  resolve(ids: readonly string[]): Promise<void>;
 }
 
 export interface HostNotice {

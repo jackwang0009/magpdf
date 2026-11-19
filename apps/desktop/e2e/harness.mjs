@@ -103,10 +103,11 @@ export function resizeWindow(appPid, { width, height }) {
 
 /**
  * 起桌面程序，命令行打开 `files`（最后一份是活动文档）。数据目录和 WebView2 的用户目录放在一个新建的临时目录里，
- * 用完由 `cleanUp` 删掉。返回子进程、调试端口、临时目录和启动的时刻（`Date.now()`）。
+ * 用完由 `cleanUp` 删掉；给了 `options.scratch` 就接着用那一个（同一份数据目录再起一次，崩溃恢复要用）。
+ * 返回子进程、调试端口、临时目录和启动的时刻（`Date.now()`）。
  */
-export async function launchApp(appBin, files) {
-  const scratch = mkdtempSync(join(tmpdir(), 'magpdf-e2e-'));
+export async function launchApp(appBin, files, options = {}) {
+  const scratch = options.scratch ?? mkdtempSync(join(tmpdir(), 'magpdf-e2e-'));
   const port = await freePort();
   const launched = Date.now();
   const app = spawn(appBin, files, {

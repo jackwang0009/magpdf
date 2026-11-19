@@ -5,6 +5,8 @@
 //!   是主进程自己用的，`doc.open` 带着路径，都不让界面直接调。
 //! - 命令 `open_document_dialog`：主进程弹“打开”对话框，用户选了文件就交给引擎打开。界面拿不到任意路径。
 //! - 命令 `open_documents`：主进程知道的、已经开着的文档（启动时命令行给的，或者界面重新加载之前打开的）。
+//! - 命令 `recoverable_documents`、`recover_documents`：上次没有正常退出时开着的文档，界面问过用户之后重新打开
+//!   （[`crate::leftover`]）。
 //! - 自定义协议 `magpdf://tile/<槽位>/<代数>`：从共享内存取一块瓦片的 BGRA 像素（WebView2 里的地址是
 //!   `http://magpdf.localhost/tile/<槽位>/<代数>`）。打开了 [`crate::shared_tiles`] 时改走命令
 //!   `fetch_tile_shared`，像素放在 WebView2 的共享缓冲区里。
@@ -29,6 +31,7 @@ use tauri::{
 };
 use tokio::sync::mpsc::UnboundedReceiver;
 
+use crate::leftover::{self, Leftover, RecoverableDocument};
 use crate::shared_tiles::{self, FillError, SharedTile, SharedTiles};
 
 /// 界面收引擎事件用的 Tauri 事件名。Tauri 的事件名里不能有点号，所以协议里的事件名放在载荷的 `method` 里。
@@ -48,6 +51,8 @@ struct Shell {
     recovery: PathBuf,
     /// 取瓦片走 WebView2 共享缓冲区（[`crate::shared_tiles`]）；没打开这条路时为空。
     shared_tiles: Option<Arc<SharedTiles>>,
+    /// 上次没有正常退出时留下的恢复文件（[`crate::leftover`]）。用户答复之后清空。
+    leftover: Mutex<Leftover>,
 }
 
 impl Shell {
@@ -145,6 +150,42 @@ async fn open_document_dialog(
 #[tauri::command]
 fn open_documents(shell: State<'_, Shell>) -> Vec<DocInfo> {
     shell.docs()
+}
+
+/// 上次没有正常退出时开着、现在还能重新打开的文档。没有就是空的；用户答复过之后也是空的。
+#[tauri::command]
+fn recoverable_documents(shell: State<'_, Shell>) -> Vec<RecoverableDocument> {
+    shell
+        .leftover
+        .lock()
+        .map(|leftover| leftover.documents.clone())
+        .unwrap_or_default()
+}
+
+/// 用户答复了崩溃恢复：重新打开选中的文档（`ids` 来自 [`recoverable_documents`]），然后把上次留下的恢复文件
+/// 都删掉，不再问。返回打开了的文档；打不开的跳过（日志里不记文件名）。
+#[tauri::command]
+async fn recover_documents(
+    shell: State<'_, Shell>,
+    ids: Vec<String>,
+) -> Result<Vec<DocInfo>, RpcError> {
+    let leftover = shell
+        .leftover
+        .lock()
+        .map(|mut leftover| std::mem::take(&mut *leftover))
+        .unwrap_or_default();
+    let mut opened = Vec::new();
+    for doc in leftover.documents.iter().filter(|d| ids.contains(&d.id)) {
+        match shell.open(&doc.path).await {
+            Ok(info) => opened.push(info),
+            Err(error) => tracing::warn!("上次开着的文档没能重新打开：{error}"),
+        }
+    }
+    for file in &leftover.files {
+        let _ = std::fs::remove_file(file);
+        let _ = std::fs::remove_file(file.with_extension("json.tmp"));
+    }
+    Ok(opened)
 }
 
 /// 界面取瓦片走哪条路：`sharedBuffer`（[`crate::shared_tiles`]）或 `protocol`（《接口协议》3.3）。
@@ -400,6 +441,7 @@ pub fn run(open_paths: Vec<PathBuf>) -> Result<()> {
     // 恢复文件按主进程的 PID 分开，同时开两个 MagPDF 互不干扰；PID 被系统复用时先清掉上一个进程留下的。
     let recovery = recovery_dir.join(format!("session-{}.json", std::process::id()));
     let _ = std::fs::remove_file(&recovery);
+    let leftover = leftover::scan(&recovery_dir, &recovery, leftover::is_running_magpdf);
 
     let mut launch = EngineLaunch::new(engine_bin()?, recovery.clone(), env!("CARGO_PKG_VERSION"));
     launch.locale = Some("zh-CN".to_owned());
@@ -420,6 +462,7 @@ pub fn run(open_paths: Vec<PathBuf>) -> Result<()> {
         origins: page_origins(&context),
         recovery,
         shared_tiles: shared_tiles::enabled().then(|| Arc::new(SharedTiles::default())),
+        leftover: Mutex::new(leftover),
     };
     for path in &open_paths {
         // 日志里不记文件名和路径（《工程规范》）。
@@ -435,6 +478,8 @@ pub fn run(open_paths: Vec<PathBuf>) -> Result<()> {
             engine_request,
             open_document_dialog,
             open_documents,
+            recoverable_documents,
+            recover_documents,
             tile_transport,
             attach_tile_buffers,
             fetch_tile_shared

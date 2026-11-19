@@ -8,6 +8,8 @@ fn main() {
             "engine_request",
             "open_document_dialog",
             "open_documents",
+            "recoverable_documents",
+            "recover_documents",
             "tile_transport",
             "attach_tile_buffers",
             "fetch_tile_shared",

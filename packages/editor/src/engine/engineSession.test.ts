@@ -238,6 +238,38 @@ describe('EngineSession：打开、翻页、关闭', () => {
     expect(store.getState().activeDocumentId).toBe('engine-1');
   });
 
+  it('崩溃恢复：主进程给了两样才有；选中的文档重新打开后接进来', async () => {
+    expect(setup().session.recovery).toBeUndefined();
+
+    const engine = new FakeEngine();
+    const store = createEditorStore();
+    const reopened = engine.open('提单.pdf', [plainPage(20)]);
+    const asked: (readonly string[])[] = [];
+    const session = new EngineSession({
+      transport: engine.transport,
+      store,
+      pickDocument: () => Promise.resolve(null),
+      listDocuments: () => Promise.resolve([]),
+      recoverableDocuments: () =>
+        Promise.resolve([
+          { id: '0', name: '提单.pdf', modifiedMs: 1 },
+          { id: '1', name: '合同.pdf', modifiedMs: 2 },
+        ]),
+      recoverDocuments: (ids) => {
+        asked.push(ids);
+        return Promise.resolve(ids.includes('0') ? [reopened] : []);
+      },
+    });
+    expect((await session.recovery!.list()).map((d) => d.name)).toEqual(['提单.pdf', '合同.pdf']);
+    await session.recovery!.resolve(['0']);
+    await flush();
+    expect(asked).toEqual([['0']]);
+    expect(store.getState().documentOrder).toEqual(['engine-1']);
+    await session.recovery!.resolve([]);
+    expect(asked).toEqual([['0'], []]);
+    expect(store.getState().documentOrder).toEqual(['engine-1']);
+  });
+
   it('打不开时把引擎的错误原样抛给外壳', async () => {
     const { session, dialog } = setup();
     dialog.result = { code: 2002, message: '需要打开密码' };

@@ -297,6 +297,16 @@ export const zhCN = {
     documentNotRestored: '“{name}”没能重新载入，已经关闭。',
     engineFailed: '引擎没能重新启动：{reason}。请重新打开 MagPDF。',
   },
+  recovery: {
+    title: '上次没有正常退出',
+    message:
+      'MagPDF 上次没有正常退出。下面这些文档当时开着，要重新打开吗？重新打开的是磁盘上保存过的样子，当时没保存的修改恢复不了。',
+    name: '文件',
+    modified: '上次修改时间',
+    reopen: '重新打开选中的',
+    discard: '都不要',
+    failed: '上次开着的文档没能重新打开：{reason}',
+  },
   mock: {
     contractName: '合同.pdf',
     billOfLadingName: '提单.pdf',

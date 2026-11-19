@@ -813,6 +813,31 @@
   user-select: text;
 }
 
+/* ---- 崩溃恢复 ---- */
+.mg-recovery {
+  width: 480px;
+}
+.mg-recovery-table {
+  width: calc(100% - 20px);
+  margin: 4px 10px;
+  border-collapse: collapse;
+}
+.mg-recovery-table th,
+.mg-recovery-table td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--mg-line);
+  text-align: left;
+}
+.mg-recovery-table th:first-child,
+.mg-recovery-table td:first-child {
+  width: 24px;
+}
+.mg-recovery-table th:last-child,
+.mg-recovery-table td:last-child {
+  color: var(--mg-text-muted);
+  white-space: nowrap;
+}
+
 /* ---- dockview 主题：颜色映射到 --mg-* 变量，标签高度 28px（方案 8.2） ---- */
 .dockview-theme-magpdf {
   --dv-tabs-and-actions-container-font-size: var(--mg-font-size);

@@ -24,9 +24,9 @@ import {
   saveWorkspace,
 } from '../workspace/workspaces';
 import type { WorkspaceStorage } from '../workspace/workspaces';
-import { BenchmarkDialog, NoticeDialog } from './Dialogs';
+import { BenchmarkDialog, NoticeDialog, RecoveryDialog } from './Dialogs';
 import { EditorHostContext } from './editorHost';
-import type { EditorHost, HostNotice } from './editorHost';
+import type { EditorHost, HostNotice, RecoverableDocument } from './editorHost';
 import { MenuBar } from './MenuBar';
 import { OptionsBar } from './OptionsBar';
 import { ShellContext } from './shellContext';
@@ -96,6 +96,32 @@ export function EditorShell({
     if (!host) return undefined;
     return host.onNotice((notice) => setNotices((pending) => [...pending, notice]));
   }, [host]);
+  /** 上次没有正常退出时开着的文档，等用户答复；没有时是 null */
+  const [recoverable, setRecoverable] = useState<readonly RecoverableDocument[] | null>(null);
+  useEffect(() => {
+    const recovery = host?.recovery;
+    if (!recovery) return undefined;
+    let cancelled = false;
+    recovery
+      .list()
+      .then((documents) => {
+        if (!cancelled && documents.length > 0) setRecoverable(documents);
+      })
+      .catch((error: unknown) => console.warn('取可恢复的文档失败', error));
+    return () => {
+      cancelled = true;
+    };
+  }, [host]);
+  const resolveRecovery = useCallback(
+    (ids: readonly string[]) => {
+      setRecoverable(null);
+      host?.recovery?.resolve(ids).catch((error: unknown) => {
+        const message = format(t.recovery.failed, { reason: describeError(error) });
+        setNotices((pending) => [...pending, { kind: 'error', message }]);
+      });
+    },
+    [host],
+  );
 
   const doc = useStoreDoc(store);
   const showRulers = useStoreValue(store, (s) => s.showRulers);
@@ -401,10 +427,14 @@ export function EditorShell({
             running={benchmark.running}
             onClose={() => setBenchmark({ result: null, running: false })}
           />
-          <NoticeDialog
-            notice={notices[0] ?? null}
-            onDismiss={() => setNotices((pending) => pending.slice(1))}
-          />
+          {recoverable ? (
+            <RecoveryDialog documents={recoverable} onResolve={resolveRecovery} />
+          ) : (
+            <NoticeDialog
+              notice={notices[0] ?? null}
+              onDismiss={() => setNotices((pending) => pending.slice(1))}
+            />
+          )}
         </div>
       </ShellContext.Provider>
     </EditorHostContext.Provider>
