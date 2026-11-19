@@ -67,6 +67,9 @@ windows = { version = "0.62", features = [
 tauri = { version = "2", features = [] }
 tauri-build = { version = "2", features = [] }
 rfd = { version = "0.18", default-features = false }
+# WebView2 的 SharedBuffer（取瓦片的另一条路，V06 11.7）：Tauri 没有包这个接口，直接调 COM。
+# 版本跟 wry 用的一致，不多装一份。
+webview2-com = "0.39"
 
 [workspace.lints.rust]
 missing_debug_implementations = "warn"

@@ -230,9 +230,18 @@ impl MappedRegion {
 
     /// 读出槽位的像素（拷贝出 512×512×4 字节）。`expected` 与当前代数不符时返回 [`ShmError::Generation`]。
     pub fn read_tile(&self, slot: u32, expected: u32) -> Result<Vec<u8>, ShmError> {
+        let mut out = vec![0u8; TILE_BYTES];
+        self.read_tile_into(slot, expected, &mut out)?;
+        Ok(out)
+    }
+
+    /// 同 [`Self::read_tile`]，像素拷进 `out`（长度必须是 [`TILE_BYTES`]），不另分配。
+    pub fn read_tile_into(&self, slot: u32, expected: u32, out: &mut [u8]) -> Result<(), ShmError> {
         let offset = self.offset(slot)?;
         let bytes = self.view.bytes();
-        let mut out = vec![0u8; TILE_BYTES];
+        if out.len() != TILE_BYTES {
+            return Err(ShmError::PixelLength);
+        }
         for _ in 0..8 {
             let before = win32::load_generation(bytes, offset);
             if before != expected {
@@ -250,7 +259,7 @@ impl MappedRegion {
             win32::fence_acquire();
             let after = win32::load_generation(bytes, offset);
             if after == before {
-                return Ok(out);
+                return Ok(());
             }
         }
         Err(ShmError::Generation {

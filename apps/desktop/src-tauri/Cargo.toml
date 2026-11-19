@@ -29,6 +29,7 @@ rfd.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows.workspace = true
+webview2-com.workspace = true
 
 [lints]
 workspace = true

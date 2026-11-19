@@ -11,8 +11,11 @@ import { TauriTransport } from './tauriTransport';
  */
 export function createEngineHost(): EngineSession | null {
   if (!isTauri()) return null;
+  const transport = new TauriTransport();
+  // 端到端测试和性能测量用（`e2e/`）：在页面里直接比两条取瓦片的路。
+  (window as unknown as { __magpdfTransport?: TauriTransport }).__magpdfTransport = transport;
   const session = new EngineSession({
-    transport: new TauriTransport(),
+    transport,
     store: editorStore,
     // 路径由主进程经手：对话框是它弹的，文件是它交给引擎打开的
     pickDocument: () => invoke<DocInfo | null>('open_document_dialog'),

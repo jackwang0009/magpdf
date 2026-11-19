@@ -6,13 +6,14 @@
 //! - 命令 `open_document_dialog`：主进程弹“打开”对话框，用户选了文件就交给引擎打开。界面拿不到任意路径。
 //! - 命令 `open_documents`：主进程知道的、已经开着的文档（启动时命令行给的，或者界面重新加载之前打开的）。
 //! - 自定义协议 `magpdf://tile/<槽位>/<代数>`：从共享内存取一块瓦片的 BGRA 像素（WebView2 里的地址是
-//!   `http://magpdf.localhost/tile/<槽位>/<代数>`）。
+//!   `http://magpdf.localhost/tile/<槽位>/<代数>`）。打开了 [`crate::shared_tiles`] 时改走命令
+//!   `fetch_tile_shared`，像素放在 WebView2 的共享缓冲区里。
 //!
 //! 主进程到界面只有一个 Tauri 事件 [`ENGINE_EVENT`]，载荷是 `{ method, params }`：引擎推送的事件原样转发；
 //! 引擎重启时主进程自己发 `engine.restarting`、`engine.restored`、`engine.failed`。
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use magpdf_ipc::host::{EngineLaunch, HostError, HostEvent, Supervisor};
@@ -27,6 +28,8 @@ use tauri::{
     WebviewWindow,
 };
 use tokio::sync::mpsc::UnboundedReceiver;
+
+use crate::shared_tiles::{self, FillError, SharedTile, SharedTiles};
 
 /// 界面收引擎事件用的 Tauri 事件名。Tauri 的事件名里不能有点号，所以协议里的事件名放在载荷的 `method` 里。
 const ENGINE_EVENT: &str = "engine-event";
@@ -43,6 +46,8 @@ struct Shell {
     origins: Vec<String>,
     /// 恢复文件，正常退出时删掉。
     recovery: PathBuf,
+    /// 取瓦片走 WebView2 共享缓冲区（[`crate::shared_tiles`]）；没打开这条路时为空。
+    shared_tiles: Option<Arc<SharedTiles>>,
 }
 
 impl Shell {
@@ -140,6 +145,54 @@ async fn open_document_dialog(
 #[tauri::command]
 fn open_documents(shell: State<'_, Shell>) -> Vec<DocInfo> {
     shell.docs()
+}
+
+/// 界面取瓦片走哪条路：`sharedBuffer`（[`crate::shared_tiles`]）或 `protocol`（《接口协议》3.3）。
+#[tauri::command]
+fn tile_transport(shell: State<'_, Shell>) -> &'static str {
+    if shell.shared_tiles.is_some() {
+        "sharedBuffer"
+    } else {
+        "protocol"
+    }
+}
+
+/// 把共享缓冲区交给页面，返回块数。页面每次加载调一次。
+#[tauri::command]
+async fn attach_tile_buffers(
+    window: WebviewWindow,
+    shell: State<'_, Shell>,
+) -> Result<usize, String> {
+    let tiles = shell
+        .shared_tiles
+        .clone()
+        .ok_or_else(|| "没有打开共享缓冲区".to_owned())?;
+    tiles.attach(&window).await
+}
+
+/// 把一块瓦片拷进共享缓冲区。失败时的错误：`gone`（槽位已经被别的瓦片占了，和自定义协议的 410 一样，
+/// 界面重新请求渲染）、`notFound`（槽位越界）、`notAttached`（缓冲区还没有交给页面），或者别的说明。
+#[tauri::command]
+async fn fetch_tile_shared(
+    shell: State<'_, Shell>,
+    slot: u32,
+    generation: u32,
+) -> Result<SharedTile, String> {
+    let tiles = shell
+        .shared_tiles
+        .as_ref()
+        .ok_or_else(|| "notAttached".to_owned())?;
+    tiles
+        .fill(|out| shell.supervisor.read_tile_into(slot, generation, out))
+        .map_err(|error| match error {
+            FillError::NotAttached => "notAttached".to_owned(),
+            FillError::Shm(ShmError::Generation { .. }) => "gone".to_owned(),
+            FillError::Shm(ShmError::SlotOutOfRange { .. }) => "notFound".to_owned(),
+            FillError::Shm(other) => {
+                tracing::warn!("读瓦片失败：{other}");
+                other.to_string()
+            }
+        })
 }
 
 /// `magpdf://tile/<槽位>/<代数>`：读共享内存是一次 1 MB 的拷贝，放到后台线程上做，不占窗口的消息循环。
@@ -366,6 +419,7 @@ pub fn run(open_paths: Vec<PathBuf>) -> Result<()> {
         docs: Mutex::new(Vec::new()),
         origins: page_origins(&context),
         recovery,
+        shared_tiles: shared_tiles::enabled().then(|| Arc::new(SharedTiles::default())),
     };
     for path in &open_paths {
         // 日志里不记文件名和路径（《工程规范》）。
@@ -380,7 +434,10 @@ pub fn run(open_paths: Vec<PathBuf>) -> Result<()> {
         .invoke_handler(tauri::generate_handler![
             engine_request,
             open_document_dialog,
-            open_documents
+            open_documents,
+            tile_transport,
+            attach_tile_buffers,
+            fetch_tile_shared
         ])
         .setup(move |app| {
             open_main_window(app.handle())?;

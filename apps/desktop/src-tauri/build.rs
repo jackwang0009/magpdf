@@ -8,6 +8,9 @@ fn main() {
             "engine_request",
             "open_document_dialog",
             "open_documents",
+            "tile_transport",
+            "attach_tile_buffers",
+            "fetch_tile_shared",
         ]));
     if let Err(error) = tauri_build::try_build(attributes) {
         panic!("tauri-build 失败：{error:#}");

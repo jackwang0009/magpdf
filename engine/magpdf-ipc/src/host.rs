@@ -274,6 +274,18 @@ impl Supervisor {
         live.shm.read_tile(slot, generation)
     }
 
+    /// 同 [`Self::read_tile`]，像素拷进调用方给的缓冲区（长度是 [`crate::shm::TILE_BYTES`]）。
+    pub fn read_tile_into(
+        &self,
+        slot: u32,
+        generation: u32,
+        out: &mut [u8],
+    ) -> Result<(), ShmError> {
+        let live = self.shared.live.lock().map_err(|_| stale(generation))?;
+        let live = live.as_ref().ok_or_else(|| stale(generation))?;
+        live.shm.read_tile_into(slot, generation, out)
+    }
+
     /// 当前引擎进程的 PID；正在重启时是 `None`。
     pub fn engine_pid(&self) -> Option<u32> {
         self.shared
