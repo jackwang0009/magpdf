@@ -200,13 +200,13 @@ def main(argv: list[str] | None = None) -> int:
     print(text, end="")
     if args.markdown:
         args.markdown.parent.mkdir(parents=True, exist_ok=True)
-        args.markdown.write_text(text, encoding="utf-8")
+        args.markdown.write_text(text, encoding="utf-8", newline="\n")
     if args.candidate:
         args.candidate.parent.mkdir(parents=True, exist_ok=True)
-        args.candidate.write_text(dump_baseline(current), encoding="utf-8")
+        args.candidate.write_text(dump_baseline(current), encoding="utf-8", newline="\n")
     if args.update_baseline:
         args.baseline.parent.mkdir(parents=True, exist_ok=True)
-        args.baseline.write_text(dump_baseline(current), encoding="utf-8")
+        args.baseline.write_text(dump_baseline(current), encoding="utf-8", newline="\n")
         print(f"基线已更新：{args.baseline}")
         return EXIT_OK
     if cmp is None:
