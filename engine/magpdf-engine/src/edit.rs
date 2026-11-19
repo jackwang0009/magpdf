@@ -185,13 +185,12 @@ pub struct Session<'lib> {
     /// 保真校验用的流级检查器，第一次校验时按原始文件字节建：专门拦 PDFium 自己比不出来的两类情况
     ///（内容流没能完整解码；内容流或页对象与别处共用，生成器就地改写会连带改坏别处）。
     stream_guard: Option<Option<StreamGuard>>,
-    /// 保真校验用的另一份文档，第一次校验时建：文件原来的样子，在它上面试着重写页面，不碰正在用的这份。
-    /// 文件里有默认隐藏的可选内容组时，这份副本先把 View 下的组打开，像素比对才看得到那些图层
-    /// （方案 2.3）。`Err` 表示建不出来。
+    /// 保真校验用的副本，第一次校验时建：文件原来的样子，在它上面试着重写页面，不碰正在用的这份。
+    /// `Err` 表示建不出来。
     ///
     /// 它和下面的 `fidelity` 都按页序号对应到正在用的文档。原型还没有页面命令（插入、删除、重排）；
     /// 加页面命令的时候，这两处要改成按不随重排变化的页面编号来对。
-    scratch: Option<std::result::Result<Document<'lib>, ()>>,
+    scratch: Option<std::result::Result<Scratch<'lib>, ()>>,
     /// 隐藏图层打不开时的结论。有它就不再做对象和像素比对：比了也看不到那些图层。
     hidden_layers: Option<&'static str>,
     /// 校验过的页：`None` 表示可以修改，`Some` 是不能修改的原因。
@@ -379,8 +378,9 @@ impl<'lib> Session<'lib> {
     /// PDFium 的生成器写不出来的对象会消失、挪位置或者变色，这样的页一旦改了任何对象，整页的内容流
     /// 都要重写，别的对象也跟着坏，所以只允许在上面叠加内容。结果按页记住，只校验一次。
     ///
-    /// 像素比对前会把默认隐藏的可选内容组在 View 用途下打开（方案 2.3）。加密文件写不回、可选内容
-    /// 成员字典的 AnyOff / AllOff / VE 还开不了，这种文件整份按不能改原有对象处理。
+    /// 文件里有默认隐藏的可选内容组时，默认状态比一遍，再在把 View 下的组打开的副本上比一遍
+    /// （方案 2.3）。隐藏图层打不开的文件（加了密，或者有“组关闭才显示”的可选内容成员字典），整份
+    /// 按不能改原有对象处理。
     ///
     /// 还看不出来的一类：颜色空间被换算成画面相同的 RGB（灰度写成 `rg`）。像素一样、对象也一样，
     /// 要靠操作符级比对，这里还没有做。
@@ -415,7 +415,13 @@ impl<'lib> Session<'lib> {
             return Ok(Some(reason));
         }
         let verdict = match &self.scratch {
-            Some(Ok(scratch)) => roundtrip_verdict(scratch, page)?,
+            Some(Ok(scratch)) => match roundtrip_verdict(&scratch.default, page)? {
+                Some(reason) => Some(reason),
+                None => match &scratch.revealed {
+                    Some(revealed) => roundtrip_verdict(revealed, page)?,
+                    None => None,
+                },
+            },
             _ => Some("校验用的文档副本建不出来"),
         };
         self.fidelity.insert(page, verdict);
@@ -423,42 +429,40 @@ impl<'lib> Session<'lib> {
         Ok(verdict)
     }
 
-    /// 校验用的文档副本。有隐藏图层时用打开图层之后的字节；打不开就记结论，不再比对。
+    /// 建校验用的副本。有隐藏图层时另建一份打开了图层的；打不开就记结论，不再比对。
     fn open_scratch(
         &mut self,
         shared_bytes: Option<&std::sync::Arc<Vec<u8>>>,
-    ) -> std::result::Result<Document<'lib>, ()> {
+    ) -> std::result::Result<Scratch<'lib>, ()> {
         const LAYERS_UNOPENED: &str = "默认隐藏的可选内容图层打不开，没法比较重写前后的画面";
         let pw = self.password.as_deref();
-        if let Some(bytes) = shared_bytes {
-            match reveal_view_layers(bytes) {
-                Ok(Some(revealed)) => {
-                    return match Document::load_bytes(self.lib, revealed, pw) {
-                        Ok(doc) => Ok(doc),
-                        Err(_) => {
-                            self.hidden_layers = Some(LAYERS_UNOPENED);
-                            Err(())
-                        }
-                    };
-                }
+        let revealed = match shared_bytes.map(|bytes| reveal_view_layers(bytes)) {
+            Some(Ok(Some(bytes))) => match Document::load_bytes(self.lib, bytes, pw) {
+                Ok(doc) => Some(doc),
                 Err(_) => {
                     self.hidden_layers = Some(LAYERS_UNOPENED);
                     return Err(());
                 }
-                Ok(None) => {}
+            },
+            Some(Err(_)) => {
+                self.hidden_layers = Some(LAYERS_UNOPENED);
+                return Err(());
             }
-        }
+            Some(Ok(None)) | None => None,
+        };
         // 从文件打开的文档：把文件的数据再解析一遍。要校验的页还没有被改过（改之前必须先过校验），
         // 所以文件原来的样子就是它现在的样子；两份文档共用同一块数据，不复制，文件再大也只花解析的
         // 时间。新建的文档没有文件数据，只能把当前的样子存一份出来再读回去。
-        self.doc
+        let default = self
+            .doc
             .reopen(self.lib, pw)
             .unwrap_or_else(|| {
                 self.doc
                     .save_to_vec(SaveFlags::NO_INCREMENTAL)
                     .and_then(|bytes| Document::load_bytes(self.lib, bytes, pw))
             })
-            .map_err(|_| ())
+            .map_err(|_| ())?;
+        Ok(Scratch { default, revealed })
     }
 
     /// 这一页已经有的校验结论，不做校验。外层的 `None` 表示还没有校验过。
@@ -735,6 +739,14 @@ impl<'lib> Session<'lib> {
             self.undo.remove(0);
         }
     }
+}
+
+/// 保真校验用的副本。`revealed` 只在文件里有默认隐藏的可选内容组时才有：同一份文件把 View 下的组
+/// 都打开了。两份都要比：只比打开的那份，生成器把 `/OC` 标记写丢、隐藏的内容重写之后露出来，
+/// 这种变化两边都看得见就比不出来；只比默认的那份，隐藏图层里被写坏的对象又看不见。
+struct Scratch<'lib> {
+    default: Document<'lib>,
+    revealed: Option<Document<'lib>>,
 }
 
 /// 流级保真检查：读原始 PDF 的页树与流字典，拦下“内容流解不开”与“内容流 / 页对象被多处共用”。
@@ -1601,6 +1613,42 @@ mod tests {
         let doc = Document::load_bytes(&lib, ocg_pdf(content), None).expect("打开");
         let mut session = Session::from_document(&lib, doc);
         assert_eq!(session.check_fidelity(0).unwrap(), None);
+    }
+
+    /// “组关闭才显示”的成员字典：把组打开，这块内容反而从比对的两边都消失了，所以整份文档不能改原有对象。
+    #[test]
+    fn membership_shown_only_when_the_group_is_off_blocks_editing() {
+        use pdfium_sys::Document;
+
+        let _guard = crate::pdfium_lock::lock();
+        let lib = Library::init().expect("PDFium");
+        let content = b"/OC /M BDC 1 0 0 rg 10 10 30 20 re f EMC";
+        let pdf = build_minimal_pdf(&[
+            b"<< /Type /Catalog /Pages 2 0 R /OCProperties << /OCGs [5 0 R] /D << >> >> >>"
+                .to_vec(),
+            b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] /Resources << /Properties << /M << /Type /OCMD /OCGs [5 0 R] /P /AnyOff >> >> >> /Contents 4 0 R >>"
+                .to_vec(),
+            {
+                let mut body = format!("<< /Length {} >>\nstream\n", content.len()).into_bytes();
+                body.extend_from_slice(content);
+                body.extend_from_slice(b"\nendstream");
+                body
+            },
+            b"<< /Type /OCG /Usage << /View << /ViewState /OFF >> >> >>".to_vec(),
+        ]);
+        let doc = Document::load_bytes(&lib, pdf, None).expect("打开");
+        let screen = doc
+            .page(0)
+            .unwrap()
+            .render(pdfium_sys::RenderOptions::default())
+            .unwrap();
+        assert!(red_pixels(&screen) > 30, "组关闭时这块红色应当画出来");
+        let mut session = Session::from_document(&lib, doc);
+        assert_eq!(
+            session.check_fidelity(0).unwrap(),
+            Some("默认隐藏的可选内容图层打不开，没法比较重写前后的画面")
+        );
     }
 
     /// 隐藏图层里放一块原版生成器写不好的 CMYK 色块，可见部分是一块普通的黑块。

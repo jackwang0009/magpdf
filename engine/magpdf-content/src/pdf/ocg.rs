@@ -7,9 +7,9 @@
 //! `/View /ViewState` 字典的条目。这里按同一套规则找出 View 下不可见的组，只追加一节增量更新
 //! 把它们改成可见，原文件字节不动。
 //!
-//! 没有处理的：加密文件（追加的明文对象 PDFium 不一定认）；可选内容成员字典（OCMD）的
-//! `AnyOff` / `AllOff` / `VE`（把组打开反而会藏起“组关闭才显示”的内容）。这两种调用方应当成
-//! 图层没能打开，而不是当作已经比过。
+//! 打不开、返回 [`Unwritable`] 的两种：加密文件（追加的明文对象 PDFium 不一定认）；文件里有
+//! “组关闭才显示”的可选内容成员字典（OCMD 的 `/P /AnyOff`、`/P /AllOff`，或 `/VE` 里带 `Not`）——
+//! 把组打开反而会把这部分内容藏起来。调用方应当成图层没能打开，而不是当作已经比过。
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -17,7 +17,8 @@ use super::object::{PdfDict, PdfObject};
 use super::reader::PdfDocument;
 use super::writer::IncrementalWriter;
 
-/// 有隐藏图层，但这份文件写不回（加密，或要改的对象放在交叉引用表文件的对象流里）。
+/// 有隐藏图层，但打不开：文件加了密，有“组关闭才显示”的成员字典，或者要改的对象放在交叉引用表
+/// 文件的对象流里。
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 #[error("隐藏的可选内容图层写不回文件")]
 pub struct Unwritable;
@@ -61,7 +62,7 @@ pub fn reveal_view_layers(bytes: &[u8]) -> Result<Option<Vec<u8>>, Unwritable> {
     if usage_off.is_empty() && config_off.is_empty() {
         return Ok(None);
     }
-    if doc.encrypt.is_some() {
+    if doc.encrypt.is_some() || has_inverting_ocmd(&doc) {
         return Err(Unwritable);
     }
     let mut edits = Edits::new(&doc);
@@ -161,6 +162,65 @@ fn collect_ocgs(doc: &PdfDocument) -> Vec<u32> {
         }
     }
     nums.into_iter().collect()
+}
+
+/// 文件里有没有“组关闭才显示”的可选内容成员字典（`CPDF_OCContext::LoadOCMDState`）：
+/// `/P /AnyOff`、`/P /AllOff`，或者 `/VE` 里带 `Not`。成员字典可以直接写在资源的 `/Properties`、
+/// 外部对象的 `/OC` 里，所以把每个对象的字典、数组都翻一遍，不只看顶层。
+fn has_inverting_ocmd(doc: &PdfDocument) -> bool {
+    doc.live_entries()
+        .into_iter()
+        .filter_map(|(number, _, _)| doc.object(number))
+        .any(|obj| contains_inverting_ocmd(doc, &obj, 0))
+}
+
+fn contains_inverting_ocmd(doc: &PdfDocument, obj: &PdfObject, depth: usize) -> bool {
+    if depth > 32 {
+        return false;
+    }
+    if let PdfObject::Array(items) = obj {
+        return items
+            .iter()
+            .any(|item| contains_inverting_ocmd(doc, item, depth + 1));
+    }
+    let Some(dict) = obj.as_dict() else {
+        return false;
+    };
+    if dict.get(b"Type").and_then(PdfObject::as_name) == Some(b"OCMD".as_slice())
+        && ocmd_inverts(doc, dict)
+    {
+        return true;
+    }
+    dict.iter()
+        .any(|(_, value)| contains_inverting_ocmd(doc, value, depth + 1))
+}
+
+fn ocmd_inverts(doc: &PdfDocument, ocmd: &PdfDict) -> bool {
+    if let Some(ve @ PdfObject::Array(_)) = doc.resolve(ocmd.get(b"VE")) {
+        return expression_has_not(doc, &ve, 0);
+    }
+    // `/OCGs` 只写一个组（不是数组）时 PDFium 直接取这个组的可见性，`/P` 不起作用。
+    matches!(doc.resolve(ocmd.get(b"OCGs")), Some(PdfObject::Array(_)))
+        && matches!(
+            dict_name(doc, ocmd, b"P", b"AnyOn").as_slice(),
+            b"AnyOff" | b"AllOff"
+        )
+}
+
+fn expression_has_not(doc: &PdfDocument, expr: &PdfObject, depth: usize) -> bool {
+    if depth > 32 {
+        return false;
+    }
+    let PdfObject::Array(items) = expr else {
+        return false;
+    };
+    if items.first().and_then(PdfObject::as_name) == Some(b"Not".as_slice()) {
+        return true;
+    }
+    items.iter().skip(1).any(|item| {
+        doc.resolve(Some(item))
+            .is_some_and(|item| expression_has_not(doc, &item, depth + 1))
+    })
 }
 
 fn oc_properties(doc: &PdfDocument) -> Option<PdfDict> {
@@ -349,7 +409,8 @@ fn set_nested_name(obj: &mut PdfObject, path: &[&[u8]], key: &[u8], name: &[u8])
 fn usage_view_state(doc: &PdfDocument, ocg: &PdfDict) -> Option<PdfObject> {
     let usage = doc.deref(ocg.get(b"Usage")?)?;
     let view = doc.deref(usage.as_dict()?.get(b"View")?)?;
-    view.as_dict()?.get(b"ViewState").cloned()
+    let state = view.as_dict()?.get(b"ViewState")?;
+    Some(doc.resolve(Some(state)).unwrap_or(PdfObject::Null))
 }
 
 fn config_visible(doc: &PdfDocument, config: Option<&PdfDict>, ocg: u32) -> bool {
@@ -390,10 +451,10 @@ fn apply_as(doc: &PdfDocument, entry: &PdfObject, ocg: u32, state: bool) -> bool
     let Some(view) = view.as_dict() else {
         return state;
     };
-    match view.get(b"ViewState") {
-        Some(value) => !is_off(value),
-        None => state,
-    }
+    // PDFium 取不到键时得空串，`!= "OFF"` 为真：有 /View 字典但没写 ViewState 也算可见。
+    !view
+        .get(b"ViewState")
+        .is_some_and(|value| resolved_off(doc, value))
 }
 
 fn rewrite_config(doc: &PdfDocument, dict: &mut PdfDict, ocgs: &[u32]) {
@@ -441,7 +502,10 @@ fn rewrite_as_entry(doc: &PdfDocument, entry: PdfObject) -> PdfObject {
     let PdfObject::Dict(mut view) = view_direct else {
         return entry;
     };
-    if !view.get(b"ViewState").is_some_and(is_off) {
+    if !view
+        .get(b"ViewState")
+        .is_some_and(|value| resolved_off(doc, value))
+    {
         return entry;
     }
     view.set(b"ViewState", PdfObject::Name(b"ON".to_vec()));
@@ -703,6 +767,107 @@ mod tests {
             .get(b"PrintState")
             .unwrap();
         assert!(is_off(print_state), "打印用途的状态不该被改掉");
+    }
+
+    fn with_membership(properties: &str, extra: &[(u32, &str)]) -> Vec<u8> {
+        let page = format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] \
+            /Resources << /Properties << /M {properties} >> >> /Contents 4 0 R >>"
+        );
+        let mut objects = vec![
+            (
+                1,
+                "<< /Type /Catalog /Pages 2 0 R /OCProperties << /OCGs [5 0 R] /D << >> >> >>",
+            ),
+            (2, PAGES),
+            (3, page.as_str()),
+            (4, STREAM),
+            (5, OCG_OFF),
+        ];
+        objects.extend_from_slice(extra);
+        build(&objects, "")
+    }
+
+    #[test]
+    fn membership_shown_when_the_group_is_off_is_refused() {
+        for properties in [
+            "<< /Type /OCMD /OCGs [5 0 R] /P /AnyOff >>",
+            "<< /Type /OCMD /OCGs [5 0 R] /P /AllOff >>",
+            "<< /Type /OCMD /VE [/Or [/Not 5 0 R] 5 0 R] >>",
+        ] {
+            assert_eq!(
+                reveal_view_layers(&with_membership(properties, &[])),
+                Err(Unwritable),
+                "{properties}"
+            );
+        }
+        let indirect = with_membership(
+            "6 0 R",
+            &[(6, "<< /Type /OCMD /OCGs [5 0 R] /P /AnyOff >>")],
+        );
+        assert_eq!(reveal_view_layers(&indirect), Err(Unwritable));
+    }
+
+    #[test]
+    fn membership_shown_when_the_group_is_on_is_opened() {
+        for properties in [
+            "<< /Type /OCMD /OCGs 5 0 R >>",
+            // 只有一个组时 PDFium 不看 /P。
+            "<< /Type /OCMD /OCGs 5 0 R /P /AnyOff >>",
+            "<< /Type /OCMD /OCGs [5 0 R] /P /AllOn >>",
+            "<< /Type /OCMD /VE [/And 5 0 R [/Or 5 0 R]] >>",
+        ] {
+            let revealed = reveal_view_layers(&with_membership(properties, &[]))
+                .unwrap()
+                .unwrap_or_else(|| panic!("{properties} 应该写出增量更新"));
+            assert_eq!(
+                view_state_of(&revealed, 5).as_deref(),
+                Some(b"ON".as_slice())
+            );
+        }
+    }
+
+    #[test]
+    fn indirect_view_state_and_as_entry_without_view_state_follow_pdfium() {
+        let indirect = build(
+            &[
+                (
+                    1,
+                    "<< /Type /Catalog /Pages 2 0 R /OCProperties << /OCGs [5 0 R] /D << >> >> >>",
+                ),
+                (2, PAGES),
+                (3, PAGE),
+                (4, STREAM),
+                (
+                    5,
+                    "<< /Type /OCG /Usage << /View << /ViewState 6 0 R >> >> >>",
+                ),
+                (6, "/OFF"),
+            ],
+            "",
+        );
+        let revealed = reveal_view_layers(&indirect).unwrap().unwrap();
+        assert_eq!(
+            view_state_of(&revealed, 5).as_deref(),
+            Some(b"ON".as_slice())
+        );
+
+        // /AS 条目里有 /View 字典但没写 ViewState：PDFium 判为可见，不用改。
+        let as_without_state = build(
+            &[
+                (
+                    1,
+                    "<< /Type /Catalog /Pages 2 0 R /OCProperties << /OCGs [5 0 R] /D << \
+                    /OFF [5 0 R] /AS [ << /Event /View /OCGs [5 0 R] /View << >> >> ] >> >> >>",
+                ),
+                (2, PAGES),
+                (3, PAGE),
+                (4, STREAM),
+                (5, OCG_BARE),
+            ],
+            "",
+        );
+        assert_eq!(reveal_view_layers(&as_without_state).unwrap(), None);
     }
 
     #[test]
