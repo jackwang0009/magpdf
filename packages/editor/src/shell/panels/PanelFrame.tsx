@@ -28,11 +28,38 @@ export function PanelFrame({ children, toolbar, icon }: PanelFrameProps) {
 }
 
 /** 只读的搜索框外观（P0 不接搜索） */
-export function PanelSearch({ placeholder }: { readonly placeholder: string }) {
+/** 面板顶上的搜索框。给了 `onChange` 才能输入，没给只显示提示文字（还没接上的面板）。 */
+export function PanelSearch({
+  placeholder,
+  value,
+  onChange,
+}: {
+  readonly placeholder: string;
+  readonly value?: string;
+  readonly onChange?: (value: string) => void;
+}) {
   return (
     <span className="mg-panel-search">
       <Icon name="search" size={13} className="mg-muted" />
-      <span>{placeholder}</span>
+      {onChange ? (
+        <input
+          className="mg-panel-search-input"
+          type="search"
+          value={value ?? ''}
+          placeholder={placeholder}
+          aria-label={placeholder}
+          spellCheck={false}
+          onChange={(event) => onChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape' && value) {
+              event.stopPropagation();
+              onChange('');
+            }
+          }}
+        />
+      ) : (
+        <span>{placeholder}</span>
+      )}
     </span>
   );
 }

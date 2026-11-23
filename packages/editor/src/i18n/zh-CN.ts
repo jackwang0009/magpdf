@@ -249,6 +249,7 @@ export const zhCN = {
   },
   layers: {
     filterPlaceholder: '筛选图层',
+    noMatch: '这一页没有对得上的对象',
     pageRow: '第 {n} 页',
     filterText: '文字',
     filterPath: '路径',
@@ -296,6 +297,8 @@ export const zhCN = {
       backward: '下移一层',
       front: '置顶',
       back: '置底',
+      /** 图层面板里拖动 */
+      index: '调整层级',
     },
     /** 历史记录面板：悬停在一条上的说明 */
     jumpTo: '回到“{label}”之后的样子',

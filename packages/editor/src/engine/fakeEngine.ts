@@ -340,9 +340,11 @@ export class FakeEngine {
   /** 调整层级。假引擎里没有内容流，不会因为跨流被拒绝；顺序本来就是那样时不推送、版本号不变。 */
   private reorder(params: EditZOrderParams): EditResult {
     const document = this.document(params.docId);
-    if (params.op === 'index') throw invalid('假引擎不支持 index');
+    // 和真引擎一样：index 要给值
+    if (params.op === 'index' && params.index === undefined)
+      throw invalid('op 为 index 时要给 index');
     const found = this.locate(document, params.baseVersion, params.ids);
-    const op = params.op;
+    const op = params.op === 'index' ? { index: params.index! } : params.op;
     const selected = new Set([...found.values()].flat());
     const before = new Map(
       [...found.keys()].map((index) => [index, [...document.pages[index]!.objects]]),
@@ -355,7 +357,7 @@ export class FakeEngine {
     );
     if (moved.length === 0) return { version: document.version };
     return this.commit(document, {
-      label: `调整层级（${op}）`,
+      label: `调整层级（${params.op}）`,
       pages: moved.map(([index]) => index),
       forward: () => {
         for (const [index, objects] of moved) document.pages[index]!.objects = [...objects];

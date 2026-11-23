@@ -17,4 +17,10 @@ describe('arrangeZOrder：和引擎的规则一样', () => {
     expect(arrange('backward', [4, 5])).toEqual([1, 2, 4, 5, 3]);
     expect(arrange('backward', [1, 3])).toEqual([1, 3, 2, 4, 5]);
   });
+
+  it('放到第 index 层：数的是没选中的对象，超过个数放在最上面', () => {
+    expect(arrange({ index: 1 }, [4, 5])).toEqual([1, 4, 5, 2, 3]);
+    expect(arrange({ index: 0 }, [3])).toEqual([3, 1, 2, 4, 5]);
+    expect(arrange({ index: 99 }, [1])).toEqual([2, 3, 4, 5, 1]);
+  });
 });

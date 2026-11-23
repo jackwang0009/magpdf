@@ -52,7 +52,7 @@ import {
   userBoxToPageRect,
 } from '../document/pageSpace';
 import type { Matrix } from '../document/pageSpace';
-import type { ZOrderOp } from '../document/zOrder';
+import type { ZOrderTarget } from '../document/zOrder';
 import type { DocumentSnapshot, ObjectType, PageObject } from '../document/types';
 import type { Point, Rect } from '../geometry';
 import { format, t } from '../i18n';
@@ -744,14 +744,17 @@ export class EngineSession implements EditorHost {
    * 调整层级。只能叠加内容的页上一个也不发，新加的组件也一样：挪到原有对象下面就要重写原有的内容流。
    * 界面上不先改，引擎改了之后 `doc.changed` 到了重新取对象，新顺序随列表回来。
    */
-  private reorder(document: EngineDocument, ids: readonly string[], op: ZOrderOp): void {
+  private reorder(document: EngineDocument, ids: readonly string[], target: ZOrderTarget): void {
     const targets = engineIds(ids);
     if (targets.length === 0) return;
     const pages = new Set(ids.flatMap((id) => pageOfObject(id) ?? []));
     if ([...pages].some((page) => this.isOverlayOnly(document, page))) return;
     this.enqueue(document, [], () =>
       this.command(document, METHOD.EDIT_Z_ORDER, (docId, baseVersion) => {
-        const params: EditZOrderParams = { docId, baseVersion, ids: targets, op };
+        const params: EditZOrderParams =
+          typeof target === 'string'
+            ? { docId, baseVersion, ids: targets, op: target }
+            : { docId, baseVersion, ids: targets, op: 'index', index: target.index };
         return params;
       }),
     );

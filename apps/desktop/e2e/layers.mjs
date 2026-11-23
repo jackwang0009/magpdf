@@ -1,5 +1,6 @@
 /**
- * 调整层级：点选红方块，Ctrl+Shift+] 置于顶层，“对象 > 置底”放到最下面，图层面板跟着变；撤销两步回到原样。
+ * 调整层级：点选红方块，Ctrl+Shift+] 置于顶层，“对象 > 置底”放到最下面，图层面板跟着变；撤销两步回到原样；
+ * 在图层面板里把它那一行拖到最上面；按名字筛选图层。
  * 新放的条码在 PDFium 追加的另一段内容流里，挪到原有对象下面写不下来：提示原因，文档不变。
  *
  * 用 color-devicergb.pdf（原有内容在一段内容流里）。
@@ -130,12 +131,33 @@ try {
   }
   await waitFor('顺序回到原样', async () => (await order(page)).join() === original.join(), 5_000);
 
-  // 4. 新放的条码在另一段内容流里：挪到最下面写不下来，提示原因，文档不变
+  // 4. 图层面板：把方块那一行拖到最上面一行的上面；按名字筛选
+  const layerRow = (name) =>
+    page
+      .locator('.mg-layers li')
+      .filter({ has: page.locator('.mg-layer-name', { hasText: name }) });
+  const topName = await page.locator('.mg-layer-name').first().textContent();
+  await layerRow(square.name)
+    .locator('button')
+    .dragTo(layerRow(topName), { targetPosition: { x: 20, y: 3 } });
+  await editSettled(page, 5, '图层面板里拖动');
+  await waitFor('拖到了最上面', async () => (await order(page)).at(-1) === square.id, 5_000);
+  await page.locator('.mg-layers').screenshot({ path: join(shots, 'layers-dragged.png') });
+  const search = page.locator('.mg-panel-search-input');
+  await search.fill('文字');
+  const textRows = await page.locator('.mg-layer-name').allTextContents();
+  assert.ok(
+    textRows.length > 0 && textRows.every((name) => name.startsWith('文字')),
+    `只剩文字：${textRows}`,
+  );
+  await search.fill('');
+
+  // 5. 新放的条码在另一段内容流里：挪到最下面写不下来，提示原因，文档不变
   await page.locator('.mg-comp-item:not([disabled])', { hasText: 'Code 128' }).first().click();
   // 页面只有 300×200 pt 左右，放在右下角的空处（点在页面外面不算放置）
   const spot = await onPage(page, 230, 150);
   await page.mouse.click(spot.x, spot.y);
-  await editSettled(page, 5, '放条码');
+  await editSettled(page, 6, '放条码');
   await waitFor(
     '条码被选中',
     async () => (await documentState(page)).selection.length === 1,
@@ -150,7 +172,7 @@ try {
   await page.screenshot({ path: join(shots, 'layers-refused.png') });
   await page.locator('.mg-notice[data-kind="error"] button').click();
   await sleep(300);
-  assert.equal((await documentState(page)).version, 5, '拒绝了的命令不改文档');
+  assert.equal((await documentState(page)).version, 6, '拒绝了的命令不改文档');
   assert.deepEqual(await order(page), placedOrder);
 
   console.log(

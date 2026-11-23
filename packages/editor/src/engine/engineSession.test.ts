@@ -827,6 +827,16 @@ describe('EngineSession：调整层级', () => {
     expect(objects(0).map((o) => o.id)).toEqual(['p0-1', 'p0-2', 'p0-3']);
   });
 
+  it('图层面板里拖动：发 op 为 index 和位置', async () => {
+    const { engine, editor, objects } = await attached();
+    editor.reorder(['p0-3'], { index: 1 });
+    await flush();
+    expect(engine.transport.sent(METHOD.EDIT_Z_ORDER)).toEqual([
+      { docId: 1, baseVersion: 0, ids: [3], op: 'index', index: 1 },
+    ]);
+    expect(objects(0).map((o) => o.id)).toEqual(['p0-1', 'p0-3', 'p0-2']);
+  });
+
   it('只能叠加内容的页上一个也不发，新加的组件也一样', async () => {
     const { engine, editor } = await attached();
     editor.placeComponent(0, 'code128', { x: 30, y: 40 });

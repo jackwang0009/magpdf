@@ -24,7 +24,7 @@ export type { HitTester, MarqueeMode } from './document/hitTest';
 export * from './document/pageSpace';
 export type { DocumentEditor, PageTransform, StyleInfo, TextInfo } from './document/documentEditor';
 export { arrangeZOrder } from './document/zOrder';
-export type { ZOrderOp } from './document/zOrder';
+export type { ZOrderOp, ZOrderTarget } from './document/zOrder';
 
 // 视图
 export * from './view/viewState';

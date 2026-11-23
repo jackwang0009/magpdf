@@ -6,7 +6,7 @@ import { COMPONENT_DEFAULTS, mockComponentObject } from '../document/components'
 import type { ComponentValues, PlaceableComponent } from '../document/components';
 import type { DocumentSnapshot, PageObject } from '../document/types';
 import { arrangeZOrder } from '../document/zOrder';
-import type { ZOrderOp } from '../document/zOrder';
+import type { ZOrderTarget } from '../document/zOrder';
 import { translateRect } from '../geometry';
 import type { Point, Rect } from '../geometry';
 import { format, t } from '../i18n';
@@ -89,7 +89,7 @@ export interface EditorState {
   /** 模拟文档：改文字对象（外观是一段文字的）的文字。 */
   setText(id: string, objectId: string, text: string): void;
   /** 模拟文档：调整层级，每页各排各的。 */
-  reorderObjects(id: string, objectIds: readonly string[], op: ZOrderOp): void;
+  reorderObjects(id: string, objectIds: readonly string[], op: ZOrderTarget): void;
   /** 模拟文档：改填充色（`#rrggbb`）。方块改填充，文字和文字条改颜色。 */
   setFill(id: string, objectIds: readonly string[], color: string): void;
   /** 换掉历史记录（引擎的撤销栈变了）：`entries` 从打开时的样子数起，`at` 是现在在哪一条之后。 */
@@ -323,7 +323,10 @@ export function createEditorStore(): EditorStore {
           return {
             ...doc,
             snapshot: { ...doc.snapshot, pages, version: doc.snapshot.version + 1, dirty: true },
-            history: [...doc.history, t.history.reorder[op]].slice(-MAX_HISTORY),
+            history: [
+              ...doc.history,
+              typeof op === 'string' ? t.history.reorder[op] : t.history.reorder.index,
+            ].slice(-MAX_HISTORY),
           };
         });
       },
