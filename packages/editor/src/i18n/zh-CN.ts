@@ -290,6 +290,13 @@ export const zhCN = {
     updateComponent: '改组件参数',
     setText: '改字',
     setFill: '改 {n} 个对象的填充色',
+    /** 和“对象”菜单的叫法一样 */
+    reorder: {
+      forward: '上移一层',
+      backward: '下移一层',
+      front: '置顶',
+      back: '置底',
+    },
     /** 历史记录面板：悬停在一条上的说明 */
     jumpTo: '回到“{label}”之后的样子',
   },

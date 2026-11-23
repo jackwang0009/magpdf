@@ -111,6 +111,12 @@ pub enum EditError {
     Text(String),
     #[error("历史记录只有 {total} 步，跳不到第 {applied} 步")]
     NoHistoryStep { applied: usize, total: usize },
+    /// 要挪的对象和要越过的对象在页面的不同内容流里，PDFium 写不出新的先后（见 `Session::order_written`）。
+    #[error(
+        "第 {} 页的这几个对象和要越过的对象不在同一段页面内容里，原型还调不了它们的先后",
+        .page + 1
+    )]
+    ReorderAcrossStreams { page: usize },
 }
 
 pub use magpdf_text::retext::ObjectText;
@@ -202,6 +208,77 @@ enum Atom {
         id: ObjectId,
         spare: Option<DetachedObject>,
     },
+    /// 调整一页上几个对象的层级。`before`、`after` 是整页从下到上的顺序，只有 `moved` 里的对象位置变了，
+    /// 别的对象之间的先后不变。
+    Reorder {
+        page: usize,
+        moved: Vec<ObjectId>,
+        before: Vec<ObjectId>,
+        after: Vec<ObjectId>,
+    },
+}
+
+/// 调整层级（《接口协议》6.5 `edit.zOrder`）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ZOrder {
+    /// 上移一层：越过上面紧挨着的一个对象
+    Forward,
+    /// 下移一层
+    Backward,
+    /// 置于顶层
+    Front,
+    /// 置于底层
+    Back,
+    /// 放到这一层（从下往上数，从 0 起），几个对象按原来的先后挨着放
+    Index(usize),
+}
+
+impl ZOrder {
+    /// 历史记录里的说法，和界面“对象”菜单的叫法一样。
+    fn label(self) -> &'static str {
+        match self {
+            Self::Forward => "上移一层",
+            Self::Backward => "下移一层",
+            Self::Front => "置顶",
+            Self::Back => "置底",
+            Self::Index(_) => "调整层级",
+        }
+    }
+
+    /// 一页从下到上的顺序 `order` 里，`selected` 这几个对象按本操作挪过之后的顺序。
+    fn arrange(self, order: &[ObjectId], selected: &BTreeSet<ObjectId>) -> Vec<ObjectId> {
+        let (chosen, others): (Vec<ObjectId>, Vec<ObjectId>) =
+            order.iter().partition(|id| selected.contains(id));
+        match self {
+            Self::Front => others.into_iter().chain(chosen).collect(),
+            Self::Back => chosen.into_iter().chain(others).collect(),
+            Self::Index(index) => {
+                let at = index.min(others.len());
+                let mut arranged = others;
+                arranged.splice(at..at, chosen);
+                arranged
+            }
+            // 从上往下看：选中的对象上面紧挨着的不是选中的，就和它对调。挨着的几个选中对象一起上去。
+            Self::Forward => {
+                let mut arranged = order.to_vec();
+                for i in (0..arranged.len().saturating_sub(1)).rev() {
+                    if selected.contains(&arranged[i]) && !selected.contains(&arranged[i + 1]) {
+                        arranged.swap(i, i + 1);
+                    }
+                }
+                arranged
+            }
+            Self::Backward => {
+                let mut arranged = order.to_vec();
+                for i in 1..arranged.len() {
+                    if selected.contains(&arranged[i]) && !selected.contains(&arranged[i - 1]) {
+                        arranged.swap(i, i - 1);
+                    }
+                }
+                arranged
+            }
+        }
+    }
 }
 
 /// 一条命令：若干步，撤销时整体撤回。
@@ -688,6 +765,159 @@ impl<'lib> Session<'lib> {
         })
     }
 
+    /// 调整层级。几页上都有对象时每页各排各的，是一步撤销。所在的页都要过保真校验，本次新加的对象也一样：
+    /// 新对象在 PDFium 追加的内容流里，挪到原有对象下面就要重写原有的流。
+    /// 顺序本来就是那样（比如已经在最上面）时什么也不做：不记撤销、版本号不变、返回的变化里没有页。
+    pub fn reorder(&mut self, ids: &[ObjectId], op: ZOrder) -> Result<Change> {
+        let selected: BTreeSet<ObjectId> = ids.iter().copied().collect();
+        if selected.is_empty() {
+            return Err(EditError::NoTarget);
+        }
+        self.doc.release_pages(KEPT_PAGES);
+        let mut pages: Vec<usize> = Vec::new();
+        for id in &selected {
+            let (page, _) = self.locate(*id)?;
+            if !pages.contains(&page) {
+                pages.push(page);
+            }
+        }
+        pages.sort_unstable();
+        for &page in &pages {
+            if let Some(reason) = self.check_fidelity(page)? {
+                return Err(EditError::PageNotEditable { page, reason });
+            }
+        }
+        let mut atoms = Vec::new();
+        for page in pages {
+            let before = self.ids.get(&page).cloned().unwrap_or_default();
+            let after = op.arrange(&before, &selected);
+            if after == before {
+                continue;
+            }
+            // 这一页上选中的都摘下来再插回去：没选中的对象之间先后不变，按新顺序插回就对
+            let moved: Vec<ObjectId> = before
+                .iter()
+                .copied()
+                .filter(|id| selected.contains(id))
+                .collect();
+            atoms.push(Atom::Reorder {
+                page,
+                moved,
+                before,
+                after,
+            });
+        }
+        if atoms.is_empty() {
+            return Ok(Change {
+                version: self.version,
+                pages: Vec::new(),
+            });
+        }
+        let mut log = ChangeLog::default();
+        for i in 0..atoms.len() {
+            let applied = self.apply(&mut atoms[i], true, &mut log).and_then(|()| {
+                let Atom::Reorder { page, .. } = &atoms[i] else {
+                    return Ok(());
+                };
+                if self.order_written(*page)? {
+                    Ok(())
+                } else {
+                    Err(EditError::ReorderAcrossStreams { page: *page })
+                }
+            });
+            if let Err(err) = applied {
+                // 这一页挪过了（不管写没写对）也要挪回去
+                let undone = if matches!(err, EditError::ReorderAcrossStreams { .. }) {
+                    i + 1
+                } else {
+                    i
+                };
+                let mut scratch = ChangeLog::default();
+                for atom in atoms[..undone].iter_mut().rev() {
+                    let _ = self.apply(atom, false, &mut scratch);
+                }
+                return Err(err);
+            }
+        }
+        let mut label = op.label().to_owned();
+        if selected.len() > 1 {
+            label.push_str(&format!("（{} 个对象）", selected.len()));
+        }
+        self.record(label, atoms);
+        Ok(log.finish(self.version))
+    }
+
+    /// 内容流里写下来的先后和页面上的一样吗：按现在的内容流重新解析一份这一页，逐个比对象的种类、包围盒和
+    /// 颜色（叠在一起的同样大小的方块只差颜色）。
+    ///
+    /// PDFium 重新生成内容流时只重写改过的那几条流，每个对象写回它原来所在的那条，流和流在 `/Contents`
+    /// 里的先后不变；摘下再插回的对象也还记着原来那条流（公开接口改不了）。所以对象分在几条流里时，
+    /// 跨流调层级页面上看着对，写下来的还是原来的先后，存盘再打开就变回去了。
+    fn order_written(&self, page: usize) -> Result<bool> {
+        let signature = |object: Option<PageObject<'_>>| {
+            object.map(|o| {
+                let rounded = |v: f32| (v * 10.0).round() as i64;
+                let bounds = o
+                    .bounds()
+                    .map(|b| [b.left, b.bottom, b.right, b.top].map(rounded));
+                (o.kind(), bounds, o.fill_color(), o.stroke_color())
+            })
+        };
+        let kept = self.doc.keep_page(page)?;
+        // `page` 给的是一直开着的那一份；要另外加载一份才是按内容流重新解析的
+        let fresh = self.doc.load_page(page)?;
+        let count = kept.object_count();
+        Ok(count == fresh.object_count()
+            && (0..count).all(|z| signature(kept.object(z)) == signature(fresh.object(z))))
+    }
+
+    /// 把一页上 `moved` 这几个对象摘下来，按 `target`（整页从下到上的顺序）插回去。
+    fn arrange(
+        &mut self,
+        page: usize,
+        moved: &[ObjectId],
+        target: &[ObjectId],
+        log: &mut ChangeLog,
+    ) -> Result<()> {
+        let current = self.ids.get(&page).cloned().unwrap_or_default();
+        let mut taken: Vec<(usize, ObjectId)> = moved
+            .iter()
+            .map(|id| {
+                current
+                    .iter()
+                    .position(|x| x == id)
+                    .map(|z| (z, *id))
+                    .ok_or(EditError::NoObject(*id))
+            })
+            .collect::<Result<_>>()?;
+        // 从上往下摘，下面的序号不变
+        taken.sort_unstable_by_key(|&(z, _)| std::cmp::Reverse(z));
+        let painted = self.with_page(page, |page_obj| {
+            let mut held: BTreeMap<ObjectId, DetachedObject> = BTreeMap::new();
+            let mut painted: Option<Option<Rect>> = None;
+            for &(z, id) in &taken {
+                let bounds = page_obj.object(z).and_then(|o| o.bounds());
+                painted = Some(match (painted, bounds) {
+                    (None, b) => b,
+                    (Some(Some(a)), Some(b)) => Some(union(a, b)),
+                    _ => None,
+                });
+                held.insert(id, page_obj.detach_at(z)?);
+            }
+            for (z, id) in target.iter().enumerate() {
+                if let Some(object) = held.get_mut(id) {
+                    page_obj.attach(object, z)?;
+                }
+            }
+            Ok(painted.flatten())
+        })?;
+        self.ids.insert(page, target.to_vec());
+        let change = log.page(page);
+        change.modified.extend(moved.iter().copied());
+        log.painted(page, painted);
+        Ok(())
+    }
+
     /// 置入组件：左上角放在 `at`（PDF 用户空间），插在页面最上面。返回新对象的编号。
     pub fn place_component(
         &mut self,
@@ -1080,6 +1310,16 @@ impl<'lib> Session<'lib> {
                 log.painted(page, was);
                 log.painted(page, now);
             }
+            Atom::Reorder {
+                page,
+                moved,
+                before,
+                after,
+            } => {
+                let target = if forward { &*after } else { &*before };
+                let (page, moved, target) = (*page, moved.clone(), target.clone());
+                self.arrange(page, &moved, &target, log)?;
+            }
         }
         Ok(())
     }
@@ -1454,7 +1694,7 @@ fn skipped_when_picking(
 mod tests {
     use pdfium_sys::{Library, Matrix, PageObject, Rect, Rgba};
 
-    use super::{EditError, HitMode, ObjectId, ObjectStyle, Session};
+    use super::{EditError, HitMode, ObjectId, ObjectStyle, Session, ZOrder};
     use crate::component::{ComponentKind, ComponentSpec};
 
     const DARK: Rgba = Rgba {
@@ -2620,6 +2860,121 @@ mod tests {
             session.text_info(component),
             Err(EditError::NotText(_))
         ));
+    }
+
+    #[test]
+    fn z_order_arrangements() {
+        let ids: Vec<ObjectId> = (1..=5).map(ObjectId).collect();
+        let pick = |picked: &[u64]| picked.iter().copied().map(ObjectId).collect();
+        let order = |op: ZOrder, picked: &[u64]| -> Vec<u64> {
+            op.arrange(&ids, &pick(picked))
+                .into_iter()
+                .map(|id| id.0)
+                .collect()
+        };
+        assert_eq!(order(ZOrder::Front, &[1, 3]), [2, 4, 5, 1, 3]);
+        assert_eq!(order(ZOrder::Back, &[2, 5]), [2, 5, 1, 3, 4]);
+        // 挨着的几个一起上去；已经在最上面的不动
+        assert_eq!(order(ZOrder::Forward, &[1, 2]), [3, 1, 2, 4, 5]);
+        assert_eq!(order(ZOrder::Forward, &[3, 5]), [1, 2, 4, 3, 5]);
+        assert_eq!(order(ZOrder::Backward, &[4, 5]), [1, 2, 4, 5, 3]);
+        assert_eq!(order(ZOrder::Backward, &[1, 3]), [1, 3, 2, 4, 5]);
+        assert_eq!(order(ZOrder::Index(1), &[4, 5]), [1, 4, 5, 2, 3]);
+        assert_eq!(order(ZOrder::Index(99), &[1]), [2, 3, 4, 5, 1]);
+    }
+
+    /// 叠在一起的方块调层级：最上面的是点得中的那个；撤销回到原来的顺序；顺序没变时什么也不做；存盘再打开
+    /// 顺序还在。深色方块在第一段内容流里，后加的三个在第二段里：跨段挪深色方块写不下来，原样拒绝。
+    #[test]
+    fn reordering_changes_what_is_on_top() {
+        use pdfium_sys::Document;
+
+        const RED: Rgba = Rgba {
+            r: 200,
+            g: 0,
+            b: 0,
+            a: 255,
+        };
+        const BLUE: Rgba = Rgba {
+            r: 0,
+            g: 0,
+            b: 200,
+            a: 255,
+        };
+        const GREEN: Rgba = Rgba {
+            r: 0,
+            g: 160,
+            b: 0,
+            a: 255,
+        };
+        with_session(|session| {
+            {
+                // 三个方块一次生成，同在一段新的内容流里
+                let page = session.doc.page(0).unwrap();
+                for color in [RED, BLUE, GREEN] {
+                    let path = PageObject::new_path(10.0, 10.0).unwrap();
+                    path.line_to(50.0, 10.0).unwrap();
+                    path.line_to(50.0, 30.0).unwrap();
+                    path.line_to(10.0, 30.0).unwrap();
+                    path.close_path().unwrap();
+                    path.set_fill_color(color).unwrap();
+                    path.set_path_fill(true, false).unwrap();
+                    let index = page.object_count();
+                    page.insert_object_at(path, index).unwrap();
+                }
+                page.generate_content().unwrap();
+            }
+            let order = |session: &mut Session<'_>| -> Vec<ObjectId> {
+                session.objects(0).unwrap().iter().map(|o| o.id).collect()
+            };
+            let ids = order(session);
+            let [dark, red, blue, green] = ids[..] else {
+                panic!("四个方块：{ids:?}")
+            };
+            let top = |session: &mut Session<'_>| {
+                session.hit_test(0, 20.0, 15.0, HitMode::Top).unwrap()[0].id
+            };
+            assert_eq!(top(session), green);
+
+            let change = session.reorder(&[red], ZOrder::Front).unwrap();
+            assert_eq!(change.version, 1);
+            assert_eq!(change.pages[0].modified, vec![red]);
+            assert!(change.pages[0].area.is_some());
+            assert_eq!(top(session), red);
+            assert_eq!(fill_of(session, 3), RED);
+            assert_eq!(applied_labels(session), ["置顶"]);
+
+            session.undo().unwrap();
+            assert_eq!(top(session), green);
+            assert_eq!(order(session), ids);
+
+            // 已经在最上面：什么也不做
+            let still = session.reorder(&[green], ZOrder::Front).unwrap();
+            assert_eq!((still.version, still.pages.len()), (2, 0));
+            assert_eq!(session.history().entries.len(), 1, "不记撤销");
+
+            // 深色方块在另一段内容流里：挪到上面写不下来，拒绝，页面原样
+            assert!(matches!(
+                session.reorder(&[dark], ZOrder::Front),
+                Err(EditError::ReorderAcrossStreams { page: 0 })
+            ));
+            assert_eq!(order(session), ids);
+            assert_eq!(top(session), green);
+            assert_eq!(session.version(), 2);
+
+            session.reorder(&[red, blue], ZOrder::Forward).unwrap();
+            assert_eq!(order(session), [dark, green, red, blue]);
+            assert_eq!(top(session), blue);
+            assert_eq!(applied_labels(session), ["上移一层（2 个对象）"]);
+
+            let saved = session.save_full().unwrap();
+            let reopened = Document::load_bytes(session.lib, saved.bytes.to_vec(), None).unwrap();
+            let page = reopened.page(0).unwrap();
+            let fills: Vec<Rgba> = (0..page.object_count())
+                .map(|z| page.object(z).unwrap().fill_color().unwrap())
+                .collect();
+            assert_eq!(fills, [DARK, GREEN, RED, BLUE]);
+        });
     }
 
     /// 属性面板读颜色：填充的路径有填充色、没有描边色；改了填充色读到新的，撤销读回原来的。

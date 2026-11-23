@@ -128,6 +128,7 @@ describe('工具产生的修改交给谁', () => {
       setText: (id, text) => calls.push(['setText', id, text]),
       readStyle: () => Promise.resolve({ fill: null, stroke: null }),
       setFill: (ids, color) => calls.push(['setFill', ids, color]),
+      reorder: (ids, op) => calls.push(['reorder', ids, op]),
       undo: () => calls.push(['undo']),
       redo: () => calls.push(['redo']),
       jumpHistory: (index) => calls.push(['jump', index]),
@@ -195,6 +196,58 @@ describe('工具产生的修改交给谁', () => {
       store.getState().setSelection('doc', [onSecond]);
       controller.runCommand('edit.delete');
       expect(calls).toEqual([['delete', [onSecond]]]);
+    } finally {
+      controller.dispose();
+    }
+  });
+
+  it('调整层级：选中的对象交给修改入口；选区碰到只能叠加内容的页就不发，新加的对象也一样', () => {
+    vi.spyOn(GlTileRenderer, 'create').mockReturnValue(stubRenderer());
+    const { editor, calls } = recordingEditor();
+    const { store, controller } = mount({ pages: 2, editor });
+    try {
+      const snapshot = store.getState().documents.doc!.snapshot;
+      const [first, second] = snapshot.pages;
+      const onFirst = first!.objects[0]!.id;
+      const onSecond = second!.objects[0]!.id;
+      store.getState().setSelection('doc', [onSecond]);
+      expect(controller.runCommand('object.bringToFront')).toBe(true);
+      expect(controller.runCommand('object.sendBackward')).toBe(true);
+      expect(calls).toEqual([
+        ['reorder', [onSecond], 'front'],
+        ['reorder', [onSecond], 'backward'],
+      ]);
+
+      store.getState().updateSnapshot('doc', {
+        ...snapshot,
+        pages: [
+          {
+            ...first!,
+            overlayOnly: { reason: '测试' },
+            objects: first!.objects.map((o, i) => (i === 0 ? { ...o, added: true } : o)),
+          },
+          second!,
+        ],
+      });
+      store.getState().setSelection('doc', [onFirst]);
+      controller.runCommand('object.bringForward');
+      expect(calls).toHaveLength(2);
+    } finally {
+      controller.dispose();
+    }
+  });
+
+  it('模拟文档调整层级：直接改 store 里这一页的对象顺序', () => {
+    vi.spyOn(GlTileRenderer, 'create').mockReturnValue(stubRenderer());
+    const { store, controller } = mount();
+    try {
+      const before = store.getState().documents.doc!.snapshot.pages[0]!.objects.map((o) => o.id);
+      expect(before.length).toBeGreaterThan(1);
+      store.getState().setSelection('doc', [before[0]!]);
+      controller.runCommand('object.bringToFront');
+      const after = store.getState().documents.doc!.snapshot.pages[0]!.objects.map((o) => o.id);
+      expect(after).toEqual([...before.slice(1), before[0]]);
+      expect(store.getState().documents.doc!.history.at(-1)).toBe(t.history.reorder.front);
     } finally {
       controller.dispose();
     }
@@ -386,6 +439,7 @@ describe('拖动预览（方案 3.2）', () => {
       setText: () => undefined,
       readStyle: () => Promise.resolve({ fill: null, stroke: null }),
       setFill: () => undefined,
+      reorder: () => undefined,
       undo: () => undefined,
       redo: () => undefined,
       jumpHistory: () => undefined,
@@ -805,6 +859,7 @@ describe('置入组件（P0 原型）', () => {
       setText: () => undefined,
       readStyle: () => Promise.resolve({ fill: null, stroke: null }),
       setFill: () => undefined,
+      reorder: () => undefined,
       undo: () => undefined,
       redo: () => undefined,
       jumpHistory: () => undefined,
@@ -856,6 +911,7 @@ describe('置入组件（P0 原型）', () => {
       setText: () => undefined,
       readStyle: () => Promise.resolve({ fill: null, stroke: null }),
       setFill: () => undefined,
+      reorder: () => undefined,
       undo: () => undefined,
       redo: () => undefined,
       jumpHistory: () => undefined,

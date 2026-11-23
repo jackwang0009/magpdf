@@ -16,6 +16,7 @@ import type {
   EditSetTextParams,
   EditSetTextResult,
   EditTransformParams,
+  EditZOrderParams,
   FidelityCheckParams,
   FidelityResult,
   HistoryJumpParams,
@@ -29,6 +30,7 @@ import type {
   PageInfo,
   RpcError,
 } from '@magpdf/protocol';
+import { arrangeZOrder } from '../document/zOrder';
 import { FakeTransport } from './fakeTransport';
 
 /**
@@ -208,6 +210,8 @@ export class FakeEngine {
         return this.remove(params as EditDeleteParams);
       case METHOD.EDIT_SET_STYLE:
         return this.setStyle(params as EditSetStyleParams);
+      case METHOD.EDIT_Z_ORDER:
+        return this.reorder(params as EditZOrderParams);
       case METHOD.DOC_SAVE:
         return this.save(params as DocSaveParams);
       case METHOD.COMP_PLACE:
@@ -330,6 +334,35 @@ export class FakeEngine {
       pages: [...found.keys()],
       forward: () => set(after),
       backward: () => set(before),
+    });
+  }
+
+  /** 调整层级。假引擎里没有内容流，不会因为跨流被拒绝；顺序本来就是那样时不推送、版本号不变。 */
+  private reorder(params: EditZOrderParams): EditResult {
+    const document = this.document(params.docId);
+    if (params.op === 'index') throw invalid('假引擎不支持 index');
+    const found = this.locate(document, params.baseVersion, params.ids);
+    const op = params.op;
+    const selected = new Set([...found.values()].flat());
+    const before = new Map(
+      [...found.keys()].map((index) => [index, [...document.pages[index]!.objects]]),
+    );
+    const after = new Map(
+      [...before].map(([index, objects]) => [index, arrangeZOrder(objects, selected, op)]),
+    );
+    const moved = [...after].filter(([index, objects]) =>
+      objects.some((object, i) => object !== before.get(index)![i]),
+    );
+    if (moved.length === 0) return { version: document.version };
+    return this.commit(document, {
+      label: `调整层级（${op}）`,
+      pages: moved.map(([index]) => index),
+      forward: () => {
+        for (const [index, objects] of moved) document.pages[index]!.objects = [...objects];
+      },
+      backward: () => {
+        for (const [index] of moved) document.pages[index]!.objects = [...before.get(index)!];
+      },
     });
   }
 

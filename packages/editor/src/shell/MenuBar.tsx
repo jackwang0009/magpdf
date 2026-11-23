@@ -51,6 +51,15 @@ export function MenuBar({ workspace, showRulers, showFrameStats }: MenuBarProps)
   const canUndo = editable && historyAt > 0;
   const canRedo = editable && historyAt < historyLength - 1;
   const canSave = editable && Boolean(host?.saveDocument);
+  // 调整层级：有选中的对象，并且都不在只能叠加内容的页上（新加的组件也不行，见 reorderSelection）
+  const canReorder = useEditorStore((s) => {
+    const doc = activeDocumentId ? s.documents[activeDocumentId] : undefined;
+    if (!doc || doc.selection.length === 0) return false;
+    const selected = new Set(doc.selection);
+    return !doc.snapshot.pages.some(
+      (page) => page.overlayOnly && page.objects.some((object) => selected.has(object.id)),
+    );
+  });
 
   const menus: Menu[] = [
     {
@@ -100,10 +109,30 @@ export function MenuBar({ workspace, showRulers, showFrameStats }: MenuBarProps)
         { id: 'group', label: t.menuItems.group, disabled: true },
         { id: 'ungroup', label: t.menuItems.ungroup, disabled: true },
         { id: 'sep2', label: '', separator: true },
-        { id: 'bringForward', label: t.menuItems.bringForward, disabled: true },
-        { id: 'sendBackward', label: t.menuItems.sendBackward, disabled: true },
-        { id: 'bringToFront', label: t.menuItems.bringToFront, disabled: true },
-        { id: 'sendToBack', label: t.menuItems.sendToBack, disabled: true },
+        {
+          id: 'bringToFront',
+          label: t.menuItems.bringToFront,
+          command: 'object.bringToFront',
+          disabled: !canReorder,
+        },
+        {
+          id: 'bringForward',
+          label: t.menuItems.bringForward,
+          command: 'object.bringForward',
+          disabled: !canReorder,
+        },
+        {
+          id: 'sendBackward',
+          label: t.menuItems.sendBackward,
+          command: 'object.sendBackward',
+          disabled: !canReorder,
+        },
+        {
+          id: 'sendToBack',
+          label: t.menuItems.sendToBack,
+          command: 'object.sendToBack',
+          disabled: !canReorder,
+        },
       ],
     },
     {

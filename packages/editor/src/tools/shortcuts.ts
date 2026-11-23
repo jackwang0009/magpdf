@@ -26,6 +26,10 @@ export type CommandId =
   | 'edit.nudgeRightLarge'
   | 'edit.nudgeUpLarge'
   | 'edit.nudgeDownLarge'
+  | 'object.bringForward'
+  | 'object.sendBackward'
+  | 'object.bringToFront'
+  | 'object.sendToBack'
   | 'file.new'
   | 'file.open'
   | 'file.save'
@@ -64,6 +68,11 @@ export const defaultShortcuts: readonly Shortcut[] = [
   { combo: 'Shift+ArrowRight', command: 'edit.nudgeRightLarge' },
   { combo: 'Shift+ArrowUp', command: 'edit.nudgeUpLarge' },
   { combo: 'Shift+ArrowDown', command: 'edit.nudgeDownLarge' },
+  // 和 Illustrator、InDesign 一样
+  { combo: 'Ctrl+]', command: 'object.bringForward' },
+  { combo: 'Ctrl+[', command: 'object.sendBackward' },
+  { combo: 'Ctrl+Shift+]', command: 'object.bringToFront' },
+  { combo: 'Ctrl+Shift+[', command: 'object.sendToBack' },
   { combo: 'Ctrl+N', command: 'file.new' },
   { combo: 'Ctrl+O', command: 'file.open' },
   { combo: 'Ctrl+S', command: 'file.save' },
@@ -92,6 +101,9 @@ export function comboFromEvent(event: KeyLike): string {
   } else if (key === '-' || key === '_') {
     key = '-';
     shift = false;
+  } else if (key === '{' || key === '}') {
+    // 美式键盘上按着 Shift 打出来的是 { }，组合键里仍写成 [ ]，Shift 单列
+    key = key === '{' ? '[' : ']';
   } else if (key === ' ') {
     key = 'Space';
   } else if (key.length === 1) {

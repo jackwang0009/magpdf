@@ -22,6 +22,16 @@ describe('快捷键映射', () => {
     expect(comboFromEvent(key(' '))).toBe('Space');
   });
 
+  it('调整层级：Ctrl+] / Ctrl+[，按着 Shift 时打出来的 } { 也认', () => {
+    const resolve = (value: string, shiftKey = false) =>
+      defaultShortcutMap.resolve(key(value, { ctrlKey: true, shiftKey }));
+    expect(resolve(']')).toBe('object.bringForward');
+    expect(resolve('[')).toBe('object.sendBackward');
+    expect(resolve('}', true)).toBe('object.bringToFront');
+    expect(resolve('{', true)).toBe('object.sendToBack');
+    expect(defaultShortcutMap.comboFor('object.bringToFront')).toBe('Ctrl+Shift+]');
+  });
+
   it('方案 8.4 的视图命令与微移命令', () => {
     expect(defaultShortcutMap.resolve(key('0', { ctrlKey: true }))).toBe('view.fitPage');
     expect(defaultShortcutMap.resolve(key('1', { ctrlKey: true }))).toBe('view.actualSize');

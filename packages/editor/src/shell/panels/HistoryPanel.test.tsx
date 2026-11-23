@@ -64,6 +64,7 @@ function hostWith(jumps: number[]): EditorHost {
     setText: () => undefined,
     readStyle: () => Promise.resolve({ fill: null, stroke: null }),
     setFill: () => undefined,
+    reorder: () => undefined,
     undo: () => undefined,
     redo: () => undefined,
     jumpHistory: (index) => jumps.push(index),

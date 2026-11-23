@@ -11,6 +11,7 @@ import {
 } from '../document/pageSpace';
 import type { Matrix } from '../document/pageSpace';
 import type { DocumentSnapshot, PageSnapshot } from '../document/types';
+import type { ZOrderOp } from '../document/zOrder';
 import { MM_PER_INCH, PT_PER_INCH, intersectRect, translateRect, unionRects } from '../geometry';
 import type { Point, Rect, Size } from '../geometry';
 import { format, t } from '../i18n';
@@ -322,6 +323,23 @@ export class CanvasController {
     this.setView(centerOnPage(this.layout, page, zoom, this.viewport));
   }
 
+  /**
+   * 调整选中对象的层级。选区碰到只能叠加内容的页时什么也不做（新加的组件也一样：挪到原有对象下面
+   * 要重写原有的内容流）。
+   */
+  reorderSelection(op: ZOrderOp): void {
+    const doc = this.store.getState().documents[this.documentId];
+    if (!doc || doc.selection.length === 0) return;
+    const selected = new Set(doc.selection);
+    const frozen = doc.snapshot.pages.some(
+      (page) => page.overlayOnly && page.objects.some((object) => selected.has(object.id)),
+    );
+    if (frozen) return;
+    if (this.editor) this.editor.reorder(doc.selection, op);
+    else this.store.getState().reorderObjects(this.documentId, doc.selection, op);
+    this.invalidate();
+  }
+
   actualSize(): void {
     const page = this.currentPage;
     if (page === null) return;
@@ -355,6 +373,18 @@ export class CanvasController {
           if (command === 'edit.undo') this.editor.undo();
           else this.editor.redo();
         }
+        return true;
+      case 'object.bringForward':
+        this.reorderSelection('forward');
+        return true;
+      case 'object.sendBackward':
+        this.reorderSelection('backward');
+        return true;
+      case 'object.bringToFront':
+        this.reorderSelection('front');
+        return true;
+      case 'object.sendToBack':
+        this.reorderSelection('back');
         return true;
       default: {
         if (command.startsWith('edit.')) {

@@ -15,7 +15,7 @@ use anyhow::{Context, Result};
 use magpdf_engine::component::{ComponentKind, ComponentSpec};
 use magpdf_engine::edit::{
     Change, EditError, History, HitMode, ObjectId, ObjectStyle, ObjectSummary, ObjectText, Session,
-    TextOutcome,
+    TextOutcome, ZOrder,
 };
 use magpdf_engine::save::{SaveError, write_replacing};
 use magpdf_ipc::messages::DocInfo;
@@ -84,6 +84,11 @@ pub enum EditOp {
     /// 撤销或重做到只有前 `applied` 步生效（历史记录面板）。
     Jump {
         applied: usize,
+    },
+    /// 调整层级。
+    Reorder {
+        ids: Vec<ObjectId>,
+        op: ZOrder,
     },
 }
 
@@ -1091,6 +1096,7 @@ impl PdfiumState {
             EditOp::Undo => session.undo()?,
             EditOp::Redo => session.redo()?,
             EditOp::Jump { applied } => session.jump(applied)?,
+            EditOp::Reorder { ids, op } => session.reorder(&ids, op)?,
         })
     }
 

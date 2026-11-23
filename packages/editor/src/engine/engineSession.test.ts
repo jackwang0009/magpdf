@@ -806,6 +806,40 @@ describe('EngineSession：改原有文字（方案 5.2）', () => {
   });
 });
 
+describe('EngineSession：调整层级', () => {
+  it('发 edit.zOrder，新顺序随对象列表回来；已经在最上面时不发 doc.changed，文档不算改过', async () => {
+    const { engine, editor, objects, snapshot } = await attached();
+    editor.reorder(['p0-2'], 'front');
+    await flush();
+    expect(engine.transport.sent(METHOD.EDIT_Z_ORDER)).toEqual([
+      { docId: 1, baseVersion: 0, ids: [2], op: 'front' },
+    ]);
+    expect(objects(0).map((o) => o.id)).toEqual(['p0-1', 'p0-3', 'p0-2']);
+    expect(snapshot().version).toBe(1);
+
+    editor.reorder(['p0-2'], 'front');
+    await flush();
+    expect(engine.transport.sent(METHOD.EDIT_Z_ORDER)).toHaveLength(2);
+    expect(snapshot().version).toBe(1);
+
+    editor.undo();
+    await flush();
+    expect(objects(0).map((o) => o.id)).toEqual(['p0-1', 'p0-2', 'p0-3']);
+  });
+
+  it('只能叠加内容的页上一个也不发，新加的组件也一样', async () => {
+    const { engine, editor } = await attached();
+    editor.placeComponent(0, 'code128', { x: 30, y: 40 });
+    await flush();
+    engine.page(1, 20).overlayOnly = true;
+    engine.finishBackgroundCheck(1, 20);
+    editor.reorder(['p0-7'], 'back');
+    editor.reorder(['p0-2'], 'front');
+    await flush();
+    expect(engine.transport.sent(METHOD.EDIT_Z_ORDER)).toEqual([]);
+  });
+});
+
 describe('EngineSession：颜色', () => {
   it('读颜色换成 #rrggbb；改填充色发 edit.setStyle（RGB，分量 0–1），引擎改了再读是新的', async () => {
     const { engine, editor } = await attached();

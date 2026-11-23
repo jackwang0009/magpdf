@@ -18,6 +18,7 @@ import type {
   EditSetTextParams,
   EditSetTextResult,
   EditTransformParams,
+  EditZOrderParams,
   EngineFailed,
   EngineRestored,
   FidelityCheckParams,
@@ -51,6 +52,7 @@ import {
   userBoxToPageRect,
 } from '../document/pageSpace';
 import type { Matrix } from '../document/pageSpace';
+import type { ZOrderOp } from '../document/zOrder';
 import type { DocumentSnapshot, ObjectType, PageObject } from '../document/types';
 import type { Point, Rect } from '../geometry';
 import { format, t } from '../i18n';
@@ -526,6 +528,7 @@ export class EngineSession implements EditorHost {
         return document ? this.readStyle(document, objectId) : { fill: null, stroke: null };
       },
       setFill: (objectIds, color) => on((document) => this.setFill(document, objectIds, color)),
+      reorder: (objectIds, op) => on((document) => this.reorder(document, objectIds, op)),
       undo: () => on((document) => this.stepHistory(document, METHOD.HISTORY_UNDO)),
       redo: () => on((document) => this.stepHistory(document, METHOD.HISTORY_REDO)),
       jumpHistory: (index) => on((document) => this.jumpHistory(document, index)),
@@ -732,6 +735,23 @@ export class EngineSession implements EditorHost {
     this.enqueue(document, [], () =>
       this.command(document, METHOD.EDIT_SET_STYLE, (docId, baseVersion) => {
         const params: EditSetStyleParams = { docId, baseVersion, ids: targets, fill };
+        return params;
+      }),
+    );
+  }
+
+  /**
+   * 调整层级。只能叠加内容的页上一个也不发，新加的组件也一样：挪到原有对象下面就要重写原有的内容流。
+   * 界面上不先改，引擎改了之后 `doc.changed` 到了重新取对象，新顺序随列表回来。
+   */
+  private reorder(document: EngineDocument, ids: readonly string[], op: ZOrderOp): void {
+    const targets = engineIds(ids);
+    if (targets.length === 0) return;
+    const pages = new Set(ids.flatMap((id) => pageOfObject(id) ?? []));
+    if ([...pages].some((page) => this.isOverlayOnly(document, page))) return;
+    this.enqueue(document, [], () =>
+      this.command(document, METHOD.EDIT_Z_ORDER, (docId, baseVersion) => {
+        const params: EditZOrderParams = { docId, baseVersion, ids: targets, op };
         return params;
       }),
     );

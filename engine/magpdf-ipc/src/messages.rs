@@ -216,6 +216,7 @@ names! {
         /// 不在《接口协议》里：原型用一条命令代替 `text.beginEdit`、`text.preview`、`text.commit`。
         EDIT_SET_TEXT = "edit.setText";
         EDIT_SET_STYLE = "edit.setStyle";
+        EDIT_Z_ORDER = "edit.zOrder";
         EDIT_DELETE = "edit.delete";
         HISTORY_UNDO = "history.undo";
         HISTORY_REDO = "history.redo";
@@ -778,6 +779,37 @@ pub struct EditSetStyleParams {
     /// 填充色。只换颜色，对象的不透明度不动。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fill: Option<Color>,
+}
+
+/// 调整层级的方式（《接口协议》6.5 `edit.zOrder`）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum ZOrderOp {
+    /// 上移一层
+    Forward,
+    /// 下移一层
+    Backward,
+    /// 置于顶层
+    Front,
+    /// 置于底层
+    Back,
+    /// 放到 `index` 这一层（从下往上数，从 0 起）
+    Index,
+}
+
+/// `edit.zOrder` 的参数。返回 [`EditResult`]；顺序本来就是那样时版本号不变、不推送 `doc.changed`。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct EditZOrderParams {
+    pub doc_id: u32,
+    pub base_version: u32,
+    pub ids: Vec<u64>,
+    pub op: ZOrderOp,
+    /// `op` 为 `index` 时必须给
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<u32>,
 }
 
 /// `edit.delete` 的参数。

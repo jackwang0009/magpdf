@@ -72,6 +72,7 @@ function withEditor(info: TextInfo | null, style: StyleInfo = { fill: null, stro
     setText: (id, text) => calls.push([id, text]),
     readStyle: () => Promise.resolve(style),
     setFill: (ids, color) => fills.push([ids, color]),
+    reorder: () => undefined,
     undo: () => undefined,
     redo: () => undefined,
     jumpHistory: () => undefined,

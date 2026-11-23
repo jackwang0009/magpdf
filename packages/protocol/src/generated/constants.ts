@@ -18,6 +18,7 @@ export const METHOD = {
   EDIT_TRANSFORM: 'edit.transform',
   EDIT_SET_TEXT: 'edit.setText',
   EDIT_SET_STYLE: 'edit.setStyle',
+  EDIT_Z_ORDER: 'edit.zOrder',
   EDIT_DELETE: 'edit.delete',
   HISTORY_UNDO: 'history.undo',
   HISTORY_REDO: 'history.redo',

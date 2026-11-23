@@ -956,6 +956,10 @@ async fn existing_text_is_read_changed_and_undone_over_the_pipe() {
         )
         .await;
     assert_eq!(empty["code"], ErrorCode::TextNotEditable.code(), "{empty}");
+    assert_eq!(
+        empty["message"], "文字不能是空的",
+        "原因放在 message 里，界面直接显示"
+    );
     let component = engine
         .call_err(
             method::EDIT_SET_TEXT,
@@ -1045,6 +1049,88 @@ async fn styles_are_read_and_changed_over_the_pipe() {
         after[0]["style"],
         json!({ "fill": { "space": "rgb", "components": [0.0, 0.0, 1.0] } })
     );
+}
+
+/// 调整层级（《接口协议》6.5 `edit.zOrder`）：置于顶层、原地不动不推送、跨内容流拒绝、参数不全、撤销。
+#[tokio::test]
+async fn objects_are_reordered_over_the_pipe() {
+    let mut engine = Engine::start(None).await;
+    engine.hello().await;
+    let doc_id = engine.open("color-devicergb.pdf").await;
+    let ids = |objects: &[Value]| -> Vec<u64> {
+        objects.iter().map(|o| o["id"].as_u64().unwrap()).collect()
+    };
+    let before = ids(&engine.objects(doc_id).await);
+    let first = before[1];
+
+    let (version, changed) = engine
+        .edit(
+            method::EDIT_Z_ORDER,
+            json!({ "docId": doc_id, "baseVersion": 0, "ids": [first], "op": "front" }),
+        )
+        .await;
+    assert_eq!(version, 1);
+    assert_eq!(changed["changes"][0]["modified"], json!([first]));
+    let after = ids(&engine.objects(doc_id).await);
+    assert_eq!(after.last(), Some(&first));
+    assert_eq!(after.len(), before.len());
+
+    // 已经在最上面：版本号不变，不推送 doc.changed
+    let still = engine
+        .call(
+            method::EDIT_Z_ORDER,
+            json!({ "docId": doc_id, "baseVersion": 1, "ids": [first], "op": "front" }),
+        )
+        .await;
+    assert_eq!(still, json!({ "version": 1 }));
+    assert!(
+        !engine
+            .events
+            .iter()
+            .any(|(_, name, _)| name == event::DOC_CHANGED)
+    );
+
+    // 新放的组件在 PDFium 追加的另一段内容流里：挪到原有对象下面写不下来，拒绝
+    let placed = engine
+        .call(
+            method::COMP_PLACE,
+            json!({
+                "docId": doc_id, "baseVersion": 1, "pageId": 0,
+                "type": "code128", "params": {}, "at": [20, 200],
+            }),
+        )
+        .await;
+    engine.event(event::DOC_CHANGED).await;
+    let across = engine
+        .call_err(
+            method::EDIT_Z_ORDER,
+            json!({ "docId": doc_id, "baseVersion": 2, "ids": [placed["compId"]], "op": "back" }),
+        )
+        .await;
+    assert_eq!(
+        across["code"],
+        ErrorCode::InvalidArgument.code(),
+        "{across}"
+    );
+    assert!(
+        across["message"].as_str().unwrap().contains("调不了"),
+        "{across}"
+    );
+    let missing = engine
+        .call_err(
+            method::EDIT_Z_ORDER,
+            json!({ "docId": doc_id, "baseVersion": 2, "ids": [first], "op": "index" }),
+        )
+        .await;
+    assert_eq!(missing["code"], ErrorCode::InvalidArgument.code());
+
+    // 撤销置入和置于顶层：回到原来的顺序
+    for _ in 0..2 {
+        engine
+            .edit(method::HISTORY_UNDO, json!({ "docId": doc_id }))
+            .await;
+    }
+    assert_eq!(ids(&engine.objects(doc_id).await), before);
 }
 
 /// 历史记录（《接口协议》6.8 `history.list`、`history.jump`）：列出每一步，一次跳几步，越界报错。

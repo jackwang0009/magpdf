@@ -1,6 +1,7 @@
 import type { Point } from '../geometry';
 import type { ComponentValues, PlaceableComponent } from './components';
 import type { Matrix } from './pageSpace';
+import type { ZOrderOp } from './zOrder';
 
 /** 对一页上的若干对象做同一个变换。 */
 export interface PageTransform {
@@ -53,6 +54,11 @@ export interface DocumentEditor {
   readStyle(id: string): Promise<StyleInfo>;
   /** 改填充色（`#rrggbb`），不透明度不动。 */
   setFill(ids: readonly string[], color: string): void;
+  /**
+   * 调整层级。页面不先改：引擎可能拒绝（对象分在几段内容流里时跨段挪不了），由宿主告诉用户原因；
+   * 新的顺序随对象列表回来。
+   */
+  reorder(ids: readonly string[], op: ZOrderOp): void;
   undo(): void;
   redo(): void;
   /** 撤销或重做到历史记录的第 `index` 条之后（0 是打开时的样子），历史记录面板点了一条时用。 */

@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use magpdf_engine::component::{ComponentKind, ComponentProblem};
-use magpdf_engine::edit::{Change, EditError, HitMode, ObjectId, ObjectSummary};
+use magpdf_engine::edit::{Change, EditError, HitMode, ObjectId, ObjectSummary, ZOrder};
 use magpdf_engine::save::SaveError;
 use magpdf_ipc::frame::{self, Incoming};
 use magpdf_ipc::messages::{
@@ -20,12 +20,13 @@ use magpdf_ipc::messages::{
     CompPlaceResult, CompUpdateParams, ComponentInfo, ComponentValues, DocChanged, DocCloseParams,
     DocInfo, DocOpenParams, DocSaveParams, DocSaveResult, DocSaved, DocSnapshot, DocSnapshotParams,
     EchoParams, EditDeleteParams, EditResult, EditSetStyleParams, EditSetTextParams,
-    EditSetTextResult, EditTransformParams, ErrorCode, Fidelity, FidelityCheckParams,
-    FidelityResult, HelloParams, HelloResult, HistoryJumpParams, HistoryList, HistoryParams,
-    JsonValue, LayerMode, OBJ_LIST_MAX, ObjDetail, ObjDetailKind, ObjGetParams, ObjHitTestParams,
-    ObjListParams, PageChange, PageInfo, PingParams, RenderTilesParams, RenderTilesResult, Request,
-    RequestId, Response, RoundtripParams, RoundtripResult, RpcError, SaveMode, StallParams,
-    StyleDetail, TextDetail, TileCoord, TileFetchParams, TileFetchResult, method,
+    EditSetTextResult, EditTransformParams, EditZOrderParams, ErrorCode, Fidelity,
+    FidelityCheckParams, FidelityResult, HelloParams, HelloResult, HistoryJumpParams, HistoryList,
+    HistoryParams, JsonValue, LayerMode, OBJ_LIST_MAX, ObjDetail, ObjDetailKind, ObjGetParams,
+    ObjHitTestParams, ObjListParams, PageChange, PageInfo, PingParams, RenderTilesParams,
+    RenderTilesResult, Request, RequestId, Response, RoundtripParams, RoundtripResult, RpcError,
+    SaveMode, StallParams, StyleDetail, TextDetail, TileCoord, TileFetchParams, TileFetchResult,
+    ZOrderOp, method,
 };
 use magpdf_ipc::shm::{self, Layout, MappedRegion};
 use magpdf_ipc::{PROTOCOL_VERSION, pipe, pump};
@@ -746,6 +747,24 @@ async fn handle_request(
             };
             apply_edit(engine, id, p.doc_id, Some(p.base_version), op, out).await
         }
+        method::EDIT_Z_ORDER => {
+            let p: EditZOrderParams = decode(params)?;
+            let op = match (p.op, p.index) {
+                (ZOrderOp::Forward, _) => ZOrder::Forward,
+                (ZOrderOp::Backward, _) => ZOrder::Backward,
+                (ZOrderOp::Front, _) => ZOrder::Front,
+                (ZOrderOp::Back, _) => ZOrder::Back,
+                (ZOrderOp::Index, Some(index)) => ZOrder::Index(index as usize),
+                (ZOrderOp::Index, None) => {
+                    return Err(ErrorCode::InvalidArgument.error_with("op 为 index 时要给 index"));
+                }
+            };
+            let op = EditOp::Reorder {
+                ids: object_ids(&p.ids),
+                op,
+            };
+            apply_edit(engine, id, p.doc_id, Some(p.base_version), op, out).await
+        }
         method::COMP_PLACE => {
             let p: CompPlaceParams = decode(params)?;
             let Some(kind) = ComponentKind::parse(&p.kind) else {
@@ -820,17 +839,7 @@ async fn handle_request(
             let op = EditOp::Jump {
                 applied: p.index as usize,
             };
-            let change = engine
-                .engine
-                .edit(p.doc_id, None, op)
-                .await
-                .map_err(map_engine_error)?;
-            // 原地不动：文档没变，不推送 doc.changed（界面收到它会把文档标成已修改）
-            if !change.pages.is_empty() {
-                announce_change(engine, p.doc_id, &change, out);
-            }
-            let version = wire_version(change.version);
-            Ok(Some(frame::response_ok(id, &EditResult { version })))
+            apply_edit(engine, id, p.doc_id, None, op, out).await
         }
         method::FIDELITY_CHECK => {
             let p: FidelityCheckParams = decode(params)?;
@@ -1118,7 +1127,10 @@ async fn run_edit(
         .edit(doc_id, base_version.map(u64::from), op)
         .await
         .map_err(map_engine_error)?;
-    announce_change(engine, doc_id, &change, out);
+    // 什么都没变（历史记录原地不动、层级本来就是那样）：不推送，界面收到它会把文档标成已修改
+    if !change.pages.is_empty() {
+        announce_change(engine, doc_id, &change, out);
+    }
     Ok(change)
 }
 
@@ -1210,6 +1222,12 @@ fn map_engine_error(e: EngineError) -> RpcError {
     if let EngineError::Edit(EditError::Component(problem)) = &e {
         return comp_invalid(problem);
     }
+    // 原因是写给用户看的（界面直接显示 message）：放在 message 里，不放 data.detail
+    if let EngineError::Edit(edit @ (EditError::Text(_) | EditError::ReorderAcrossStreams { .. })) =
+        &e
+    {
+        return RpcError::new(edit_error_code(edit), edit.to_string());
+    }
     if let EngineError::Save(SaveError::Io(io)) = &e {
         // 给用户看的说法放在 message 里（界面直接显示），原始的系统错误放在 detail 里
         let mut error = RpcError::new(ErrorCode::WriteFailed, write_failure(io));
@@ -1244,7 +1262,8 @@ fn edit_error_code(error: &EditError) -> ErrorCode {
         | EditError::NothingToRedo
         | EditError::NotComponent(_)
         | EditError::NotText(_)
-        | EditError::NoHistoryStep { .. } => ErrorCode::InvalidArgument,
+        | EditError::NoHistoryStep { .. }
+        | EditError::ReorderAcrossStreams { .. } => ErrorCode::InvalidArgument,
         EditError::Component(_) => ErrorCode::CompInvalid,
         EditError::Text(_) => ErrorCode::TextNotEditable,
         EditError::Pdfium(_) | EditError::NoFill => ErrorCode::Internal,

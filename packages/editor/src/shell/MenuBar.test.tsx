@@ -98,3 +98,55 @@ describe('菜单栏：撤销、重做随历史记录变灰', () => {
     expect(item(view, t.menuItems.redo).disabled).toBe(true);
   });
 });
+
+describe('菜单栏：调整层级', () => {
+  function withObject(overlayOnly: boolean) {
+    act(() => {
+      const state = editorStore.getState();
+      const snapshot = state.documents['menu-doc']!.snapshot;
+      state.updateSnapshot('menu-doc', {
+        ...snapshot,
+        pages: [
+          {
+            ...snapshot.pages[0]!,
+            ...(overlayOnly ? { overlayOnly: { reason: '测试' } } : {}),
+            objects: [
+              { id: 'r1', type: 'path', name: '框', bbox: { x: 0, y: 0, width: 9, height: 9 } },
+            ],
+          },
+        ],
+      });
+    });
+  }
+  const layerItems = [
+    t.menuItems.bringToFront,
+    t.menuItems.bringForward,
+    t.menuItems.sendBackward,
+    t.menuItems.sendToBack,
+  ];
+  const openObjectMenu = (view: HTMLElement) => {
+    const menu = [...view.querySelectorAll<HTMLButtonElement>('.mg-menu')].find(
+      (button) => button.textContent === t.menu.object,
+    )!;
+    act(() => menu.click());
+  };
+
+  it('有选中的对象才能用；选中的在只能叠加内容的页上时是灰的', () => {
+    withObject(false);
+    const view = openEditMenu(engineHost);
+    openObjectMenu(view);
+    expect(layerItems.map((label) => item(view, label).disabled)).toEqual([true, true, true, true]);
+
+    act(() => editorStore.getState().setSelection('menu-doc', ['r1']));
+    expect(layerItems.map((label) => item(view, label).disabled)).toEqual([
+      false,
+      false,
+      false,
+      false,
+    ]);
+    expect(item(view, t.menuItems.bringToFront).textContent).toContain('Ctrl+Shift+]');
+
+    withObject(true);
+    expect(item(view, t.menuItems.sendToBack).disabled).toBe(true);
+  });
+});
