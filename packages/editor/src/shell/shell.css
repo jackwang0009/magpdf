@@ -865,6 +865,14 @@
   user-select: text;
 }
 
+/* ---- 关闭前保存 ---- */
+.mg-unsaved-list {
+  margin: 0 10px 6px;
+  padding-left: 18px;
+  max-height: 160px;
+  overflow: auto;
+}
+
 /* ---- 崩溃恢复 ---- */
 .mg-recovery {
   width: 480px;

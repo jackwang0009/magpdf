@@ -9,6 +9,8 @@
     "allow-engine-request",
     "allow-open-document-dialog",
     "allow-save-document-as",
+    "allow-acknowledge-close-request",
+    "allow-confirm-exit",
     "allow-open-documents",
     "allow-recoverable-documents",
     "allow-recover-documents",

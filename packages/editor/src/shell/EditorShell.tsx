@@ -24,7 +24,7 @@ import {
   saveWorkspace,
 } from '../workspace/workspaces';
 import type { WorkspaceStorage } from '../workspace/workspaces';
-import { BenchmarkDialog, NoticeDialog, RecoveryDialog } from './Dialogs';
+import { BenchmarkDialog, NoticeDialog, RecoveryDialog, UnsavedDialog } from './Dialogs';
 import { EditorHostContext } from './editorHost';
 import type { EditorHost, HostNotice, RecoverableDocument } from './editorHost';
 import { MenuBar } from './MenuBar';
@@ -122,6 +122,78 @@ export function EditorShell({
     },
     [host],
   );
+
+  /**
+   * 等用户答复“要不要保存”的关闭（《交互设计》9.1）：要关的文档、其中有没保存的修改的那几份、是不是退出程序。
+   * 只有宿主打开的文档才问：模拟文档存不了，问了也没用。
+   */
+  const [closing, setClosing] = useState<{
+    readonly ids: readonly string[];
+    readonly unsaved: readonly string[];
+    readonly exit: boolean;
+  } | null>(null);
+  const closingRef = useRef(closing);
+  closingRef.current = closing;
+  const [closingBusy, setClosingBusy] = useState(false);
+
+  const closePanel = useCallback(
+    (id: string) => {
+      const panel = apiRef.current?.getPanel(`doc:${id}`);
+      if (panel) panel.api.close();
+      else store.getState().closeDocument(id);
+    },
+    [store],
+  );
+
+  const finishClose = useCallback(
+    (ids: readonly string[], exit: boolean) => {
+      setClosing(null);
+      if (exit) {
+        host?.exit?.();
+        return;
+      }
+      for (const id of ids) closePanel(id);
+    },
+    [host, closePanel],
+  );
+
+  /** 关掉这几份文档（`exit` 为真时是关掉整个程序）；有没保存的修改就先问。 */
+  const requestClose = useCallback(
+    (ids: readonly string[], exit: boolean) => {
+      // 已经在问了（比如用户又点了一次窗口的关闭按钮），不叠第二个对话框
+      if (closingRef.current) return;
+      const unsaved = ids.filter(
+        (id) =>
+          Boolean(host?.saveDocument && host.documentEditor(id)) &&
+          store.getState().documents[id]?.snapshot.dirty,
+      );
+      if (unsaved.length === 0) finishClose(ids, exit);
+      else setClosing({ ids, unsaved, exit });
+    },
+    [host, store, finishClose],
+  );
+
+  /** 对话框里点了“保存”：一份一份存，有一份没存成就停下（出错的提示由宿主弹），文档都不关。 */
+  const saveThenClose = useCallback(async () => {
+    const pending = closingRef.current;
+    if (!pending || !host?.saveDocument) return;
+    setClosingBusy(true);
+    for (const id of pending.unsaved) {
+      if (!(await host.saveDocument(id, false))) {
+        setClosingBusy(false);
+        setClosing(null);
+        return;
+      }
+    }
+    setClosingBusy(false);
+    finishClose(pending.ids, pending.exit);
+  }, [host, finishClose]);
+
+  // 用户点了窗口的关闭按钮：问过要不要保存再让宿主关
+  useEffect(() => {
+    if (!host?.onExitRequest) return undefined;
+    return host.onExitRequest(() => requestClose(store.getState().documentOrder, true));
+  }, [host, store, requestClose]);
 
   const doc = useStoreDoc(store);
   const showRulers = useStoreValue(store, (s) => s.showRulers);
@@ -240,6 +312,9 @@ export function EditorShell({
         case 'file.close':
           closeActiveDocument();
           return true;
+        case 'file.exit':
+          if (host?.exit) requestClose(store.getState().documentOrder, true);
+          return true;
         case 'file.save':
         case 'file.saveAs': {
           // 模拟文档存不了；按键照样算处理过，免得落到 WebView2 自己的“保存网页”上
@@ -281,10 +356,7 @@ export function EditorShell({
 
     const closeActiveDocument = () => {
       const id = store.getState().activeDocumentId;
-      if (!id) return;
-      const panel = apiRef.current?.getPanel(`doc:${id}`);
-      if (panel) panel.api.close();
-      else store.getState().closeDocument(id);
+      if (id) requestClose([id], false);
     };
 
     const applyWorkspace = (id: WorkspaceId) => {
@@ -326,6 +398,7 @@ export function EditorShell({
       run,
       openDocument,
       closeActiveDocument,
+      closeDocument: (id) => requestClose([id], false),
       applyWorkspace,
       resetWorkspace,
       runBenchmark: () => void startBenchmark(),
@@ -336,7 +409,7 @@ export function EditorShell({
       openPanel,
       toggleRulers: () => store.getState().toggleRulers(),
     };
-  }, [store, activeController, persist, workspaceId, benchmark.running, host]);
+  }, [store, activeController, persist, workspaceId, benchmark.running, host, requestClose]);
 
   // 全局键盘：工具快捷键、视图命令、Space 临时抓手
   useEffect(() => {
@@ -439,6 +512,17 @@ export function EditorShell({
             running={benchmark.running}
             onClose={() => setBenchmark({ result: null, running: false })}
           />
+          {closing ? (
+            <UnsavedDialog
+              names={closing.unsaved.map(
+                (id) => store.getState().documents[id]?.snapshot.name ?? id,
+              )}
+              busy={closingBusy}
+              onSave={() => void saveThenClose()}
+              onDiscard={() => finishClose(closing.ids, closing.exit)}
+              onCancel={() => setClosing(null)}
+            />
+          ) : null}
           {recoverable ? (
             <RecoveryDialog documents={recoverable} onResolve={resolveRecovery} />
           ) : (

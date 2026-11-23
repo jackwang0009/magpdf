@@ -6,6 +6,8 @@
 //! - 命令 `open_document_dialog`：主进程弹“打开”对话框，用户选了文件就交给引擎打开。界面拿不到任意路径。
 //! - 命令 `save_document_as`：主进程弹“另存为”对话框，让引擎存到用户选的地方。界面经 `engine_request` 发的
 //!   `doc.save` 只能存回打开的文件，带了路径就拒绝。
+//! - 命令 `acknowledge_close_request`、`confirm_exit`：用户要关窗时主进程先不关，发 Tauri 事件
+//!   [`CLOSE_REQUESTED_EVENT`] 让界面问要不要保存，界面同意了才关（[`on_window_event`]）。
 //! - 命令 `open_documents`：主进程知道的、已经开着的文档（启动时命令行给的，或者界面重新加载之前打开的）。
 //! - 命令 `recoverable_documents`、`recover_documents`：上次没有正常退出时开着的文档，界面问过用户之后重新打开
 //!   （[`crate::leftover`]）。
@@ -18,6 +20,7 @@
 //! 引擎重启时主进程自己发 `engine.restarting`、`engine.restored`、`engine.failed`。
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
@@ -31,7 +34,7 @@ use serde_json::{Value, json};
 use tauri::http::{Method, Request, Response, StatusCode, header};
 use tauri::{
     AppHandle, Emitter, Manager, RunEvent, State, UriSchemeContext, UriSchemeResponder,
-    WebviewWindow,
+    WebviewWindow, WindowEvent,
 };
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -40,6 +43,12 @@ use crate::shared_tiles::{self, FillError, SharedTile, SharedTiles};
 
 /// 界面收引擎事件用的 Tauri 事件名。Tauri 的事件名里不能有点号，所以协议里的事件名放在载荷的 `method` 里。
 const ENGINE_EVENT: &str = "engine-event";
+
+/// 用户要关窗时发给界面的 Tauri 事件（[`on_window_event`]）。
+const CLOSE_REQUESTED_EVENT: &str = "close-requested";
+
+/// 发出关窗请求之后等界面回应多久。
+const CLOSE_ACK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
 /// 取瓦片的自定义协议名（《接口协议》3.3）。
 const TILE_SCHEME: &str = "magpdf";
@@ -57,6 +66,10 @@ struct Shell {
     shared_tiles: Option<Arc<SharedTiles>>,
     /// 上次没有正常退出时留下的恢复文件（[`crate::leftover`]）。用户答复之后清空。
     leftover: Mutex<Leftover>,
+    /// 界面同意关窗了（问过要不要保存，见 [`on_window_event`]）。
+    exit_confirmed: AtomicBool,
+    /// 界面收到了这一次的关窗请求。
+    close_acknowledged: AtomicBool,
 }
 
 impl Shell {
@@ -206,6 +219,52 @@ async fn save_document_as(
     let saved: DocSaveResult = serde_json::from_value(value)
         .map_err(|e| ErrorCode::Internal.error_with(format!("doc.save 的返回值看不懂：{e}")))?;
     Ok(Some(saved))
+}
+
+/// 用户要关窗（点了关闭按钮、Alt+F4、文件 > 退出）：先不关，交给界面问要不要保存没保存的修改
+///（《交互设计》9.1“关闭前保存”）；界面答复 [`confirm_exit`] 才真的关。界面卡住、过了
+/// [`CLOSE_ACK_TIMEOUT`] 还没有回 [`acknowledge_close_request`] 的话直接关，免得窗口永远关不掉。
+fn on_window_event(window: &tauri::Window, event: &WindowEvent) {
+    let WindowEvent::CloseRequested { api, .. } = event else {
+        return;
+    };
+    let shell = window.state::<Shell>();
+    if shell.exit_confirmed.load(Ordering::SeqCst) {
+        return;
+    }
+    api.prevent_close();
+    shell.close_acknowledged.store(false, Ordering::SeqCst);
+    if let Err(error) = window.emit(CLOSE_REQUESTED_EVENT, ()) {
+        tracing::warn!("关窗请求没有发到界面，直接关：{error}");
+        shell.exit_confirmed.store(true, Ordering::SeqCst);
+        let _ = window.close();
+        return;
+    }
+    let window = window.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(CLOSE_ACK_TIMEOUT);
+        let shell = window.state::<Shell>();
+        if !shell.close_acknowledged.load(Ordering::SeqCst) {
+            tracing::warn!("界面没有回应关窗请求，直接关");
+            shell.exit_confirmed.store(true, Ordering::SeqCst);
+            let _ = window.close();
+        }
+    });
+}
+
+/// 界面收到关窗请求了（它会自己问用户，问多久都行）。
+#[tauri::command]
+fn acknowledge_close_request(shell: State<'_, Shell>) {
+    shell.close_acknowledged.store(true, Ordering::SeqCst);
+}
+
+/// 界面问过了，可以关：关掉主窗口，程序随之退出。
+#[tauri::command]
+fn confirm_exit(window: WebviewWindow, shell: State<'_, Shell>) {
+    shell.exit_confirmed.store(true, Ordering::SeqCst);
+    if let Err(error) = window.close() {
+        tracing::warn!("主窗口没有关掉：{error}");
+    }
 }
 
 /// 已经开着的文档。界面启动（或重新加载）时调一次。
@@ -558,6 +617,8 @@ pub fn run(open_paths: Vec<PathBuf>) -> Result<()> {
         recovery,
         shared_tiles: shared_tiles::enabled().then(|| Arc::new(SharedTiles::default())),
         leftover: Mutex::new(leftover),
+        exit_confirmed: AtomicBool::new(false),
+        close_acknowledged: AtomicBool::new(false),
     };
     for path in &open_paths {
         // 日志里不记文件名和路径（《工程规范》）。
@@ -569,10 +630,13 @@ pub fn run(open_paths: Vec<PathBuf>) -> Result<()> {
     let app = tauri::Builder::default()
         .manage(shell)
         .register_asynchronous_uri_scheme_protocol(TILE_SCHEME, tile_protocol)
+        .on_window_event(on_window_event)
         .invoke_handler(tauri::generate_handler![
             engine_request,
             open_document_dialog,
             save_document_as,
+            acknowledge_close_request,
+            confirm_exit,
             open_documents,
             recoverable_documents,
             recover_documents,

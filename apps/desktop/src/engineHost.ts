@@ -1,4 +1,5 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { EngineSession, editorStore } from '@magpdf/editor';
 import type { RecoverableDocument } from '@magpdf/editor';
 import type { DocInfo, DocSaveResult } from '@magpdf/protocol';
@@ -24,6 +25,15 @@ export function createEngineHost(): EngineSession | null {
     recoverableDocuments: () => invoke<RecoverableDocument[]>('recoverable_documents'),
     recoverDocuments: (ids) => invoke<DocInfo[]>('recover_documents', { ids }),
     saveDocumentAs: (docId) => invoke<DocSaveResult | null>('save_document_as', { docId }),
+    // 用户点了窗口的关闭按钮：主进程先不关，等外壳问过要不要保存。先回一声“收到了”，不然主进程过几秒就直接关
+    exitRequests: (listener) => {
+      const unlisten = listen('close-requested', () => {
+        void invoke('acknowledge_close_request');
+        listener();
+      });
+      return () => void unlisten.then((stop) => stop());
+    },
+    exitApp: () => void invoke('confirm_exit'),
   });
   session.attach().catch((error: unknown) => console.error('接上已打开的文档失败', error));
   return session;

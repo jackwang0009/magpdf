@@ -72,6 +72,10 @@ export interface EngineSessionOptions {
    * 不给就没有另存为。
    */
   readonly saveDocumentAs?: (docId: number) => Promise<DocSaveResult | null>;
+  /** 订阅“用户要关掉程序”（主进程拦下了关窗）。返回取消订阅的函数。不给就没有关窗前的询问。 */
+  readonly exitRequests?: (listener: () => void) => () => void;
+  /** 问过之后让主进程真的关掉程序。 */
+  readonly exitApp?: () => void;
 }
 
 /** 一页在界面这边的记录。 */
@@ -141,11 +145,17 @@ export class EngineSession implements EditorHost {
   private disposed = false;
 
   readonly recovery?: RecoveryHost;
+  readonly onExitRequest?: (listener: () => void) => () => void;
+  readonly exit?: () => void;
 
   constructor(options: EngineSessionOptions) {
     this.options = options;
     this.transport = options.transport;
     this.store = options.store;
+    if (options.exitRequests && options.exitApp) {
+      this.onExitRequest = options.exitRequests;
+      this.exit = options.exitApp;
+    }
     const { recoverableDocuments, recoverDocuments } = options;
     if (recoverableDocuments && recoverDocuments) {
       this.recovery = {
@@ -195,11 +205,12 @@ export class EngineSession implements EditorHost {
    * 保存（方案 9.1；原型只有完整重写）。排在这份文档的修改命令后面，等它们都有了结果再存。另存为时主进程弹对话框。
    * 成功了状态栏写“已保存”，文档的路径、标题、“已修改”标记随 `doc.saved` 更新；失败弹提示。不会拒绝。
    */
-  saveDocument(documentId: string, saveAs: boolean): Promise<void> {
+  saveDocument(documentId: string, saveAs: boolean): Promise<boolean> {
     const document = this.documents.get(documentId);
     const saveDocumentAs = this.options.saveDocumentAs;
-    if (!document || (saveAs && !saveDocumentAs)) return Promise.resolve();
-    const done = new Promise<void>((resolve) => {
+    if (!document || (saveAs && !saveDocumentAs)) return Promise.resolve(false);
+    return new Promise<boolean>((resolve) => {
+      let saved = false;
       this.enqueue(document, [], async () => {
         try {
           const docId = document.docId;
@@ -216,6 +227,7 @@ export class EngineSession implements EditorHost {
             : await this.transport.request<DocSaveResult>(METHOD.DOC_SAVE, params);
           // 另存为时用户取消了
           if (!result) return;
+          saved = true;
           this.store.getState().setStatusMessage(format(t.host.saved, { name: result.title }));
         } catch (error) {
           const reason =
@@ -224,11 +236,10 @@ export class EngineSession implements EditorHost {
               : describeError(error);
           this.notify('error', format(t.host.saveFailed, { name: document.title, reason }));
         } finally {
-          resolve();
+          resolve(saved);
         }
       });
     });
-    return done;
   }
 
   onNotice(listener: (notice: HostNotice) => void): () => void {

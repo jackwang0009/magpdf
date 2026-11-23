@@ -324,6 +324,16 @@ export const zhCN = {
     documentNotRestored: '“{name}”没能重新载入，已经关闭。',
     engineFailed: '引擎没能重新启动：{reason}。请重新打开 MagPDF。',
   },
+  /** 关闭前保存（《交互设计》9.1、9.2） */
+  unsaved: {
+    titleOne: '要保存对“{name}”的修改吗？',
+    titleMany: '有 {n} 份文档的修改还没有保存',
+    message: '不保存的话，这些修改会丢失。',
+    save: '保存',
+    discard: '不保存',
+    cancel: '取消',
+    saving: '正在保存…',
+  },
   recovery: {
     title: '上次没有正常退出',
     message:

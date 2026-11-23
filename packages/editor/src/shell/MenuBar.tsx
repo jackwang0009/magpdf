@@ -59,7 +59,7 @@ export function MenuBar({ workspace, showRulers, showFrameStats }: MenuBarProps)
         { id: 'saveAs', label: t.menuItems.saveAs, command: 'file.saveAs', disabled: !canSave },
         { id: 'print', label: t.menuItems.print, disabled: true },
         { id: 'sep3', label: '', separator: true },
-        { id: 'exit', label: t.menuItems.exit, disabled: true },
+        { id: 'exit', label: t.menuItems.exit, command: 'file.exit', disabled: !host?.exit },
       ],
     },
     {

@@ -13,7 +13,10 @@ export interface ShellCommands {
   /** 执行快捷键命令，返回是否处理 */
   run(command: CommandId): boolean;
   openDocument(preset: 'blank' | 'contract' | 'billOfLading' | 'large'): void;
+  /** 关当前文档；有没保存的修改先问（《交互设计》9.1） */
   closeActiveDocument(): void;
+  /** 关某一份文档（标签页上的关闭按钮）；有没保存的修改先问 */
+  closeDocument(id: string): void;
   /** 切换工作区（复位到内置布局） */
   applyWorkspace(id: 'basic' | 'freight'): void;
   /** 复位当前工作区到内置布局并清掉保存的版本 */

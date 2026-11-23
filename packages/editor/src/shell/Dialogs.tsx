@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { t } from '../i18n';
+import { format, t } from '../i18n';
 import type { BenchmarkResult } from '../canvas/benchmark';
 import { formatMs } from '../canvas/frameStats';
 import type { HostNotice, RecoverableDocument } from './editorHost';
@@ -68,6 +68,63 @@ export function RecoveryDialog({ documents, onResolve }: RecoveryDialogProps) {
           </button>
           <button type="button" onClick={() => onResolve([])}>
             {t.recovery.discard}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export interface UnsavedDialogProps {
+  /** 有没保存的修改的文档名 */
+  readonly names: readonly string[];
+  /** 正在保存：按钮都不能点 */
+  readonly busy: boolean;
+  readonly onSave: () => void;
+  readonly onDiscard: () => void;
+  readonly onCancel: () => void;
+}
+
+/**
+ * 关闭前保存（《交互设计》9.1、9.2）：关标签页、退出程序时有没保存的修改，问“保存”“不保存”“取消”。
+ * 一份文档时标题里写文件名；几份时标题写份数，下面列出文件名，“保存”把它们都存了。
+ * 对话框里的按键不往外传：免得 Esc、方向键、工具键落到后面的画布上；Esc 等于“取消”。
+ */
+export function UnsavedDialog({ names, busy, onSave, onDiscard, onCancel }: UnsavedDialogProps) {
+  const title =
+    names.length === 1
+      ? format(t.unsaved.titleOne, { name: names[0]! })
+      : format(t.unsaved.titleMany, { n: names.length });
+  return (
+    <div
+      className="mg-dialog-backdrop"
+      role="alertdialog"
+      aria-modal="true"
+      aria-label={title}
+      onKeyDown={(event) => {
+        event.stopPropagation();
+        if (event.key === 'Escape' && !busy) onCancel();
+      }}
+    >
+      <div className="mg-dialog mg-notice">
+        <header className="mg-dialog-title">{title}</header>
+        <p className="mg-notice-message">{busy ? t.unsaved.saving : t.unsaved.message}</p>
+        {names.length > 1 ? (
+          <ul className="mg-unsaved-list">
+            {names.map((name, index) => (
+              <li key={`${name}-${index}`}>{name}</li>
+            ))}
+          </ul>
+        ) : null}
+        <div className="mg-dialog-actions">
+          <button type="button" onClick={onSave} disabled={busy} autoFocus>
+            {t.unsaved.save}
+          </button>
+          <button type="button" onClick={onDiscard} disabled={busy}>
+            {t.unsaved.discard}
+          </button>
+          <button type="button" onClick={onCancel} disabled={busy}>
+            {t.unsaved.cancel}
           </button>
         </div>
       </div>

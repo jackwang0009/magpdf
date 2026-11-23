@@ -699,9 +699,18 @@ async function main() {
     // 文档已经撤销回原样：再按住同一个对象拖一阵（默认两秒），量帧间隔
     result.drag = await measureDrag(page);
 
-    // 6. 关掉标签页，文档从界面上消失
+    // 6. 关掉标签页，文档从界面上消失。改过的那一份先问要不要保存（《交互设计》9.1），选“不保存”
     for (let left = 2; left > 0; left--) {
+      const dirty = await page.evaluate(() => {
+        const state = window.__magpdf.store.getState();
+        return state.documents[state.documentOrder[0]].snapshot.dirty;
+      });
       await page.locator('.mg-doc-tab-close').first().click();
+      if (dirty) {
+        const ask = page.getByRole('alertdialog', { name: /要保存对/ });
+        await ask.waitFor({ timeout: 5_000 });
+        await ask.getByRole('button', { name: '不保存' }).click();
+      }
       await page.waitForFunction((n) => window.__magpdf.documents().length === n, left - 1);
     }
 

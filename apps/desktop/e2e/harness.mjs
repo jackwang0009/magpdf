@@ -102,6 +102,21 @@ export function resizeWindow(appPid, { width, height }) {
 }
 
 /**
+ * 请主进程的窗口关掉：给它发 WM_CLOSE，和点右上角的关闭按钮一样。不激活窗口，不动真实的鼠标键盘。
+ */
+export function requestWindowClose(appPid) {
+  const WM_CLOSE = 0x0010;
+  execFileSync('powershell.exe', [
+    '-NoProfile',
+    '-Command',
+    `$api = Add-Type -PassThru -Namespace MagpdfE2eClose -Name Window -MemberDefinition '[DllImport("user32.dll")] public static extern bool PostMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);';` +
+      ` $window = (Get-Process -Id ${appPid}).MainWindowHandle;` +
+      ` if ($window -eq [IntPtr]::Zero) { exit 2 };` +
+      ` if (-not $api::PostMessage($window, ${WM_CLOSE}, [IntPtr]::Zero, [IntPtr]::Zero)) { exit 3 }`,
+  ]);
+}
+
+/**
  * 起桌面程序，命令行打开 `files`（最后一份是活动文档）。数据目录和 WebView2 的用户目录放在一个新建的临时目录里，
  * 用完由 `cleanUp` 删掉；给了 `options.scratch` 就接着用那一个（同一份数据目录再起一次，崩溃恢复要用）。
  * 返回子进程、调试端口、临时目录和启动的时刻（`Date.now()`）。

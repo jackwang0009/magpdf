@@ -3,6 +3,7 @@ import { Icon } from '@magpdf/ui';
 import type { IDockviewPanelHeaderProps } from 'dockview-react';
 import { t } from '../i18n';
 import { useEditorStore } from '../store/editorStore';
+import { useShellCommands } from './shellContext';
 
 export interface DocumentTabParams {
   readonly documentId: string;
@@ -14,6 +15,7 @@ export interface DocumentTabParams {
  */
 export function DocumentTab(props: IDockviewPanelHeaderProps<DocumentTabParams>) {
   const documentId = props.params?.documentId;
+  const commands = useShellCommands();
   const doc = useEditorStore((s) => (documentId ? s.documents[documentId] : undefined));
   const [active, setActive] = useState(() => props.api.isActive);
   useEffect(() => {
@@ -39,7 +41,9 @@ export function DocumentTab(props: IDockviewPanelHeaderProps<DocumentTabParams>)
         aria-label={`${t.documents.closeTab} ${title}`}
         onClick={(event) => {
           event.stopPropagation();
-          props.api.close();
+          // 有没保存的修改要先问，所以交给外壳关，不直接关面板
+          if (documentId) commands.closeDocument(documentId);
+          else props.api.close();
         }}
       >
         <Icon name="close" size={11} />

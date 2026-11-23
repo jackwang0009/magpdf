@@ -32,6 +32,7 @@ export type CommandId =
   | 'file.saveAs'
   | 'file.print'
   | 'file.close'
+  | 'file.exit'
   | 'window.togglePanels'
   | 'window.toggleFrameStats'
   | 'window.benchmark'

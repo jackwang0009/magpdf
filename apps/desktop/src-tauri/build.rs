@@ -8,6 +8,8 @@ fn main() {
             "engine_request",
             "open_document_dialog",
             "save_document_as",
+            "acknowledge_close_request",
+            "confirm_exit",
             "open_documents",
             "recoverable_documents",
             "recover_documents",

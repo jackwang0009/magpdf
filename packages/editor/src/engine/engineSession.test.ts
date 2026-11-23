@@ -739,8 +739,7 @@ describe('EngineSession：保存', () => {
   it('等在途的修改有了结果再存；存完去掉“已修改”标记，状态栏写“已保存”', async () => {
     const { engine, editor, session, store, snapshot } = await attached();
     editor.transformObjects([{ page: 0, ids: ['p0-2'], matrix: translationMatrix(10, 0) }]);
-    const saving = session.saveDocument('engine-1', false);
-    await saving;
+    expect(await session.saveDocument('engine-1', false)).toBe(true);
     await flush();
     expect(engine.transport.sent(METHOD.DOC_SAVE)).toEqual([{ docId: 1 }]);
     // 存的时候那条修改已经做完了：存的是第 1 版
@@ -772,13 +771,13 @@ describe('EngineSession：保存', () => {
     );
     const context = await attached({ saveDocumentAs });
     const { session, snapshot, store, notices } = context;
-    await session.saveDocument('engine-1', true);
+    expect(await session.saveDocument('engine-1', true)).toBe(false);
     expect(saveDocumentAs).toHaveBeenCalledWith(1);
     expect(snapshot().name).toBe('提单.pdf');
     expect(store.getState().statusMessage).toBeNull();
 
     answer.path = 'C:\\docs\\提单-改.pdf';
-    await session.saveDocument('engine-1', true);
+    expect(await session.saveDocument('engine-1', true)).toBe(true);
     await flush();
     expect(snapshot()).toMatchObject({ name: '提单-改.pdf', dirty: false });
     expect(store.getState().statusMessage?.text).toBe(
@@ -795,7 +794,7 @@ describe('EngineSession：保存', () => {
       code: ERROR_CODE.E_WRITE_FAILED,
       message: '文件正被其他程序占用。请关闭该程序后重试，或另存为新文件',
     };
-    await session.saveDocument('engine-1', false);
+    expect(await session.saveDocument('engine-1', false)).toBe(false);
     expect(notices).toEqual([
       {
         kind: 'error',

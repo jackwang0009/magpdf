@@ -18,9 +18,14 @@ export interface EditorHost {
   documentEditor(documentId: string): DocumentEditor | undefined;
   /**
    * 保存（`saveAs` 为真时另存为，由主进程弹对话框）。等文档上在途的修改都有了结果再存。结果由宿主自己告诉
-   * 用户（成功写状态栏，失败弹提示），返回的 Promise 不会拒绝。不是宿主打开的文档什么也不做。
+   * 用户（成功写状态栏，失败弹提示），返回的 Promise 不会拒绝：存好了是 true，没存（出错、另存为时取消、
+   * 不是宿主打开的文档）是 false。
    */
-  saveDocument?(documentId: string, saveAs: boolean): Promise<void>;
+  saveDocument?(documentId: string, saveAs: boolean): Promise<boolean>;
+  /** 用户要关掉整个程序（点了窗口的关闭按钮、Alt+F4）。外壳问过要不要保存再调 {@link exit}。返回取消订阅的函数。 */
+  onExitRequest?(listener: () => void): () => void;
+  /** 关掉程序（外壳已经问过要不要保存）。 */
+  exit?(): void;
   /** 宿主有事要告诉用户（引擎重启了、文档没能恢复）。返回取消订阅的函数。 */
   onNotice(listener: (notice: HostNotice) => void): () => void;
   /** 崩溃恢复（方案 9.3、《交互设计》6.9）。宿主没有这一项时外壳不问。 */
