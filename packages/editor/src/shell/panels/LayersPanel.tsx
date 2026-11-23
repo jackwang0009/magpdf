@@ -29,11 +29,14 @@ interface DropTarget {
 
 /**
  * 图层面板：按页列出对象（顶层在上），点选与画布选区同步。按名字或种类筛选；拖动一行（或选中的几行）
- * 放到别的行的上面或下面，调整层级。只能叠加内容的页、筛选的时候不能拖。
+ * 放到别的行的上面或下面，调整层级。只能叠加内容的页、筛选的时候不能拖。每一行前面是“显示”“锁定”
+ * 两个开关，只在本次会话有效（方案 4.3）：隐藏的不画、锁定的照画，两种都点不中、不能拖。
  */
 export function LayersPanel() {
   const doc = useEditorStore(activeDocument);
   const setSelection = useEditorStore((s) => s.setSelection);
+  const setHidden = useEditorStore((s) => s.setHidden);
+  const setLocked = useEditorStore((s) => s.setLocked);
   const host = useEditorHost();
   const [filter, setFilter] = useState('');
   const [dragging, setDragging] = useState<readonly string[] | null>(null);
@@ -45,6 +48,8 @@ export function LayersPanel() {
     object.name.toLowerCase().includes(query) ||
     t.objectTypes[object.type].includes(query);
   const draggable = Boolean(page && !page.overlayOnly && !query);
+  const hidden = new Set(doc?.hidden ?? []);
+  const locked = new Set(doc?.locked ?? []);
 
   const finishDrag = () => {
     setDragging(null);
@@ -128,13 +133,48 @@ export function LayersPanel() {
                 const selected = doc.selection.includes(object.id);
                 const marker =
                   drop?.id === object.id ? (drop.above ? 'mg-drop-above' : 'mg-drop-below') : '';
+                const isHidden = hidden.has(object.id);
+                const isLocked = Boolean(object.locked) || locked.has(object.id);
+                const toggles = (
+                  <>
+                    <button
+                      type="button"
+                      className={`mg-layer-toggle${isHidden ? ' mg-off' : ''}`}
+                      aria-pressed={!isHidden}
+                      aria-label={`${isHidden ? t.layers.show : t.layers.hide} ${object.name}`}
+                      title={`${isHidden ? t.layers.show : t.layers.hide}（${t.layers.sessionOnly}）`}
+                      onClick={() => setHidden(doc.snapshot.id, [object.id], !isHidden)}
+                    >
+                      <Icon name="eye" size={12} />
+                    </button>
+                    <button
+                      type="button"
+                      className={`mg-layer-toggle${isLocked ? '' : ' mg-off'}`}
+                      aria-pressed={isLocked}
+                      aria-label={`${isLocked ? t.layers.unlock : t.layers.lockLayer} ${object.name}`}
+                      title={`${isLocked ? t.layers.unlock : t.layers.lockLayer}（${t.layers.sessionOnly}）`}
+                      // 文件里本来就锁着的（模拟文档的数据）这里解不开
+                      disabled={Boolean(object.locked)}
+                      onClick={() => setLocked(doc.snapshot.id, [object.id], !isLocked)}
+                    >
+                      <Icon name="lock" size={12} />
+                    </button>
+                  </>
+                );
                 return (
-                  <li key={object.id} className={marker} {...rowDropProps(object)}>
-                    {object.locked ? (
-                      <span className="mg-layer mg-layer-locked" title={t.layers.locked}>
+                  <li
+                    key={object.id}
+                    className={`mg-layer-row${marker ? ` ${marker}` : ''}`}
+                    {...rowDropProps(object)}
+                  >
+                    {toggles}
+                    {isLocked || isHidden ? (
+                      <span
+                        className={`mg-layer ${isHidden ? 'mg-layer-hidden' : 'mg-layer-locked'}`}
+                        title={isHidden ? t.layers.hidden : t.layers.locked}
+                      >
                         <Icon name={TYPE_ICON[object.type]} size={13} className="mg-muted" />
                         <span className="mg-layer-name">{object.name}</span>
-                        <Icon name="lock" size={12} className="mg-muted" />
                       </span>
                     ) : (
                       <button

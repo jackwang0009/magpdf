@@ -94,7 +94,7 @@ function fire(target: Element, type: string, clientY = 0) {
 function drag(view: HTMLElement, from: string, to: string, above: boolean) {
   const target = row(view, to);
   target.getBoundingClientRect = () => ({ top: 100, height: 20 }) as DOMRect;
-  const handle = row(view, from).querySelector('button')!;
+  const handle = row(view, from).querySelector('button.mg-layer')!;
   fire(handle, 'dragstart');
   const y = above ? 104 : 116;
   fire(target, 'dragover', y);
@@ -175,6 +175,29 @@ describe('图层面板：拖动改层级', () => {
     ]);
     // 界面上不先改，新顺序随对象列表回来
     expect(order()).toEqual(['a', 'b', 'c']);
+  });
+
+  it('隐藏、锁定的行变灰，点不了、拖不动；开关再点一下恢复；隐藏、锁定的从选区里去掉', () => {
+    act(() => editorStore.getState().setSelection('layers-doc', ['a', 'b']));
+    const view = render();
+    const toggle = (name: string, which: 0 | 1) =>
+      row(view, name).querySelectorAll<HTMLButtonElement>('.mg-layer-toggle')[which]!;
+    act(() => toggle('框 a', 0).click());
+    act(() => toggle('标题 b', 1).click());
+    const state = () => editorStore.getState().documents['layers-doc']!;
+    expect(state().hidden).toEqual(['a']);
+    expect(state().locked).toEqual(['b']);
+    expect(state().selection).toEqual([]);
+    expect(toggle('框 a', 0).getAttribute('aria-pressed')).toBe('false');
+    expect(row(view, '框 a').querySelector('button.mg-layer')).toBeNull();
+    expect(row(view, '标题 b').querySelector('.mg-layer-locked')).not.toBeNull();
+    expect(view.querySelectorAll('button[draggable="true"]')).toHaveLength(1);
+
+    act(() => toggle('框 a', 0).click());
+    act(() => toggle('标题 b', 1).click());
+    expect(state().hidden).toEqual([]);
+    expect(state().locked).toEqual([]);
+    expect(view.querySelectorAll('button[draggable="true"]')).toHaveLength(3);
   });
 
   it('只能叠加内容的页、筛选的时候不能拖', () => {

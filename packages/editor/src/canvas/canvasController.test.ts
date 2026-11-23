@@ -494,6 +494,7 @@ describe('拖动预览（方案 3.2）', () => {
     const drawn = (layer: string) => draws.filter((draw) => draw.texture?.layer === layer);
 
     return {
+      store,
       controller,
       provider,
       edits,
@@ -524,6 +525,68 @@ describe('拖动预览（方案 3.2）', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it('图层面板里隐藏的对象：整页瓦片带上 without，开关一下重新要；点不中；拖动预览的底图也不画它', async () => {
+    const context = mount();
+    const { store, controller, provider, frame, deliver, client, pointer } = context;
+    try {
+      frame();
+      expect(provider.pending('page').length).toBeGreaterThan(0);
+      expect(provider.pending('without')).toEqual([]);
+      await deliver('page');
+
+      store.getState().setHidden('doc', ['p0-2'], true);
+      frame();
+      const hiddenTiles = provider.pending('without');
+      expect(hiddenTiles.length).toBeGreaterThan(0);
+      for (const entry of hiddenTiles) expect(entry.request.layer?.objects).toEqual(['p0-2']);
+      await deliver('without');
+
+      // 隐藏的对象点不中
+      pointer('pointerdown', client(320, 420));
+      pointer('pointerup', client(320, 420));
+      expect(store.getState().documents.doc!.selection).toEqual([]);
+
+      // 拖另一个对象：底图把被拖的和隐藏的都去掉
+      const from = client(140, 130);
+      pointer('pointerdown', from);
+      pointer('pointermove', { x: from.x + 40, y: from.y + 30 });
+      frame();
+      const base = provider.pending('without');
+      expect(base.length).toBeGreaterThan(0);
+      for (const entry of base) expect(entry.request.layer?.objects).toEqual(['p0-1', 'p0-2']);
+      pointer('pointerup', { x: from.x + 40, y: from.y + 30 });
+
+      // 再显示出来：重新要不带 layer 的整页瓦片
+      store.getState().setHidden('doc', ['p0-2'], false);
+      frame();
+      expect(provider.pending('page').length).toBeGreaterThan(0);
+    } finally {
+      controller.dispose();
+    }
+  });
+
+  it('锁定、隐藏的对象：点不中，全选也跳过；画面照常（锁定的不去掉）', async () => {
+    const context = mount();
+    const { store, controller, provider, frame, deliver, client, pointer } = context;
+    try {
+      frame();
+      await deliver('page');
+      store.getState().setLocked('doc', ['p0-1'], true);
+      frame();
+      expect(provider.pending('without')).toEqual([]);
+      pointer('pointerdown', client(140, 130));
+      pointer('pointerup', client(140, 130));
+      expect(store.getState().documents.doc!.selection).toEqual([]);
+      controller.runCommand('edit.selectAll');
+      expect(store.getState().documents.doc!.selection).toEqual(['p0-2']);
+      store.getState().setHidden('doc', ['p0-2'], true);
+      controller.runCommand('edit.selectAll');
+      expect(store.getState().documents.doc!.selection).toEqual([]);
+    } finally {
+      controller.dispose();
+    }
   });
 
   it('拖动一开始要两层瓦片；到齐之前照旧，到齐之后底图盖在上面、对象层跟着鼠标走', async () => {

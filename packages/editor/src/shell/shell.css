@@ -668,6 +668,44 @@
   background: var(--mg-accent);
   color: var(--mg-handle-fill);
 }
+/* 一行：显示、锁定两个开关，后面是对象 */
+.mg-layer-row {
+  display: flex;
+  align-items: center;
+}
+.mg-layer-row .mg-layer {
+  flex: 1;
+  min-width: 0;
+}
+.mg-layer-toggle {
+  flex: none;
+  width: 18px;
+  height: var(--mg-row-height);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--mg-text-muted);
+}
+.mg-layer-toggle:not(:disabled):hover {
+  color: var(--mg-text);
+}
+.mg-layer-toggle.mg-off {
+  opacity: 0.3;
+}
+.mg-layer-locked:hover,
+.mg-layer-hidden:hover {
+  background: transparent;
+}
+.mg-layer-locked,
+.mg-layer-hidden {
+  color: var(--mg-text-muted);
+}
+.mg-layer-hidden .mg-layer-name {
+  font-style: italic;
+}
 .mg-layer-name {
   flex: 1;
   overflow: hidden;

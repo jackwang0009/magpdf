@@ -250,6 +250,14 @@ export const zhCN = {
   layers: {
     filterPlaceholder: '筛选图层',
     noMatch: '这一页没有对得上的对象',
+    /** 图层面板每一行前面的两个开关 */
+    hide: '隐藏',
+    show: '显示',
+    lockLayer: '锁定',
+    unlock: '解锁',
+    hidden: '已隐藏',
+    /** 原型的限制，悬停在开关上时看到 */
+    sessionOnly: '只在这次打开时有效，不存进文件',
     pageRow: '第 {n} 页',
     filterText: '文字',
     filterPath: '路径',

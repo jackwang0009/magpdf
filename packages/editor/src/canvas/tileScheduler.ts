@@ -2,7 +2,7 @@ import type { Rect } from '../geometry';
 import type { TileRequestSpec } from './renderPlan';
 import type { TileCache, TileEntry } from './tileCache';
 import { isAbortError, releasePixels } from './tileProvider';
-import type { TileProvider, TileRequest } from './tileProvider';
+import type { TileLayer, TileProvider, TileRequest } from './tileProvider';
 import { TILE_SIZE, tileBytes, tileTouches } from './tiles';
 
 /**
@@ -16,6 +16,11 @@ import { TILE_SIZE, tileBytes, tileTouches } from './tiles';
 export interface TileSchedulerOptions {
   /** 同时在途的请求数；未提供时用 provider.concurrency，再没有则 3 */
   readonly concurrency?: number;
+  /**
+   * 这一页的瓦片要不要去掉一些对象（图层面板里隐藏的）：有就随请求带上 `layer`。这一页要去掉的对象变了，
+   * 调用方要 `invalidatePage`。
+   */
+  readonly layerFor?: (page: number) => TileLayer | undefined;
 }
 
 interface Pending {
@@ -29,6 +34,7 @@ export class TileScheduler {
   private version = 0;
   private disposed = false;
   private readonly concurrency: number;
+  private readonly layerFor: ((page: number) => TileLayer | undefined) | undefined;
   /** 统计：完成、取消、失败的请求数。每个请求只落在其中一项里。 */
   readonly stats = { completed: 0, aborted: 0, failed: 0 };
 
@@ -39,6 +45,7 @@ export class TileScheduler {
     options: TileSchedulerOptions = {},
   ) {
     this.concurrency = Math.max(1, options.concurrency ?? provider.concurrency ?? 3);
+    this.layerFor = options.layerFor;
   }
 
   get inFlight(): number {
@@ -135,7 +142,9 @@ export class TileScheduler {
   private start(spec: TileRequestSpec): void {
     const controller = new AbortController();
     const version = this.version;
+    const layer = this.layerFor?.(spec.key.page);
     const request: TileRequest = {
+      ...(layer ? { layer } : {}),
       page: spec.key.page,
       level: spec.key.level,
       pxPerPt: spec.pxPerPt,

@@ -1014,6 +1014,8 @@ export class EngineSession implements EditorHost {
         // 新引擎的撤销栈是空的：旧的几步撤销不了了
         document.history = 'idle';
         this.store.getState().setHistory(document.id, [t.history.opened], 0);
+        // 对象编号也是新的：隐藏、锁定的记录会对到别的对象上，清掉
+        this.store.getState().clearHiddenAndLocked(document.id);
         const currentPage = this.store.getState().documents[document.id]?.currentPage ?? 0;
         this.ensureAround(document, currentPage);
       } catch (error) {

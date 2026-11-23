@@ -35,6 +35,13 @@ export interface DocumentState {
    * （模拟文档不记撤销）。
    */
   readonly historyAt?: number;
+  /**
+   * 图层面板里隐藏的对象（方案 4.3、《接口协议》6.5 `view.setHidden`）：只在本次会话有效，不改文档，
+   * 存盘照样存。画面上不画，点选、框选、全选都跳过。
+   */
+  readonly hidden?: readonly string[];
+  /** 图层面板里锁定的对象：只在本次会话有效。画面照常，点选、框选、全选都跳过。 */
+  readonly locked?: readonly string[];
 }
 
 export type ComponentView = 'grid' | 'list';
@@ -88,6 +95,12 @@ export interface EditorState {
   updateComponent(id: string, objectId: string, values: Partial<ComponentValues>): void;
   /** 模拟文档：改文字对象（外观是一段文字的）的文字。 */
   setText(id: string, objectId: string, text: string): void;
+  /** 隐藏（`hidden` 为真）或显示这些对象。隐藏的从选区里去掉。 */
+  setHidden(id: string, objectIds: readonly string[], hidden: boolean): void;
+  /** 锁定或解锁这些对象。锁定的从选区里去掉。 */
+  setLocked(id: string, objectIds: readonly string[], locked: boolean): void;
+  /** 清掉隐藏、锁定的记录（引擎重启之后对象编号换了，旧的编号会对到别的对象上）。 */
+  clearHiddenAndLocked(id: string): void;
   /** 模拟文档：调整层级，每页各排各的。 */
   reorderObjects(id: string, objectIds: readonly string[], op: ZOrderTarget): void;
   /** 模拟文档：改填充色（`#rrggbb`）。方块改填充，文字和文字条改颜色。 */
@@ -305,6 +318,22 @@ export function createEditorStore(): EditorStore {
         });
       },
 
+      setHidden(id, objectIds, hidden) {
+        updateDocument(id, (doc) => toggleIn(doc, 'hidden', objectIds, hidden));
+      },
+
+      setLocked(id, objectIds, locked) {
+        updateDocument(id, (doc) => toggleIn(doc, 'locked', objectIds, locked));
+      },
+
+      clearHiddenAndLocked(id) {
+        updateDocument(id, (doc) => {
+          if (!doc.hidden?.length && !doc.locked?.length) return doc;
+          const { hidden: _hidden, locked: _locked, ...rest } = doc;
+          return rest;
+        });
+      },
+
       reorderObjects(id, objectIds, op) {
         const selected = new Set(objectIds);
         updateDocument(id, (doc) => {
@@ -429,6 +458,22 @@ export function createEditorStore(): EditorStore {
       },
     };
   });
+}
+
+/** 把对象加进（`on` 为真）或拿出隐藏、锁定的记录；加进去的同时从选区里去掉。没变时返回原来的。 */
+function toggleIn(
+  doc: DocumentState,
+  key: 'hidden' | 'locked',
+  ids: readonly string[],
+  on: boolean,
+): DocumentState {
+  const current = doc[key] ?? [];
+  const next = on
+    ? [...current, ...ids.filter((id) => !current.includes(id))]
+    : current.filter((id) => !ids.includes(id));
+  if (sameIds(current, next)) return doc;
+  const selection = on ? doc.selection.filter((id) => !ids.includes(id)) : doc.selection;
+  return { ...doc, [key]: next, selection };
 }
 
 function sameIds(a: readonly string[], b: readonly string[]): boolean {

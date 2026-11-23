@@ -923,10 +923,12 @@ describe('EngineSession：历史记录（方案 4.2）', () => {
     expect(history(store).at).toBe(2);
   });
 
-  it('引擎重启后历史记录只剩打开时：新引擎的撤销栈是空的', async () => {
+  it('引擎重启后历史记录只剩打开时：新引擎的撤销栈是空的；隐藏、锁定的记录也清掉（编号换了）', async () => {
     const { engine, editor, store } = await attached();
     editor.deleteObjects(['p0-3']);
     await flush();
+    store.getState().setHidden('engine-1', ['p0-2'], true);
+    store.getState().setLocked('engine-1', ['p0-1'], true);
     engine.transport.emit(EVENT.ENGINE_RESTARTING, {});
     const restored = engine.restart([{ name: '提单.pdf', pages: fourPages() }]);
     engine.transport.emit(EVENT.ENGINE_RESTORED, {
@@ -935,6 +937,8 @@ describe('EngineSession：历史记录（方案 4.2）', () => {
     });
     await flush();
     expect(history(store)).toEqual({ entries: [t.history.opened], at: 0 });
+    const doc = store.getState().documents['engine-1']!;
+    expect([doc.hidden, doc.locked]).toEqual([undefined, undefined]);
   });
 });
 

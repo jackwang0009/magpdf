@@ -1,6 +1,6 @@
 /**
  * 调整层级：点选红方块，Ctrl+Shift+] 置于顶层，“对象 > 置底”放到最下面，图层面板跟着变；撤销两步回到原样；
- * 在图层面板里把它那一行拖到最上面；按名字筛选图层。
+ * 在图层面板里把它那一行拖到最上面；按名字筛选图层；隐藏、锁定它。
  * 新放的条码在 PDFium 追加的另一段内容流里，挪到原有对象下面写不下来：提示原因，文档不变。
  *
  * 用 color-devicergb.pdf（原有内容在一段内容流里）。
@@ -82,6 +82,23 @@ function firstSquare(page) {
   });
 }
 
+/** 截图里这一小块的平均颜色（0–255）。PNG 交给页面自己解码，不另装依赖。 */
+async function averageColor(page, clip) {
+  const png = await page.screenshot({ clip });
+  return page.evaluate(async (base64) => {
+    const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+    const bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    const context = canvas.getContext('2d');
+    context.drawImage(bitmap, 0, 0);
+    const { data } = context.getImageData(0, 0, bitmap.width, bitmap.height);
+    const sum = [0, 0, 0];
+    for (let i = 0; i < data.length; i += 4) for (let c = 0; c < 3; c++) sum[c] += data[i + c];
+    const n = data.length / 4;
+    return sum.map((s) => Math.round(s / n));
+  }, png.toString('base64'));
+}
+
 async function menuItem(page, menu, label) {
   await page.locator('.mg-menu', { hasText: menu }).click();
   await page.locator('.mg-menu-item', { hasText: label }).click();
@@ -138,7 +155,7 @@ try {
       .filter({ has: page.locator('.mg-layer-name', { hasText: name }) });
   const topName = await page.locator('.mg-layer-name').first().textContent();
   await layerRow(square.name)
-    .locator('button')
+    .locator('button.mg-layer')
     .dragTo(layerRow(topName), { targetPosition: { x: 20, y: 3 } });
   await editSettled(page, 5, '图层面板里拖动');
   await waitFor('拖到了最上面', async () => (await order(page)).at(-1) === square.id, 5_000);
@@ -152,7 +169,40 @@ try {
   );
   await search.fill('');
 
-  // 5. 新放的条码在另一段内容流里：挪到最下面写不下来，提示原因，文档不变
+  // 5. 显示、锁定（只在本次会话有效，文档版本号不变）：隐藏之后那一块画的是白底、点不中；锁定之后照画、
+  //    点不中、全选不选它
+  const toggles = layerRow(square.name).locator('.mg-layer-toggle');
+  const at2 = await onPage(page, square.x, square.y);
+  const clip = { x: at2.x - 4, y: at2.y - 4, width: 8, height: 8 };
+  const shown = await averageColor(page, clip);
+  await toggles.nth(0).click();
+  await sleep(100);
+  await tilesSettled(page, 1);
+  await parkMouse(page);
+  const hiddenColor = await averageColor(page, clip);
+  assert.ok(
+    hiddenColor.every((c) => c > 240),
+    `隐藏之后是白底：${hiddenColor}（原来 ${shown}）`,
+  );
+  await page.mouse.click(at2.x, at2.y);
+  assert.ok(!(await documentState(page)).selection.includes(square.id), '隐藏的点不中');
+  await page.screenshot({ path: join(shots, 'layers-hidden.png') });
+  await toggles.nth(0).click();
+  await sleep(100);
+  await tilesSettled(page, 1);
+  await parkMouse(page);
+  assert.deepEqual(await averageColor(page, clip), shown, '显示回来，颜色和原来一样');
+
+  await toggles.nth(1).click();
+  await page.mouse.click(at2.x, at2.y);
+  assert.ok(!(await documentState(page)).selection.includes(square.id), '锁定的点不中');
+  await page.keyboard.press('Control+a');
+  const all = (await documentState(page)).selection;
+  assert.ok(all.length > 0 && !all.includes(square.id), `全选跳过锁定的：${all}`);
+  await toggles.nth(1).click();
+  assert.equal((await documentState(page)).version, 5, '隐藏、锁定不改文档');
+
+  // 6. 新放的条码在另一段内容流里：挪到最下面写不下来，提示原因，文档不变
   await page.locator('.mg-comp-item:not([disabled])', { hasText: 'Code 128' }).first().click();
   // 页面只有 300×200 pt 左右，放在右下角的空处（点在页面外面不算放置）
   const spot = await onPage(page, 230, 150);

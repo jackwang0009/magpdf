@@ -37,6 +37,8 @@ export interface DragLayersOptions {
   readonly level: number;
   /** 被拖的对象 */
   readonly objects: readonly string[];
+  /** 这一页上隐藏的对象（图层面板）：底图里也不画 */
+  readonly hidden?: readonly string[];
   readonly documentVersion: number;
   /** 把像素变成能画的东西（纹理）。画不了时返回 null */
   readonly upload: (pixels: TilePixels, width: number, height: number) => unknown;
@@ -145,7 +147,11 @@ export class DragLayers {
         pixelRect: spec.pixelRect,
         pageRect: spec.pageRect,
         documentVersion: this.options.documentVersion,
-        layer: { mode, objects: this.objects },
+        layer: {
+          mode,
+          objects:
+            mode === 'without' ? [...this.objects, ...(this.options.hidden ?? [])] : this.objects,
+        },
         signal: this.abort.signal,
       };
       this.options.provider.renderTile(request).then(

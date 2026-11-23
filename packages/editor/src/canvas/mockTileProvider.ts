@@ -80,8 +80,10 @@ export function drawTile(
   ctx.setTransform(pxPerPt, 0, 0, pxPerPt, -pixelRect.x, -pixelRect.y);
   // 旋转的文字章会略微超出包围盒，判断相交时把瓦片范围放大一点
   const probe = inflateRect(request.pageRect, 12);
+  // 模拟来源只认“去掉这些对象”（图层面板里隐藏的），不做拖动预览的对象层（`layers` 没开）
+  const skipped = request.layer?.mode === 'without' ? new Set(request.layer.objects) : null;
   for (const object of page.objects) {
-    if (!rectsIntersect(object.bbox, probe)) continue;
+    if (skipped?.has(object.id) || !rectsIntersect(object.bbox, probe)) continue;
     drawObject(ctx, object, pxPerPt);
   }
   // 页面边缘 1 个设备像素的描边，便于看清页边

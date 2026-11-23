@@ -56,7 +56,7 @@ import { computeRenderPlan } from './renderPlan';
 import type { RenderPlan, TileRequestSpec } from './renderPlan';
 import { TileCache } from './tileCache';
 import type { TileEntry } from './tileCache';
-import type { TileProvider } from './tileProvider';
+import type { TileLayer, TileProvider } from './tileProvider';
 import { releasePixels } from './tileProvider';
 import { TileScheduler } from './tileScheduler';
 import { levelPxPerPt } from './tiles';
@@ -147,6 +147,13 @@ export class CanvasController {
   private cursor = '';
   /** 上一次从 store 同步过来的选区，用来判断是否要丢掉工具内部的选区覆盖值 */
   private knownSelection: readonly string[] | null = null;
+  /** `toolPages` 的缓存 */
+  private toolPagesCache: {
+    readonly snapshot: DocumentSnapshot;
+    readonly hidden: readonly string[] | undefined;
+    readonly locked: readonly string[] | undefined;
+    readonly pages: readonly PageSnapshot[];
+  } | null = null;
   private pendingVisibleTiles = 0;
   /** 已经打过“首屏画齐”的性能标记的文档 */
   private readonly firstScreens = new Set<string>();
@@ -210,8 +217,13 @@ export class CanvasController {
       });
       this.ownsProvider = true;
     }
-    this.scheduler = new TileScheduler(this.provider, this.cache, (entry) =>
-      this.onTileReady(entry),
+    this.scheduler = new TileScheduler(
+      this.provider,
+      this.cache,
+      (entry) => this.onTileReady(entry),
+      {
+        layerFor: (page) => this.hiddenLayer(page),
+      },
     );
 
     this.unsubscribe = this.store.subscribe((state, previous) =>
@@ -509,6 +521,14 @@ export class CanvasController {
     if (!doc) return;
     if (doc.snapshot !== this.snapshot) {
       this.onSnapshotChange(doc.snapshot);
+    }
+    if (prevDoc && doc.hidden !== prevDoc.hidden) {
+      // 图层面板里隐藏、显示了对象：这几页的瓦片要按新的“去掉哪些对象”重画
+      for (let i = 0; i < doc.snapshot.pages.length; i++) {
+        const before = hiddenOnPage(prevDoc.hidden, doc.snapshot.pages[i]!);
+        const after = hiddenOnPage(doc.hidden, doc.snapshot.pages[i]!);
+        if (!sameIds(before, after)) this.scheduler.invalidatePage(i);
+      }
     }
     if (state.showRulers !== previous.showRulers) {
       this.layoutGlCanvas();
@@ -1048,6 +1068,7 @@ export class CanvasController {
       page,
       level,
       objects: ids,
+      hidden: this.hiddenLayer(page)?.objects ?? [],
       documentVersion: doc.snapshot.version,
       upload: (pixels, width, height) => renderer.uploadTexture(pixels, width, height),
       release: (texture) => renderer.deleteTexture(texture),
@@ -1183,6 +1204,50 @@ export class CanvasController {
 
   // ---------- 工具上下文与副作用 ----------
 
+  /** 这一页的瓦片要去掉的对象（图层面板里隐藏的）；没有时为 undefined。 */
+  private hiddenLayer(page: number): TileLayer | undefined {
+    const doc = this.document;
+    const snapshot = doc?.snapshot.pages[page];
+    const objects = snapshot ? hiddenOnPage(doc.hidden, snapshot) : [];
+    return objects.length > 0 ? { mode: 'without', objects } : undefined;
+  }
+
+  /**
+   * 交给工具的页面：隐藏的对象拿掉，锁定的标上 `locked`，点选、框选、全选就都跳过它们。
+   * 按快照和两份记录缓存，指针每动一下都要用。
+   */
+  private toolPages(): readonly PageSnapshot[] {
+    const doc = this.document;
+    if (!doc) return [];
+    const { snapshot, hidden, locked } = doc;
+    const cached = this.toolPagesCache;
+    if (
+      cached &&
+      cached.snapshot === snapshot &&
+      cached.hidden === hidden &&
+      cached.locked === locked
+    ) {
+      return cached.pages;
+    }
+    const hiddenIds = new Set(hidden ?? []);
+    const lockedIds = new Set(locked ?? []);
+    const pages =
+      hiddenIds.size === 0 && lockedIds.size === 0
+        ? snapshot.pages
+        : snapshot.pages.map((page) =>
+            page.objects.some((o) => hiddenIds.has(o.id) || lockedIds.has(o.id))
+              ? {
+                  ...page,
+                  objects: page.objects
+                    .filter((o) => !hiddenIds.has(o.id))
+                    .map((o) => (lockedIds.has(o.id) ? { ...o, locked: true } : o)),
+                }
+              : page,
+          );
+    this.toolPagesCache = { snapshot, hidden, locked, pages };
+    return pages;
+  }
+
   private toolContext(): ToolContext {
     const doc = this.document;
     const view = this.view;
@@ -1190,7 +1255,7 @@ export class CanvasController {
       view,
       viewport: this.viewport,
       layout: this.layout,
-      pages: doc?.snapshot.pages ?? [],
+      pages: this.toolPages(),
       hitTester: linearHitTester,
       selection: doc?.selection ?? [],
       objectById: (id) => this.objectById(id),
@@ -1248,7 +1313,7 @@ export class CanvasController {
     const point = screenToDoc(this.view, screen);
     const hit = this.layout.pageAtPoint(point);
     if (!hit) return null;
-    const page = doc.snapshot.pages[hit.index];
+    const page = this.toolPages()[hit.index];
     if (!page) return null;
     return linearHitTester.hitPoint(page, hit.local, 3 / cssPxPerPt(this.view.zoom))?.id ?? null;
   }
@@ -1352,6 +1417,13 @@ function pagesResized(a: DocumentSnapshot, b: DocumentSnapshot): boolean {
     if (pa.width !== pb.width || pa.height !== pb.height) return true;
   }
   return false;
+}
+
+/** 一页上隐藏的对象，按层级从下到上。 */
+function hiddenOnPage(hidden: readonly string[] | undefined, page: PageSnapshot): string[] {
+  if (!hidden || hidden.length === 0) return [];
+  const set = new Set(hidden);
+  return page.objects.filter((object) => set.has(object.id)).map((object) => object.id);
 }
 
 /** 两组对象 id 是不是同一组（顺序也一样）。 */
