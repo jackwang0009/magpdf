@@ -3,12 +3,15 @@ import { useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { checkComponent, componentName, sizeLabel } from '../../document/components';
 import type { ComponentProblem, ComponentValues } from '../../document/components';
+import { rectToRectMatrix } from '../../document/pageSpace';
 import type { PageObject } from '../../document/types';
 import { ptToMm } from '../../geometry';
+import type { Rect } from '../../geometry';
 import { t } from '../../i18n';
 import { activeDocument, editorStore, useEditorStore } from '../../store/editorStore';
 import { overlayOnlyDetail } from '../DocumentBanner';
 import { useEditorHost } from '../editorHost';
+import { MmField } from '../MmField';
 import { PanelFrame } from './PanelFrame';
 
 /** 属性面板：单个对象显示变换与组件参数；多选显示数量；空选显示提示。 */
@@ -55,6 +58,22 @@ export function PropertiesPanel() {
     if (editor) editor.updateComponent(object.id, values);
     else editorStore.getState().updateComponent(documentId, object.id, values);
   };
+  // 只能叠加内容的页上原有的对象不能动；组件的大小由参数（条高、字号）决定，拉伸会把条码、字形拉变形
+  const frozenHere = Boolean(entry.page.overlayOnly && !object.added);
+  const fixedSize = object.type === 'component';
+  /** 把对象的外框改成 `next`（页面坐标，pt）：交给修改入口的是把原外框映到新外框的变换，撤销照常。 */
+  const transformTo = (next: Rect) => {
+    const editor = host?.documentEditor(documentId);
+    if (editor) {
+      editor.transformObjects([
+        { page: entry.page.index, ids: [object.id], matrix: rectToRectMatrix(b, next) },
+      ]);
+    } else if (next.width === b.width && next.height === b.height) {
+      editorStore.getState().moveObjects(documentId, [object.id], next.x - b.x, next.y - b.y);
+    } else {
+      editorStore.getState().resizeObjects(documentId, new Map([[object.id, next]]));
+    }
+  };
   return (
     <PanelFrame>
       {readOnly}
@@ -70,22 +89,51 @@ export function PropertiesPanel() {
       <SectionHeader title={t.properties.transform} />
       <div className="mg-props-grid">
         <label>{t.options.x}</label>
-        <Field value={ptToMm(b.x).toFixed(2)} unit="mm" />
+        <MmField
+          key={`x${b.x}`}
+          label={t.options.x}
+          value={b.x}
+          disabled={frozenHere}
+          onCommit={(x) => transformTo({ ...b, x })}
+        />
         <label>{t.options.y}</label>
-        <Field value={ptToMm(b.y).toFixed(2)} unit="mm" />
+        <MmField
+          key={`y${b.y}`}
+          label={t.options.y}
+          value={b.y}
+          disabled={frozenHere}
+          onCommit={(y) => transformTo({ ...b, y })}
+        />
         <label>{t.options.w}</label>
-        <Field value={ptToMm(b.width).toFixed(2)} unit="mm" />
+        <MmField
+          key={`w${b.width}`}
+          label={t.options.w}
+          value={b.width}
+          positive
+          disabled={frozenHere || fixedSize}
+          onCommit={(width) => transformTo({ ...b, width })}
+        />
         <label>{t.options.h}</label>
-        <Field value={ptToMm(b.height).toFixed(2)} unit="mm" />
+        <MmField
+          key={`h${b.height}`}
+          label={t.options.h}
+          value={b.height}
+          positive
+          disabled={frozenHere || fixedSize}
+          onCommit={(height) => transformTo({ ...b, height })}
+        />
         <label>{t.properties.rotation}</label>
         <Field value="0°" />
       </div>
+      {fixedSize && !frozenHere ? (
+        <p className="mg-props-hint">{t.properties.componentSizeHint}</p>
+      ) : null}
       {object.component ? (
         <ComponentFields
           // 参数变了（引擎重新生成之后、撤销之后）输入框跟着换成新的值
           key={`${object.id}|${object.component.values.content}|${object.component.values.size}`}
           component={object.component}
-          readOnly={Boolean(entry.page.overlayOnly && !object.added)}
+          readOnly={frozenHere}
           apply={applyComponent}
         />
       ) : null}

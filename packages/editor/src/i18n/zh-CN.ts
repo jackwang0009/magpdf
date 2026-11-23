@@ -220,6 +220,7 @@ export const zhCN = {
     barcodeNote: '模块宽度 1 pt（0.35 mm），不带可读文字',
     /** 输入框旁的提示 */
     applyHint: '回车或离开输入框后生效',
+    componentSizeHint: '组件的大小由参数决定（条高、字号），不能直接拉伸',
     quietZone: '静区',
     quietZoneAuto: '自动（10 倍模块宽度）',
     showReadableText: '显示可读文字',

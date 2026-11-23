@@ -98,6 +98,18 @@ try {
   await editSettled(page, 2, '改条码内容');
   assert.equal(await dirty(page), true, '改过之后标成已修改');
 
+  // 属性面板里把 X 改成 40 mm：引擎按变换挪过去
+  const x = page.locator('input[aria-label="X"]');
+  await x.fill('40');
+  await x.press('Enter');
+  await editSettled(page, 3, '改 X');
+  const left = await page.evaluate(() => {
+    const state = window.__magpdf.store.getState();
+    const doc = state.documents[state.activeDocumentId];
+    return doc.snapshot.pages[0].objects.find((o) => o.id === doc.selection[0]).bbox.x;
+  });
+  assert.ok(Math.abs(left - (40 * 72) / 25.4) < 0.5, `X 改成了 40 mm：${left} pt`);
+
   // Ctrl+S：先让输入框交出焦点（点一下画布的标尺交汇处，那里没有对象）
   const corner = await page.evaluate(() => {
     const rect = window.__magpdf.controller().container.getBoundingClientRect();
@@ -116,7 +128,7 @@ try {
   );
   assert.equal(message, '已保存“提单.pdf”');
   assert.equal(await dirty(page), false, '存完去掉已修改标记');
-  assert.equal((await documentState(page)).version, 2, '保存不改文档版本');
+  assert.equal((await documentState(page)).version, 3, '保存不改文档版本');
 
   const saved = readFileSync(pdf);
   assert.notEqual(saved.length, originalSize, '文件存回去了');

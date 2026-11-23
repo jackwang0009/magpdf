@@ -3,6 +3,7 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { mmToPt } from '../../geometry';
 import { t } from '../../i18n';
 import { editorStore } from '../../store/editorStore';
 import { PropertiesPanel } from './PropertiesPanel';
@@ -57,6 +58,90 @@ function type(input: HTMLInputElement, value: string) {
 function placed() {
   return editorStore.getState().documents['props-doc']!.snapshot.pages[0]!.objects[0]!;
 }
+
+describe('属性面板：位置和大小', () => {
+  function addRect() {
+    act(() => {
+      const state = editorStore.getState();
+      const snapshot = state.documents['props-doc']!.snapshot;
+      state.updateSnapshot('props-doc', {
+        ...snapshot,
+        pages: [
+          {
+            ...snapshot.pages[0]!,
+            objects: [
+              {
+                id: 'r1',
+                type: 'path',
+                name: '框',
+                bbox: { x: 72, y: 72, width: 144, height: 72 },
+              },
+            ],
+          },
+        ],
+      });
+      state.setSelection('props-doc', ['r1']);
+    });
+  }
+  const field = (view: HTMLElement, label: string) =>
+    view.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!;
+  const bbox = () =>
+    editorStore.getState().documents['props-doc']!.snapshot.pages[0]!.objects[0]!.bbox;
+
+  it('X、Y、宽、高按 mm 显示；改了回车生效，写错了恢复原值', () => {
+    addRect();
+    const view = render();
+    expect(field(view, t.options.x).value).toBe('25.40');
+    expect(field(view, t.options.w).value).toBe('50.80');
+
+    type(field(view, t.options.x), '50');
+    act(() =>
+      field(view, t.options.x).dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      ),
+    );
+    expect(bbox().x).toBeCloseTo(mmToPt(50), 6);
+    expect(field(view, t.options.x).value).toBe('50.00');
+
+    type(field(view, t.options.w), '25.4');
+    act(() =>
+      field(view, t.options.w).dispatchEvent(new FocusEvent('focusout', { bubbles: true })),
+    );
+    expect(bbox().width).toBeCloseTo(72, 6);
+    expect(bbox().x).toBeCloseTo(mmToPt(50), 6);
+
+    type(field(view, t.options.h), '-3');
+    act(() =>
+      field(view, t.options.h).dispatchEvent(new FocusEvent('focusout', { bubbles: true })),
+    );
+    expect(bbox().height).toBe(72);
+    expect(field(view, t.options.h).value).toBe('25.40');
+  });
+
+  it('组件的宽、高不能直接改；只能叠加内容的页上原有的对象什么都不能改', () => {
+    act(() => editorStore.getState().placeComponent('props-doc', 0, 'code128', { x: 30, y: 40 }));
+    let view = render();
+    expect(field(view, t.options.x).disabled).toBe(false);
+    expect(field(view, t.options.w).disabled).toBe(true);
+    expect(view.textContent).toContain(t.properties.componentSizeHint);
+    act(() => root?.unmount());
+    container?.remove();
+
+    addRect();
+    act(() => {
+      const state = editorStore.getState();
+      const snapshot = state.documents['props-doc']!.snapshot;
+      state.updateSnapshot('props-doc', {
+        ...snapshot,
+        pages: [{ ...snapshot.pages[0]!, overlayOnly: { reason: '测试' } }],
+      });
+    });
+    view = render();
+    for (const label of [t.options.x, t.options.y, t.options.w, t.options.h]) {
+      expect(field(view, label).disabled).toBe(true);
+    }
+  });
+});
 
 describe('属性面板：组件参数', () => {
   it('选中置入的条码：显示内容和条高；不合法的不改，标出原因；合法的回车生效', () => {
