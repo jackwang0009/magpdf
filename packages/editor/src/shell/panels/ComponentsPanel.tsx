@@ -1,6 +1,8 @@
 import { Icon, IconButton } from '@magpdf/ui';
 import type { IconName } from '@magpdf/ui';
-import { t } from '../../i18n';
+import { COMPONENT_DRAG_TYPE, isPlaceable } from '../../document/components';
+import type { PlaceableComponent } from '../../document/components';
+import { format, t } from '../../i18n';
 import { useEditorStore } from '../../store/editorStore';
 import { useShellCommands } from '../shellContext';
 import { PanelFrame, PanelMenuButton, PanelSearch } from './PanelFrame';
@@ -114,18 +116,59 @@ export function ComponentsPanel() {
           <ul className={`mg-comp-list mg-comp-${view}`}>
             {category.items.map((item, index) => (
               <li key={`${item.id}-${index}`}>
-                <button type="button" className="mg-comp-item" title={t.components.items[item.id]}>
-                  <span className="mg-comp-preview">
-                    <Icon name={item.icon} size={20} />
-                  </span>
-                  <span className="mg-comp-name">{t.components.items[item.id]}</span>
-                </button>
+                <ComponentButton item={item} />
               </li>
             ))}
           </ul>
         </section>
       ))}
     </PanelFrame>
+  );
+}
+
+/**
+ * 一个组件。能用的（文本、Code 128）点一下进入放置状态，再点页面放下去；也可以直接拖到页面上。
+ * 别的组件 P1 才有，按钮是灰的。
+ */
+function ComponentButton({ item }: { readonly item: ComponentItem }) {
+  const placing = useEditorStore((s) => s.placing);
+  const setPlacing = useEditorStore((s) => s.setPlacing);
+  const name = t.components.items[item.id];
+  const kind: PlaceableComponent | null = isPlaceable(item.id) ? item.id : null;
+  if (!kind) {
+    return (
+      <button
+        type="button"
+        className="mg-comp-item"
+        disabled
+        title={format(t.components.notYet, { name })}
+      >
+        <span className="mg-comp-preview">
+          <Icon name={item.icon} size={20} />
+        </span>
+        <span className="mg-comp-name">{name}</span>
+      </button>
+    );
+  }
+  const active = placing === kind;
+  return (
+    <button
+      type="button"
+      className={`mg-comp-item${active ? ' mg-on' : ''}`}
+      title={format(t.components.placeHint, { name })}
+      aria-pressed={active}
+      draggable
+      onClick={() => setPlacing(active ? null : kind)}
+      onDragStart={(event) => {
+        event.dataTransfer.setData(COMPONENT_DRAG_TYPE, kind);
+        event.dataTransfer.effectAllowed = 'copy';
+      }}
+    >
+      <span className="mg-comp-preview">
+        <Icon name={item.icon} size={20} />
+      </span>
+      <span className="mg-comp-name">{name}</span>
+    </button>
   );
 }
 

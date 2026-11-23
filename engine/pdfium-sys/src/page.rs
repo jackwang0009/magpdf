@@ -23,6 +23,22 @@ impl std::fmt::Debug for DetachedObject {
     }
 }
 
+impl DetachedObject {
+    /// 接管一个新建的、还没插入任何页面的对象（[`PageObject::new_path`] 之类的结果）。
+    /// 之后用 [`Page::attach`] 插进页面；没插进去就随本类型一起销毁。
+    pub fn adopt(object: PageObject<'static>) -> Self {
+        Self {
+            handle: object.raw_handle(),
+        }
+    }
+
+    /// 借出对象本身，插进页面之前改内容、颜色、标记用。已经插进页面的返回的句柄不能再用。
+    pub fn as_object(&self) -> PageObject<'_> {
+        // SAFETY: handle 是本类型持有的对象，借出期间本类型存活。
+        unsafe { PageObject::from_raw(self.handle) }
+    }
+}
+
 impl Drop for DetachedObject {
     fn drop(&mut self) {
         if self.handle.is_null() {

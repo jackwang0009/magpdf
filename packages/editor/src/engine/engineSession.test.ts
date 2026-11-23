@@ -664,6 +664,75 @@ describe('EngineSession：只能叠加内容的页（方案 2.3）', () => {
   });
 });
 
+describe('EngineSession：组件（P0 原型）', () => {
+  it('置入：点下的位置换到用户空间发给引擎；新对象出现在列表里时选中它，带着参数', async () => {
+    const { engine, editor, store, objects } = await attached();
+    editor.placeComponent(0, 'code128', { x: 30, y: 40 });
+    await flush();
+    expect(engine.transport.sent(METHOD.COMP_PLACE)).toEqual([
+      { docId: 1, baseVersion: 0, pageId: 20, type: 'code128', params: {}, at: [30, 400] },
+    ]);
+    expect(objects(0).at(-1)).toEqual({
+      id: 'p0-7',
+      type: 'component',
+      name: `${t.components.items.code128} · SAMPLE-0001`,
+      bbox: { x: 30, y: 40, width: 100, height: 36 },
+      component: { kind: 'code128', values: { content: 'SAMPLE-0001', size: 36 } },
+      added: true,
+    });
+    expect(store.getState().documents['engine-1']!.selection).toEqual(['p0-7']);
+  });
+
+  it('只能叠加内容的页上也能放；放上去的组件能移动、能改参数，原有的对象仍然不能动', async () => {
+    const { engine, editor, object } = await attached();
+    engine.page(1, 20).overlayOnly = true;
+    engine.finishBackgroundCheck(1, 20);
+
+    editor.placeComponent(0, 'text', { x: 30, y: 40 });
+    await flush();
+    expect(object('p0-7').added).toBe(true);
+    editor.transformObjects([{ page: 0, ids: ['p0-7'], matrix: translationMatrix(10, 0) }]);
+    editor.updateComponent('p0-7', { content: 'BL-42' });
+    await flush();
+    expect(engine.transport.sent(METHOD.EDIT_TRANSFORM)).toHaveLength(1);
+    expect(engine.transport.sent(METHOD.COMP_UPDATE)).toEqual([
+      { docId: 1, baseVersion: 2, compId: 7, params: { content: 'BL-42' } },
+    ]);
+    expect(object('p0-7').component?.values).toEqual({ content: 'BL-42', size: 36 });
+    expect(object('p0-7').bbox.x).toBe(40);
+
+    // 原有的对象，或者原有的和新加的一起，都不发
+    editor.transformObjects([{ page: 0, ids: ['p0-2'], matrix: translationMatrix(10, 0) }]);
+    editor.transformObjects([{ page: 0, ids: ['p0-2', 'p0-7'], matrix: translationMatrix(10, 0) }]);
+    editor.deleteObjects(['p0-3', 'p0-7']);
+    await flush();
+    expect(engine.transport.sent(METHOD.EDIT_TRANSFORM)).toHaveLength(1);
+    expect(engine.transport.sent(METHOD.EDIT_DELETE)).toEqual([]);
+  });
+
+  it('参数不合法：引擎报 E_COMP_INVALID，把它的说明告诉用户', async () => {
+    const { editor, notices, object } = await attached();
+    editor.placeComponent(0, 'code128', { x: 30, y: 40 });
+    await flush();
+    editor.updateComponent('p0-7', { content: '提单号' });
+    await flush();
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toMatchObject({ kind: 'error' });
+    expect(notices[0]!.message).toContain('ASCII 32–126');
+    expect(object('p0-7').component?.values.content).toBe('SAMPLE-0001');
+  });
+
+  it('撤销置入：组件从列表里没了，选区跟着清掉', async () => {
+    const { editor, store, objects } = await attached();
+    editor.placeComponent(0, 'code128', { x: 30, y: 40 });
+    await flush();
+    editor.undo();
+    await flush();
+    expect(objects(0).map((o) => o.id)).toEqual(['p0-1', 'p0-2', 'p0-3']);
+    expect(store.getState().documents['engine-1']!.selection).toEqual([]);
+  });
+});
+
 describe('EngineSession：引擎推送的变化', () => {
   it('没看过的页变了：只换修订号，不去取它的对象', async () => {
     const { engine, snapshot } = await attached();

@@ -10,6 +10,7 @@
 use std::collections::{HashSet, VecDeque};
 
 use anyhow::{Context, Result};
+use magpdf_engine::component::{ComponentKind, ComponentSpec};
 use magpdf_engine::edit::{Change, EditError, HitMode, ObjectId, ObjectSummary, Session};
 use magpdf_ipc::messages::DocInfo;
 use pdfium_sys::{
@@ -55,6 +56,20 @@ pub enum EditOp {
     },
     Delete {
         ids: Vec<ObjectId>,
+    },
+    /// 置入组件，左上角放在 `at`。没给的参数用默认值。
+    PlaceComponent {
+        page_id: u32,
+        kind: ComponentKind,
+        content: Option<String>,
+        size: Option<f32>,
+        at: (f32, f32),
+    },
+    /// 改组件参数。没给的参数沿用现在的值。
+    UpdateComponent {
+        id: ObjectId,
+        content: Option<String>,
+        size: Option<f32>,
     },
     Undo,
     Redo,
@@ -736,6 +751,33 @@ impl PdfiumState {
             EditOp::Transform { ids, matrix } => session.transform(&ids, matrix)?,
             EditOp::FillRgb { ids, r, g, b } => session.set_fill_rgb(&ids, r, g, b)?,
             EditOp::Delete { ids } => session.delete(&ids)?,
+            EditOp::PlaceComponent {
+                page_id,
+                kind,
+                content,
+                size,
+                at,
+            } => {
+                if page_id as usize >= session.page_count() {
+                    return Err(EngineError::NoPage { doc_id, page_id });
+                }
+                let spec = ComponentSpec {
+                    kind,
+                    content: content.unwrap_or_else(|| kind.default_content().to_owned()),
+                    size: size.unwrap_or_else(|| kind.default_size()),
+                };
+                session.place_component(page_id as usize, &spec, at)?.1
+            }
+            EditOp::UpdateComponent { id, content, size } => {
+                let mut spec = session.component(id)?;
+                if let Some(content) = content {
+                    spec.content = content;
+                }
+                if let Some(size) = size {
+                    spec.size = size;
+                }
+                session.update_component(id, &spec)?
+            }
             EditOp::Undo => session.undo()?,
             EditOp::Redo => session.redo()?,
         })

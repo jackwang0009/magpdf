@@ -42,6 +42,8 @@ export const palette = {
   rulerTick: '#686868',
   /** 校验通过 */
   success: '#6cc070',
+  /** 参数不合法（组件参数的提示） */
+  danger: '#e5534b',
   /** 选框控制点的底色 */
   handleFill: '#ffffff',
   /** 页面周围的描边（画布上） */

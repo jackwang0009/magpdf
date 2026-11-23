@@ -6,8 +6,16 @@
  */
 export type { BenchEngineParams } from './generated/BenchEngineParams';
 export type { BenchEngineResult } from './generated/BenchEngineResult';
+export type { Check } from './generated/Check';
+export type { CheckSeverity } from './generated/CheckSeverity';
 export type { Color } from './generated/Color';
 export type { ColorSpace } from './generated/ColorSpace';
+export type { CompPlaceParams } from './generated/CompPlaceParams';
+export type { CompPlaceResult } from './generated/CompPlaceResult';
+export type { CompUpdateParams } from './generated/CompUpdateParams';
+export type { ComponentInfo } from './generated/ComponentInfo';
+export type { ComponentParams } from './generated/ComponentParams';
+export type { ComponentValues } from './generated/ComponentValues';
 export type { DocChanged } from './generated/DocChanged';
 export type { DocCloseParams } from './generated/DocCloseParams';
 export type { DocInfo } from './generated/DocInfo';

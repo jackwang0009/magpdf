@@ -2,6 +2,7 @@
 //! 分层渲染、保存与恢复。
 #![forbid(unsafe_code)]
 
+pub mod component;
 pub mod edit;
 pub mod roundtrip;
 

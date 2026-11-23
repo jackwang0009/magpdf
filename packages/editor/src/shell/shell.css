@@ -398,8 +398,15 @@
   font: inherit;
   cursor: default;
 }
-.mg-comp-item:hover {
+.mg-comp-item:hover:not(:disabled) {
   border-color: var(--mg-accent);
+}
+.mg-comp-item.mg-on {
+  border-color: var(--mg-accent);
+  box-shadow: inset 0 0 0 1px var(--mg-accent);
+}
+.mg-comp-item:disabled {
+  opacity: 0.45;
 }
 .mg-comp-preview {
   width: 100%;
@@ -526,6 +533,48 @@
   margin: 4px 0;
   color: var(--mg-success);
   font-size: var(--mg-font-size-small);
+}
+.mg-check-line.mg-bad {
+  color: var(--mg-danger);
+}
+.mg-props-hint {
+  margin: 4px 0 0;
+  color: var(--mg-text-muted);
+  font-size: var(--mg-font-size-small);
+}
+/* 组件参数：标签一列，输入框占满另一列 */
+.mg-props-form {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  align-items: center;
+  gap: 4px 6px;
+  font-size: var(--mg-font-size-small);
+}
+.mg-props-form label {
+  color: var(--mg-text-muted);
+}
+.mg-input {
+  min-width: 0;
+  height: 22px;
+  padding: 0 6px;
+  background: var(--mg-input);
+  border: 1px solid var(--mg-line);
+  border-radius: 2px;
+  color: var(--mg-text);
+  font: inherit;
+}
+.mg-input.mg-mono {
+  font-family: var(--mg-mono-font-family);
+}
+.mg-input:focus {
+  outline: none;
+  border-color: var(--mg-accent);
+}
+.mg-input.mg-bad {
+  border-color: var(--mg-danger);
+}
+.mg-input:disabled {
+  color: var(--mg-text-muted);
 }
 
 /* 图层 */

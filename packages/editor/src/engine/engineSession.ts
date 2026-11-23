@@ -1,5 +1,8 @@
 import { ERROR_CODE, EVENT, METHOD, OBJ_LIST_MAX } from '@magpdf/protocol';
 import type {
+  CompPlaceParams,
+  CompPlaceResult,
+  CompUpdateParams,
   DocChanged,
   DocCloseParams,
   DocInfo,
@@ -20,16 +23,20 @@ import type {
   RpcError,
 } from '@magpdf/protocol';
 import type { TileProvider } from '../canvas/tileProvider';
+import { componentName, isPlaceable } from '../document/components';
+import type { ComponentValues, PlaceableComponent } from '../document/components';
 import type { DocumentEditor, PageTransform } from '../document/documentEditor';
 import {
+  applyMatrix,
   displayMatrix,
+  invertMatrix,
   pageTransformToUser,
   transformRect,
   userBoxToPageRect,
 } from '../document/pageSpace';
 import type { Matrix } from '../document/pageSpace';
 import type { DocumentSnapshot, ObjectType, PageObject } from '../document/types';
-import type { Rect } from '../geometry';
+import type { Point, Rect } from '../geometry';
 import { format, t } from '../i18n';
 import type {
   EditorHost,
@@ -88,6 +95,8 @@ interface EngineDocument {
   pages: EnginePage[];
   /** 修改命令排着队一条一条发：后一条要带上前一条之后的版本号 */
   queue: Promise<void>;
+  /** 刚置入的组件：它出现在对象列表里的时候选中它 */
+  selectWhenListed: string | null;
   readonly provider: EngineTileProvider;
   readonly editor: DocumentEditor;
 }
@@ -218,6 +227,7 @@ export class EngineSession implements EditorHost {
       version: snapshot.version,
       pages: pagesOf(snapshot),
       queue: Promise.resolve(),
+      selectWhenListed: null,
       provider: new EngineTileProvider({
         transport: this.transport,
         target: (page) => {
@@ -310,6 +320,13 @@ export class EngineSession implements EditorHost {
     return snapshot?.pages[index]?.overlayOnly !== undefined;
   }
 
+  /** 这几个对象里有没有这一页原有的、又因为这一页只能叠加内容而不能改的。新加的对象（组件）可以改。 */
+  private touchesFrozen(document: EngineDocument, index: number, ids: readonly string[]): boolean {
+    if (!this.isOverlayOnly(document, index)) return false;
+    const objects = this.store.getState().documents[document.id]?.snapshot.pages[index]?.objects;
+    return ids.some((id) => !objects?.find((object) => object.id === id)?.added);
+  }
+
   /** 换掉几页上的对象列表（页序号 → 新列表的算法），画面的修订号不动。 */
   private patchObjects(
     document: EngineDocument,
@@ -375,6 +392,11 @@ export class EngineSession implements EditorHost {
       const matrix = display;
       const objects = summaries.map((summary) => toPageObject(index, summary, matrix));
       this.patchObjects(document, new Map([[index, () => objects]]));
+      const wanted = document.selectWhenListed;
+      if (wanted && objects.some((object) => object.id === wanted)) {
+        document.selectWhenListed = null;
+        this.store.getState().setSelection(document.id, [wanted]);
+      }
     } catch (error) {
       if (page.loading === turn) page.loading = 0;
       // 引擎重启时请求会失败；文档恢复之后会重新取
@@ -404,6 +426,10 @@ export class EngineSession implements EditorHost {
     return {
       transformObjects: (changes) => on((document) => this.transformObjects(document, changes)),
       deleteObjects: (ids) => on((document) => this.deleteObjects(document, ids)),
+      placeComponent: (page, kind, at) =>
+        on((document) => this.placeComponent(document, page, kind, at)),
+      updateComponent: (objectId, values) =>
+        on((document) => this.updateComponent(document, objectId, values)),
       undo: () => on((document) => this.stepHistory(document, METHOD.HISTORY_UNDO)),
       redo: () => on((document) => this.stepHistory(document, METHOD.HISTORY_REDO)),
     };
@@ -412,8 +438,8 @@ export class EngineSession implements EditorHost {
   private transformObjects(document: EngineDocument, changes: readonly PageTransform[]): void {
     const commands: { readonly ids: number[]; readonly matrix: Matrix }[] = [];
     const patches = new Map<number, (objects: readonly PageObject[]) => readonly PageObject[]>();
-    // 工具不会让只能叠加内容的页上的对象动起来；这里再拦一道，这样的页一个对象也不发给引擎
-    if (changes.some((change) => this.isOverlayOnly(document, change.page))) return;
+    // 工具不会让只能叠加内容的页上原有的对象动起来；这里再拦一道，这样的命令一个对象也不发给引擎
+    if (changes.some((change) => this.touchesFrozen(document, change.page, change.ids))) return;
     for (const change of changes) {
       const display = document.pages[change.page]?.display;
       const matrix = display && pageTransformToUser(display, change.matrix);
@@ -459,12 +485,66 @@ export class EngineSession implements EditorHost {
       const page = pageOfObject(id);
       if (page !== null) patches.set(page, (objects) => objects.filter((o) => !gone.has(o.id)));
     }
-    if ([...patches.keys()].some((page) => this.isOverlayOnly(document, page))) return;
+    if ([...patches.keys()].some((page) => this.touchesFrozen(document, page, ids))) return;
     this.patchObjects(document, patches);
     // 几页上的对象一起删是一条命令，撤销时一起回来
     this.enqueue(document, [...patches.keys()], () =>
       this.command(document, METHOD.EDIT_DELETE, (docId, baseVersion) => {
         const params: EditDeleteParams = { docId, baseVersion, ids: targets };
+        return params;
+      }),
+    );
+  }
+
+  /**
+   * 置入组件。界面上不先画：组件长什么样要引擎生成之后才知道，`doc.changed` 到了这一页重画、重新取对象，
+   * 新对象出现在列表里时选中它。只能叠加内容的页也能放（方案 2.3）。
+   */
+  private placeComponent(
+    document: EngineDocument,
+    index: number,
+    kind: PlaceableComponent,
+    at: Point,
+  ): void {
+    const page = document.pages[index];
+    const back = page?.display && invertMatrix(page.display);
+    if (!page || !back) return;
+    const user = applyMatrix(back, at.x, at.y);
+    this.enqueue(document, [], async () => {
+      const result = await this.command<CompPlaceResult>(
+        document,
+        METHOD.COMP_PLACE,
+        (docId, baseVersion) => {
+          const params: CompPlaceParams = {
+            docId,
+            baseVersion,
+            pageId: page.pageId,
+            type: kind,
+            params: {},
+            at: [user.x, user.y],
+          };
+          return params;
+        },
+      );
+      const id = objectId(index, result.compId);
+      const listed = this.store
+        .getState()
+        .documents[document.id]?.snapshot.pages[index]?.objects.some((object) => object.id === id);
+      if (listed) this.store.getState().setSelection(document.id, [id]);
+      else document.selectWhenListed = id;
+    });
+  }
+
+  private updateComponent(
+    document: EngineDocument,
+    id: string,
+    values: Partial<ComponentValues>,
+  ): void {
+    const [compId] = engineIds([id]);
+    if (compId === undefined) return;
+    this.enqueue(document, [], () =>
+      this.command(document, METHOD.COMP_UPDATE, (docId, baseVersion) => {
+        const params: CompUpdateParams = { docId, baseVersion, compId, params: { ...values } };
         return params;
       }),
     );
@@ -492,7 +572,7 @@ export class EngineSession implements EditorHost {
   private enqueue(
     document: EngineDocument,
     touched: readonly number[],
-    task: () => Promise<void>,
+    task: () => Promise<unknown>,
   ): void {
     const pages = touched.flatMap((index) => document.pages[index] ?? []);
     for (const page of pages) page.pendingEdits++;
@@ -517,14 +597,14 @@ export class EngineSession implements EditorHost {
   }
 
   /**
-   * 发一条修改命令并记下新的版本号。界面记的版本号落后时（`E_VERSION_CONFLICT`），
+   * 发一条修改命令，记下新的版本号，返回应答。界面记的版本号落后时（`E_VERSION_CONFLICT`），
    * 问一下现在的版本再试一次（《接口协议》5.2）。
    */
-  private async command(
+  private async command<R extends EditResult = EditResult>(
     document: EngineDocument,
     method: string,
     params: (docId: number, baseVersion: number) => unknown,
-  ): Promise<void> {
+  ): Promise<R> {
     for (let attempt = 0; ; attempt++) {
       const docId = document.docId;
       if (docId === null) {
@@ -535,12 +615,9 @@ export class EngineSession implements EditorHost {
         throw restarting;
       }
       try {
-        const result = await this.transport.request<EditResult>(
-          method,
-          params(docId, document.version),
-        );
+        const result = await this.transport.request<R>(method, params(docId, document.version));
         document.version = Math.max(document.version, result.version);
-        return;
+        return result;
       } catch (error) {
         const conflict = isRpcError(error) && error.code === ERROR_CODE.E_VERSION_CONFLICT;
         if (!conflict || attempt > 0 || document.docId !== docId) throw error;
@@ -730,18 +807,24 @@ const OBJECT_TYPES: Record<ObjectKind, ObjectType> = {
 
 /** 引擎的对象摘要换成界面的对象：包围盒从 PDF 用户空间换到页面坐标。 */
 function toPageObject(page: number, summary: ObjectSummary, display: Matrix): PageObject {
-  const type = OBJECT_TYPES[summary.kind];
+  const comp = summary.comp && isPlaceable(summary.comp.type) ? summary.comp : null;
+  const kind = comp?.type as PlaceableComponent | undefined;
+  const type = kind ? 'component' : OBJECT_TYPES[summary.kind];
   // 引擎给不出包围盒的对象在画布上没有位置，只能从图层面板里选
   const pickable = summary.pickable && Boolean(summary.bbox);
   return {
     id: objectId(page, summary.id),
     type,
-    name: `${t.objectTypes[type]} ${summary.id}`,
+    name: kind
+      ? `${componentName(kind)} · ${comp!.params.content}`
+      : `${t.objectTypes[type]} ${summary.id}`,
     bbox: summary.bbox
       ? userBoxToPageRect(display, summary.bbox)
       : { x: 0, y: 0, width: 0, height: 0 },
     ...(summary.locked ? { locked: true } : {}),
     ...(pickable ? {} : { pickable: false }),
+    ...(kind && comp ? { component: { kind, values: { ...comp.params } } } : {}),
+    ...(summary.added ? { added: true } : {}),
   };
 }
 

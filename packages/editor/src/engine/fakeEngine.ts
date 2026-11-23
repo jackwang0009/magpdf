@@ -1,5 +1,8 @@
 import { ERROR_CODE, EVENT, METHOD } from '@magpdf/protocol';
 import type {
+  CompPlaceParams,
+  CompPlaceResult,
+  CompUpdateParams,
   DocChanged,
   DocInfo,
   DocSnapshot,
@@ -30,6 +33,8 @@ export interface FakeObject {
   /** `[left, bottom, right, top]`；null 表示引擎给不出包围盒 */
   bbox: UserBox | null;
   readonly pickable?: boolean;
+  /** 置入的组件。假引擎里组件都是这次会话新加的 */
+  comp?: { readonly type: string; params: { content: string; size: number } };
 }
 
 export interface FakePage {
@@ -171,6 +176,10 @@ export class FakeEngine {
         return this.transform(params as EditTransformParams);
       case METHOD.EDIT_DELETE:
         return this.remove(params as EditDeleteParams);
+      case METHOD.COMP_PLACE:
+        return this.place(params as CompPlaceParams);
+      case METHOD.COMP_UPDATE:
+        return this.updateComponent(params as CompUpdateParams);
       case METHOD.HISTORY_UNDO:
         return this.history(params as HistoryParams, 'undo');
       case METHOD.HISTORY_REDO:
@@ -223,6 +232,10 @@ export class FakeEngine {
       z: params.offset + i,
       locked: false,
       pickable: object.pickable ?? true,
+      added: object.comp !== undefined,
+      ...(object.comp
+        ? { comp: { type: object.comp.type, params: { ...object.comp.params } } }
+        : {}),
     }));
   }
 
@@ -244,8 +257,10 @@ export class FakeEngine {
       list.push(page.objects.find((o) => o.id === id)!);
       found.set(index, list);
     }
-    // 动手之前先校验碰到的页（还没校验过的现在做，结论照样推送）；有一页通不过，整条命令都不做
-    for (const index of found.keys()) {
+    // 动手之前先校验碰到的页（还没校验过的现在做，结论照样推送）；有一页通不过，整条命令都不做。
+    // 只动了新加的组件的页不用校验
+    for (const [index, objects] of found) {
+      if (objects.every((object) => object.comp)) continue;
       const page = document.pages[index]!;
       if (!page.checked) this.check(document.docId, page);
       if (page.overlayOnly) {
@@ -296,6 +311,74 @@ export class FakeEngine {
     });
   }
 
+  /** 置入组件：只能叠加内容的页也能放。条码按 100 pt 宽算，左上角在 `at`。 */
+  private place(params: CompPlaceParams): CompPlaceResult {
+    const document = this.document(params.docId);
+    this.checkVersion(document, params.baseVersion);
+    const page = this.page(params.docId, params.pageId);
+    const comp = {
+      type: params.type,
+      params: {
+        content: params.params.content ?? 'SAMPLE-0001',
+        size: params.params.size ?? 36,
+      },
+    };
+    checkComponent(comp.params);
+    const id = Math.max(0, ...document.pages.flatMap((p) => p.objects.map((o) => o.id))) + 1;
+    const [x, y] = params.at;
+    const object: FakeObject = {
+      id,
+      kind: 'path',
+      bbox: [x, y - comp.params.size, x + 100, y],
+      comp,
+    };
+    const index = document.pages.indexOf(page);
+    const result = this.commit(document, {
+      pages: [index],
+      forward: () => page.objects.push(object),
+      backward: () => {
+        page.objects = page.objects.filter((o) => o !== object);
+      },
+    });
+    return { compId: id, version: result.version, checks: [] };
+  }
+
+  private updateComponent(params: CompUpdateParams): EditResult {
+    const document = this.document(params.docId);
+    this.checkVersion(document, params.baseVersion);
+    const index = document.pages.findIndex((p) => p.objects.some((o) => o.id === params.compId));
+    const object = document.pages[index]?.objects.find((o) => o.id === params.compId);
+    if (!object) throw { code: ERROR_CODE.E_OBJECT_NOT_FOUND, message: '对象不存在' };
+    const before = object.comp;
+    if (!before) throw invalid(`对象 ${params.compId} 不是组件`);
+    const after = {
+      type: before.type,
+      params: {
+        content: params.params.content ?? before.params.content,
+        size: params.params.size ?? before.params.size,
+      },
+    };
+    checkComponent(after.params);
+    return this.commit(document, {
+      pages: [index],
+      forward: () => {
+        object.comp = after;
+      },
+      backward: () => {
+        object.comp = before;
+      },
+    });
+  }
+
+  private checkVersion(document: FakeDocument, baseVersion: number): void {
+    if (baseVersion === document.version) return;
+    const conflict: RpcError = {
+      code: ERROR_CODE.E_VERSION_CONFLICT,
+      message: '文档已经被别的操作修改',
+    };
+    throw conflict;
+  }
+
   private commit(document: FakeDocument, step: Step): EditResult {
     step.forward();
     document.undo.push(step);
@@ -339,6 +422,18 @@ export class FakeEngine {
 
 function invalid(detail: string): RpcError {
   return { code: ERROR_CODE.E_INVALID_ARGUMENT, message: '参数不合法', data: { detail } };
+}
+
+/** 和真引擎一样只认 ASCII 的内容；不合法时报 `E_COMP_INVALID`，`data.checks` 标出参数。 */
+function checkComponent(params: { content: string; size: number }): void {
+  if (/^[\x20-\x7e]+$/.test(params.content)) return;
+  const message = 'Code 128 只能编码英文字母、数字和常见符号（ASCII 32–126）';
+  const error: RpcError = {
+    code: ERROR_CODE.E_COMP_INVALID,
+    message,
+    data: { checks: [{ severity: 'error', key: 'content', message }] },
+  };
+  throw error;
 }
 
 /** 包围盒的四个角按矩阵变换之后的包围盒。 */

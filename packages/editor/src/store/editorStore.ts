@@ -2,9 +2,11 @@ import { createStore } from 'zustand/vanilla';
 import type { StoreApi } from 'zustand/vanilla';
 import { useStore } from 'zustand';
 import type { FrameStatsSummary } from '../canvas/frameStats';
+import { COMPONENT_DEFAULTS, mockComponentObject } from '../document/components';
+import type { ComponentValues, PlaceableComponent } from '../document/components';
 import type { DocumentSnapshot, PageObject } from '../document/types';
 import { translateRect } from '../geometry';
-import type { Rect } from '../geometry';
+import type { Point, Rect } from '../geometry';
 import { format, t } from '../i18n';
 import { NUDGE_STEP_PT } from '../tools/selectTool';
 import type { ToolOptions } from '../tools/machine';
@@ -54,6 +56,8 @@ export interface EditorState {
   readonly panelsHidden: boolean;
   /** 折叠到右侧图标条里的面板 */
   readonly collapsedPanels: readonly PanelId[];
+  /** 在组件面板里点了、等着在页面上点一下放下去的组件；没有时为 null */
+  readonly placing: PlaceableComponent | null;
 
   openDocument(snapshot: DocumentSnapshot, options?: { activate?: boolean }): void;
   /**
@@ -69,6 +73,11 @@ export interface EditorState {
   moveObjects(id: string, ids: readonly string[], dx: number, dy: number): void;
   resizeObjects(id: string, rects: ReadonlyMap<string, Rect>): void;
   deleteObjects(id: string, ids: readonly string[]): void;
+  /** 模拟文档：置入组件（默认参数，左上角在页面坐标 `at`）并选中它。引擎的文档走 `DocumentEditor`。 */
+  placeComponent(id: string, page: number, kind: PlaceableComponent, at: Point): void;
+  /** 模拟文档：改组件参数。 */
+  updateComponent(id: string, objectId: string, values: Partial<ComponentValues>): void;
+  setPlacing(kind: PlaceableComponent | null): void;
   setTool(tool: ToolId): void;
   setToolOptions(options: Partial<ToolOptions>): void;
   setPointer(pointer: PointerInfo | null): void;
@@ -94,6 +103,8 @@ const MAX_HISTORY = 50;
 export type EditorStore = StoreApi<EditorState>;
 
 export function createEditorStore(): EditorStore {
+  /** 模拟文档里置入的组件的编号 */
+  let placedCount = 0;
   return createStore<EditorState>()((set, get) => {
     const updateDocument = (id: string, update: (doc: DocumentState) => DocumentState) => {
       const doc = get().documents[id];
@@ -151,6 +162,7 @@ export function createEditorStore(): EditorStore {
       componentView: 'grid',
       panelsHidden: false,
       collapsedPanels: STARTER_PANELS,
+      placing: null,
 
       openDocument(snapshot, options) {
         const state = get();
@@ -246,6 +258,36 @@ export function createEditorStore(): EditorStore {
       deleteObjects(id, ids) {
         if (ids.length === 0) return;
         editObjects(id, ids, format(t.history.delete, { n: ids.length }), () => null);
+      },
+
+      placeComponent(id, page, kind, at) {
+        updateDocument(id, (doc) => {
+          const target = doc.snapshot.pages[page];
+          if (!target) return doc;
+          const objectId = `p${page}-c${++placedCount}`;
+          const object = mockComponentObject(objectId, kind, COMPONENT_DEFAULTS[kind], at);
+          const pages = doc.snapshot.pages.map((p) =>
+            p === target ? { ...p, objects: [...p.objects, object] } : p,
+          );
+          return {
+            ...doc,
+            snapshot: { ...doc.snapshot, pages, version: doc.snapshot.version + 1, dirty: true },
+            selection: [objectId],
+            history: [...doc.history, t.history.placeComponent].slice(-MAX_HISTORY),
+          };
+        });
+      },
+
+      updateComponent(id, objectId, values) {
+        editObjects(id, [objectId], t.history.updateComponent, (object) => {
+          if (!object.component) return object;
+          const next = { ...object.component.values, ...values };
+          return mockComponentObject(object.id, object.component.kind, next, object.bbox);
+        });
+      },
+
+      setPlacing(kind) {
+        if (get().placing !== kind) set({ placing: kind });
       },
 
       setTool(tool) {

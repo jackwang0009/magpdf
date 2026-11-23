@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 // 控制器要往容器里放 canvas，需要 DOM；编辑器包的其他测试都是纯逻辑，跑在 node 环境里。
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { COMPONENT_DEFAULTS, COMPONENT_DRAG_TYPE } from '../document/components';
 import type { DocumentEditor, PageTransform } from '../document/documentEditor';
 import { createMockDocument } from '../document/mockDocument';
 import { transformRect } from '../document/pageSpace';
@@ -121,6 +122,8 @@ describe('工具产生的修改交给谁', () => {
     const editor: DocumentEditor = {
       transformObjects: (changes) => calls.push(['transform', changes]),
       deleteObjects: (ids) => calls.push(['delete', ids]),
+      placeComponent: (page, kind, at) => calls.push(['place', page, kind, at]),
+      updateComponent: (id, values) => calls.push(['update', id, values]),
       undo: () => calls.push(['undo']),
       redo: () => calls.push(['redo']),
     };
@@ -372,6 +375,8 @@ describe('拖动预览（方案 3.2）', () => {
         });
       },
       deleteObjects: () => undefined,
+      placeComponent: () => undefined,
+      updateComponent: () => undefined,
       undo: () => undefined,
       redo: () => undefined,
     };
@@ -709,6 +714,165 @@ describe('拖动预览（方案 3.2）', () => {
       expect(controller.dragPreview).toBeNull();
       pointer('pointerup', { x: from.x + 40, y: from.y + 30 });
       expect(edits).toHaveLength(1);
+    } finally {
+      controller.dispose();
+    }
+  });
+});
+
+describe('置入组件（P0 原型）', () => {
+  /** 一页 600×800 pt；`editor` 有的话修改交给它，没有就是模拟文档。 */
+  function mount(editor?: DocumentEditor) {
+    vi.stubGlobal('requestAnimationFrame', () => 1);
+    vi.stubGlobal('cancelAnimationFrame', () => undefined);
+    Object.assign(HTMLElement.prototype, {
+      setPointerCapture: () => undefined,
+      releasePointerCapture: () => undefined,
+      hasPointerCapture: () => false,
+    });
+    vi.spyOn(GlTileRenderer, 'create').mockReturnValue(stubRenderer());
+    const store = createEditorStore();
+    store.getState().openDocument({
+      id: 'doc',
+      name: '测试.pdf',
+      dirty: false,
+      version: 0,
+      pages: [{ index: 0, width: 600, height: 800, objects: [] }],
+    });
+    const container = document.createElement('div');
+    container.getBoundingClientRect = () => new DOMRect(0, 0, 800, 600);
+    document.body.append(container);
+    const controller = new CanvasController({
+      store,
+      documentId: 'doc',
+      container,
+      ...(editor ? { editor } : {}),
+    });
+    const overlay = container.querySelector('.mg-canvas-overlay')!;
+    /** 页面坐标里的一点在窗口里的位置（标尺占了左、上各一条） */
+    const client = (x: number, y: number) => {
+      const view = controller.view;
+      const pageRect = controller.pageLayout.pageRect(0);
+      const scale = cssPxPerPt(view.zoom);
+      return {
+        clientX: (pageRect.x + x - view.x) * scale + 20,
+        clientY: (pageRect.y + y - view.y) * scale + 20,
+      };
+    };
+    const press = (x: number, y: number, button = 0) =>
+      overlay.dispatchEvent(
+        new MouseEvent('pointerdown', { ...client(x, y), button, bubbles: true }),
+      );
+    /** jsdom 没有 DataTransfer：拖放事件上挂一个只有这几样的替身 */
+    const drag = (type: 'dragover' | 'drop', x: number, y: number, kind: string, mime: string) => {
+      const event = new MouseEvent(type, { ...client(x, y), bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'dataTransfer', {
+        value: { types: [mime], getData: (t: string) => (t === mime ? kind : ''), dropEffect: '' },
+      });
+      overlay.dispatchEvent(event);
+      return event;
+    };
+    return { store, controller, press, drag };
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const near = (expected: { x: number; y: number }) => ({
+    x: expect.closeTo(expected.x, 6) as number,
+    y: expect.closeTo(expected.y, 6) as number,
+  });
+
+  it('在组件面板里点过组件：点页面就放在那里，放完退出放置状态；点在页面外面不算', () => {
+    const calls: unknown[][] = [];
+    const editor: DocumentEditor = {
+      transformObjects: () => undefined,
+      deleteObjects: () => undefined,
+      placeComponent: (page, kind, at) => calls.push([page, kind, at]),
+      updateComponent: () => undefined,
+      undo: () => undefined,
+      redo: () => undefined,
+    };
+    const { store, controller, press } = mount(editor);
+    try {
+      // 没在放置：点页面是选择工具的事
+      press(30, 40);
+      expect(calls).toEqual([]);
+
+      store.getState().setPlacing('code128');
+      press(-40, 40);
+      expect(calls).toEqual([]);
+      expect(store.getState().placing).toBe('code128');
+      // 右键不放
+      press(30, 40, 2);
+      expect(calls).toEqual([]);
+
+      press(30, 40);
+      expect(calls).toEqual([[0, 'code128', near({ x: 30, y: 40 })]]);
+      expect(store.getState().placing).toBeNull();
+    } finally {
+      controller.dispose();
+    }
+  });
+
+  it('点画布时属性面板的输入框交出焦点：之后的方向键、Delete 交给画布', () => {
+    const { controller, press } = mount();
+    const input = document.createElement('input');
+    document.body.append(input);
+    try {
+      input.focus();
+      expect(document.activeElement).toBe(input);
+      press(30, 40);
+      expect(document.activeElement).not.toBe(input);
+    } finally {
+      controller.dispose();
+    }
+  });
+
+  it('从组件面板拖到页面上：只接组件，放在松手的地方', () => {
+    const calls: unknown[][] = [];
+    const editor: DocumentEditor = {
+      transformObjects: () => undefined,
+      deleteObjects: () => undefined,
+      placeComponent: (page, kind, at) => calls.push([page, kind, at]),
+      updateComponent: () => undefined,
+      undo: () => undefined,
+      redo: () => undefined,
+    };
+    const { controller, drag } = mount(editor);
+    try {
+      expect(drag('dragover', 50, 60, 'x', 'text/plain').defaultPrevented).toBe(false);
+      expect(drag('dragover', 50, 60, 'text', COMPONENT_DRAG_TYPE).defaultPrevented).toBe(true);
+      drag('drop', 50, 60, 'seal', COMPONENT_DRAG_TYPE);
+      expect(calls).toEqual([]);
+      drag('drop', 50, 60, 'text', COMPONENT_DRAG_TYPE);
+      expect(calls).toEqual([[0, 'text', near({ x: 50, y: 60 })]]);
+    } finally {
+      controller.dispose();
+    }
+  });
+
+  it('模拟文档：组件加进快照并选中，带着参数，标成新加的', () => {
+    const { store, controller, press } = mount();
+    try {
+      store.getState().setPlacing('code128');
+      press(30, 40);
+      const doc = store.getState().documents.doc!;
+      const placed = doc.snapshot.pages[0]!.objects[0]!;
+      expect(placed).toMatchObject({
+        type: 'component',
+        added: true,
+        component: { kind: 'code128', values: COMPONENT_DEFAULTS.code128 },
+        bbox: { x: expect.closeTo(30, 6) as number, y: expect.closeTo(40, 6) as number },
+      });
+      expect(doc.selection).toEqual([placed.id]);
+
+      store.getState().updateComponent('doc', placed.id, { content: 'BL-42', size: 20 });
+      const updated = store.getState().documents.doc!.snapshot.pages[0]!.objects[0]!;
+      expect(updated.component?.values).toEqual({ content: 'BL-42', size: 20 });
+      expect(updated.bbox.height).toBe(20);
+      expect(updated.bbox.x).toBe(placed.bbox.x);
     } finally {
       controller.dispose();
     }

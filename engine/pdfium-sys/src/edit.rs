@@ -31,6 +31,17 @@ pub struct LoadedFont<'doc> {
 }
 
 impl<'doc> LoadedFont<'doc> {
+    /// 标准 14 字体之一（`FPDFText_LoadStandardFont`），比如 `Helvetica`。不嵌入字体数据，只认 WinAnsi 编码里的字。
+    pub fn load_standard(doc: &'doc crate::Document<'_>, name: &str) -> Result<Self> {
+        let name = std::ffi::CString::new(name)?;
+        // SAFETY: doc 的句柄有效；name 是以 NUL 结尾的字符串，调用期间有效。
+        let handle = unsafe { raw::FPDFText_LoadStandardFont(doc.raw_handle(), name.as_ptr()) };
+        if handle.is_null() {
+            return Err(Error::PageObject);
+        }
+        Ok(Self { handle, _doc: &() })
+    }
+
     /// 整个字体文件作为复合字体（Type0 + Identity-H 字符码）加载。
     ///
     /// PDFium 内部（`LoadCompositeFont`）按字体的 cmap 生成 ToUnicode、按 GID 作为 CID 并生成 W 数组。
@@ -205,6 +216,79 @@ impl PageObject<'_> {
         self.line_to(x, y)
     }
 
+    /// 新起一条子路径（`FPDFPath_MoveTo`）。
+    pub fn move_to(&self, x: f32, y: f32) -> Result<()> {
+        // SAFETY: handle 有效且是路径对象。
+        if unsafe { raw::FPDFPath_MoveTo(self.raw_handle(), x, y) } == 0 {
+            return Err(Error::PageObject);
+        }
+        Ok(())
+    }
+
+    /// 加一层标记内容（`FPDFPageObj_AddMark`），带几个字符串参数（`FPDFPageObjMark_SetStringParam`）。
+    /// 生成内容流时写成 `/名字 << 参数 >> BDC … EMC`，存盘之后重新打开还在。值按字节写，只放 ASCII。
+    pub fn add_string_mark(
+        &self,
+        doc: &crate::Document<'_>,
+        name: &str,
+        params: &[(&str, &str)],
+    ) -> Result<()> {
+        let name = std::ffi::CString::new(name)?;
+        // SAFETY: handle 有效；name 以 NUL 结尾。返回的标记归对象所有。
+        let mark = unsafe { raw::FPDFPageObj_AddMark(self.raw_handle(), name.as_ptr()) };
+        if mark.is_null() {
+            return Err(Error::PageObject);
+        }
+        for (key, value) in params {
+            let (key, value) = (
+                std::ffi::CString::new(*key)?,
+                std::ffi::CString::new(*value)?,
+            );
+            // SAFETY: 文档、对象、标记的句柄都有效；key、value 以 NUL 结尾。
+            let ok = unsafe {
+                raw::FPDFPageObjMark_SetStringParam(
+                    doc.raw_handle(),
+                    self.raw_handle(),
+                    mark,
+                    key.as_ptr(),
+                    value.as_ptr(),
+                )
+            };
+            if ok == 0 {
+                return Err(Error::PageObject);
+            }
+        }
+        Ok(())
+    }
+
+    /// 第一层叫 `name` 的标记内容里，参数 `key` 的字符串值。没有这层标记或这个参数时为 `None`。
+    pub fn mark_string(&self, name: &str, key: &str) -> Option<String> {
+        let key = std::ffi::CString::new(key).ok()?;
+        // SAFETY: handle 有效。
+        let count = unsafe { raw::FPDFPageObj_CountMarks(self.raw_handle()) };
+        for index in 0..u32::try_from(count).unwrap_or(0) {
+            // SAFETY: index 在范围内；返回的标记归对象所有。
+            let mark = unsafe { raw::FPDFPageObj_GetMark(self.raw_handle(), index) };
+            if mark.is_null() {
+                continue;
+            }
+            let named = utf16_out(|buffer, len, out| {
+                // SAFETY: mark 有效；buffer 为空或指向 len 字节的可写内存。
+                unsafe { raw::FPDFPageObjMark_GetName(mark, buffer, len, out) }
+            });
+            if named.as_deref() != Some(name) {
+                continue;
+            }
+            return utf16_out(|buffer, len, out| {
+                // SAFETY: mark 有效；key 以 NUL 结尾；buffer 为空或指向 len 字节的可写内存。
+                unsafe {
+                    raw::FPDFPageObjMark_GetParamStringValue(mark, key.as_ptr(), buffer, len, out)
+                }
+            });
+        }
+        None
+    }
+
     /// 直线到 `(x, y)`（`FPDFPath_LineTo`）。
     pub fn line_to(&self, x: f32, y: f32) -> Result<()> {
         // SAFETY: handle 有效且是路径对象。
@@ -247,6 +331,23 @@ impl PageObject<'_> {
         }
         Ok(())
     }
+}
+
+/// 调两次取 UTF-16LE 字符串的 PDFium 接口：先问要多少字节，再取。`call(buffer, 字节数, 输出的字节数)`。
+fn utf16_out(
+    call: impl Fn(*mut raw::FPDF_WCHAR, std::ffi::c_ulong, *mut std::ffi::c_ulong) -> raw::FPDF_BOOL,
+) -> Option<String> {
+    let mut needed: std::ffi::c_ulong = 0;
+    if call(std::ptr::null_mut(), 0, &mut needed) == 0 || needed < 2 {
+        return None;
+    }
+    let mut buffer = vec![0u16; usize::try_from(needed).ok()?.div_ceil(2)];
+    let len = std::ffi::c_ulong::try_from(buffer.len() * 2).ok()?;
+    if call(buffer.as_mut_ptr(), len, &mut needed) == 0 {
+        return None;
+    }
+    let end = buffer.iter().position(|&c| c == 0).unwrap_or(buffer.len());
+    Some(String::from_utf16_lossy(&buffer[..end]))
 }
 
 impl Font<'_> {

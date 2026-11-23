@@ -120,8 +120,9 @@ export function transition<S>(state: S, ...effects: ToolEffect[]): Transition<S>
 }
 
 /**
- * 这些对象里有没有不能修改的：它所在的页没有通过保真校验，只能在上面添加内容（方案 2.3）。
- * 这样的对象可以选中、查看，不能移动、缩放、删除；只要选区里有一个，整个选区都不动。
+ * 这些对象里有没有不能修改的：它所在的页没有通过保真校验，只能在上面添加内容（方案 2.3），它又是
+ * 页面原有的对象。这样的对象可以选中、查看，不能移动、缩放、删除；只要选区里有一个，整个选区都不动。
+ * 新加的对象（置入的组件）不受限制。
  */
 export function hasFrozenObject(
   ctx: Pick<ToolContext, 'pages' | 'objectById'>,
@@ -129,6 +130,6 @@ export function hasFrozenObject(
 ): boolean {
   return ids.some((id) => {
     const ref = ctx.objectById(id);
-    return ref !== undefined && ctx.pages[ref.page]?.overlayOnly !== undefined;
+    return ref !== undefined && !ref.object.added && ctx.pages[ref.page]?.overlayOnly !== undefined;
   });
 }

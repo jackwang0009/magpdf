@@ -170,6 +170,21 @@ export const zhCN = {
       awb: '运单号',
       amount: '大写金额',
     },
+    /** 还不能用的组件的提示 */
+    notYet: '{name}：P1 提供',
+    /** 能用的组件的提示 */
+    placeHint: '{name}：点一下再点页面放置，或者直接拖到页面上',
+    /** 正在放置时状态栏的提示 */
+    placing: '点页面放置{name}，Esc 取消',
+  },
+  /** 组件参数的检查（和引擎 `component.rs` 一致） */
+  componentChecks: {
+    empty: '内容不能是空的',
+    textAsciiOnly:
+      '原型的文本组件只能写英文字母、数字和常见符号（用的是不嵌入的标准字体 Helvetica）',
+    code128AsciiOnly: 'Code 128 只能编码英文字母、数字和常见符号（ASCII 32–126）',
+    tooLong: '条码内容最多 {n} 个字符',
+    sizeRange: '{what}要在 {min}–{max} pt 之间',
   },
   objectTypes: {
     text: '文字',
@@ -198,6 +213,13 @@ export const zhCN = {
     serialPlaceholder: '{n}',
     moduleWidth: '模块宽度',
     barHeight: '条高',
+    fontSize: '字号',
+    componentText: '文本',
+    /** 原型的限制，显示在组件参数下面 */
+    textNote: '标准字体 Helvetica，不嵌入，只能写英文',
+    barcodeNote: '模块宽度 1 pt（0.35 mm），不带可读文字',
+    /** 输入框旁的提示 */
+    applyHint: '回车或离开输入框后生效',
     quietZone: '静区',
     quietZoneAuto: '自动（10 倍模块宽度）',
     showReadableText: '显示可读文字',
@@ -247,6 +269,8 @@ export const zhCN = {
     move: '移动 {n} 个对象',
     resize: '缩放 {n} 个对象',
     delete: '删除 {n} 个对象',
+    placeComponent: '置入组件',
+    updateComponent: '改组件参数',
   },
   placeholder: {
     panel: '{name}面板在 P1 实现',

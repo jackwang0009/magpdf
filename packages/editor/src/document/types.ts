@@ -1,4 +1,5 @@
 import type { Rect } from '../geometry';
+import type { ComponentValues, PlaceableComponent } from './components';
 
 /**
  * 界面持有的文档只读快照（方案 3.1）：对象列表、包围盒、少量属性。
@@ -74,6 +75,12 @@ export interface PageObject {
   readonly pickable?: boolean;
   /** 模拟文档的外观。引擎打开的文档由引擎渲染的位图显示，没有这一项。 */
   readonly appearance?: MockAppearance;
+  /** 置入的组件（文本、Code 128）的种类和参数，属性面板据此显示、修改参数。 */
+  readonly component?: { readonly kind: PlaceableComponent; readonly values: ComponentValues };
+  /**
+   * 本次打开以后新加的对象（置入的组件）。只能叠加内容的页上，原有的对象不能改，新加的可以（方案 2.3）。
+   */
+  readonly added?: boolean;
 }
 
 export interface PageSnapshot {

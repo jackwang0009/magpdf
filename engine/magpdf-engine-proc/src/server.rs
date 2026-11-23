@@ -11,16 +11,18 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use magpdf_engine::edit::{EditError, HitMode, ObjectId, ObjectSummary};
+use magpdf_engine::component::{ComponentKind, ComponentProblem};
+use magpdf_engine::edit::{Change, EditError, HitMode, ObjectId, ObjectSummary};
 use magpdf_ipc::frame::{self, Incoming};
 use magpdf_ipc::messages::{
-    self, BenchEngineParams, Color, ColorSpace, DocChanged, DocCloseParams, DocInfo, DocOpenParams,
-    DocSnapshot, DocSnapshotParams, EchoParams, EditDeleteParams, EditResult, EditSetStyleParams,
-    EditTransformParams, ErrorCode, Fidelity, FidelityCheckParams, FidelityResult, HelloParams,
-    HelloResult, HistoryParams, JsonValue, LayerMode, OBJ_LIST_MAX, ObjHitTestParams,
-    ObjListParams, PageChange, PageInfo, PingParams, RenderTilesParams, RenderTilesResult, Request,
-    RequestId, Response, RoundtripParams, RoundtripResult, RpcError, StallParams, TileCoord,
-    TileFetchParams, TileFetchResult, method,
+    self, BenchEngineParams, Check, CheckSeverity, Color, ColorSpace, CompPlaceParams,
+    CompPlaceResult, CompUpdateParams, ComponentInfo, ComponentValues, DocChanged, DocCloseParams,
+    DocInfo, DocOpenParams, DocSnapshot, DocSnapshotParams, EchoParams, EditDeleteParams,
+    EditResult, EditSetStyleParams, EditTransformParams, ErrorCode, Fidelity, FidelityCheckParams,
+    FidelityResult, HelloParams, HelloResult, HistoryParams, JsonValue, LayerMode, OBJ_LIST_MAX,
+    ObjHitTestParams, ObjListParams, PageChange, PageInfo, PingParams, RenderTilesParams,
+    RenderTilesResult, Request, RequestId, Response, RoundtripParams, RoundtripResult, RpcError,
+    StallParams, TileCoord, TileFetchParams, TileFetchResult, method,
 };
 use magpdf_ipc::shm::{self, Layout, MappedRegion};
 use magpdf_ipc::{PROTOCOL_VERSION, pipe, pump};
@@ -566,6 +568,45 @@ async fn handle_request(
             };
             apply_edit(engine, id, p.doc_id, Some(p.base_version), op, out).await
         }
+        method::COMP_PLACE => {
+            let p: CompPlaceParams = decode(params)?;
+            let Some(kind) = ComponentKind::parse(&p.kind) else {
+                return Err(ErrorCode::InvalidArgument.error_with(format!(
+                    "原型只能置入文本和 Code 128 条码，不认得 {}",
+                    p.kind
+                )));
+            };
+            let op = EditOp::PlaceComponent {
+                page_id: p.page_id,
+                kind,
+                content: p.params.content,
+                size: p.params.size,
+                at: (p.at[0], p.at[1]),
+            };
+            let change = run_edit(engine, p.doc_id, Some(p.base_version), op, out).await?;
+            let comp_id = change
+                .pages
+                .iter()
+                .flat_map(|page| page.added.first())
+                .next()
+                .map(|id| id.0)
+                .ok_or_else(|| ErrorCode::Internal.error_with("置入之后找不到新对象"))?;
+            let result = CompPlaceResult {
+                comp_id,
+                version: wire_version(change.version),
+                checks: Vec::new(),
+            };
+            Ok(Some(frame::response_ok(id, &result)))
+        }
+        method::COMP_UPDATE => {
+            let p: CompUpdateParams = decode(params)?;
+            let op = EditOp::UpdateComponent {
+                id: ObjectId(p.comp_id),
+                content: p.params.content,
+                size: p.params.size,
+            };
+            apply_edit(engine, id, p.doc_id, Some(p.base_version), op, out).await
+        }
         method::HISTORY_UNDO => {
             let p: HistoryParams = decode(params)?;
             apply_edit(engine, id, p.doc_id, None, EditOp::Undo, out).await
@@ -840,6 +881,19 @@ async fn apply_edit(
     op: EditOp,
     out: &mpsc::UnboundedSender<Outgoing>,
 ) -> std::result::Result<Option<Response>, RpcError> {
+    let change = run_edit(engine, doc_id, base_version, op, out).await?;
+    let version = wire_version(change.version);
+    Ok(Some(frame::response_ok(id, &EditResult { version })))
+}
+
+/// 执行一条修改命令，成功后推送 `doc.changed`。应答由调用方发。
+async fn run_edit(
+    engine: &Arc<Engine>,
+    doc_id: u32,
+    base_version: Option<u32>,
+    op: EditOp,
+    out: &mpsc::UnboundedSender<Outgoing>,
+) -> std::result::Result<Change, RpcError> {
     let change = engine
         .engine
         .edit(doc_id, base_version.map(u64::from), op)
@@ -863,7 +917,7 @@ async fn apply_edit(
         pages_changed: false,
     };
     engine.event_to(out, messages::event::DOC_CHANGED, &changed);
-    Ok(Some(frame::response_ok(id, &EditResult { version })))
+    Ok(change)
 }
 
 /// 文档版本号在协议里是 32 位。
@@ -890,6 +944,14 @@ fn wire_object(object: &ObjectSummary) -> messages::ObjectSummary {
         z: u32::try_from(object.z).unwrap_or(u32::MAX),
         locked: false,
         pickable: object.pickable,
+        added: object.added,
+        comp: object.component.as_ref().map(|spec| ComponentInfo {
+            kind: spec.kind.name().to_owned(),
+            params: ComponentValues {
+                content: spec.content.clone(),
+                size: spec.size,
+            },
+        }),
     }
 }
 
@@ -908,6 +970,9 @@ fn rgb_bytes(color: &Color) -> std::result::Result<(u8, u8, u8), RpcError> {
 
 fn map_engine_error(e: crate::pdfium_thread::EngineError) -> RpcError {
     use crate::pdfium_thread::EngineError;
+    if let EngineError::Edit(EditError::Component(problem)) = &e {
+        return comp_invalid(problem);
+    }
     let code = match &e {
         EngineError::NoDocument { .. } | EngineError::NoPage { .. } => ErrorCode::InvalidArgument,
         EngineError::Open {
@@ -930,9 +995,25 @@ fn edit_error_code(error: &EditError) -> ErrorCode {
         EditError::NoTarget
         | EditError::SingularMatrix
         | EditError::NothingToUndo
-        | EditError::NothingToRedo => ErrorCode::InvalidArgument,
+        | EditError::NothingToRedo
+        | EditError::NotComponent(_) => ErrorCode::InvalidArgument,
+        EditError::Component(_) => ErrorCode::CompInvalid,
         EditError::Pdfium(_) | EditError::NoFill => ErrorCode::Internal,
     }
+}
+
+/// `E_COMP_INVALID`：`message` 是出错参数的说明，`data.checks` 标出是哪个参数（《接口协议》第 8 节）。
+fn comp_invalid(problem: &ComponentProblem) -> RpcError {
+    let check = Check {
+        severity: CheckSeverity::Error,
+        key: Some(problem.key.to_owned()),
+        message: problem.message.clone(),
+    };
+    let mut error = RpcError::new(ErrorCode::CompInvalid, problem.message.clone());
+    error.data = serde_json::to_value(serde_json::json!({ "checks": [check] }))
+        .ok()
+        .and_then(|value| serde_json::from_value(value).ok());
+    error
 }
 
 /// `doc.open` 失败时用哪个错误码（《接口协议》6.1、第 8 节）。

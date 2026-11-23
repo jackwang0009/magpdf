@@ -1,4 +1,6 @@
 import { metrics, palette } from '@magpdf/ui';
+import { COMPONENT_DRAG_TYPE, isPlaceable } from '../document/components';
+import type { PlaceableComponent } from '../document/components';
 import type { DocumentEditor, PageTransform } from '../document/documentEditor';
 import { linearHitTester } from '../document/hitTest';
 import { PageLayout } from '../document/pageLayout';
@@ -485,6 +487,7 @@ export class CanvasController {
     if (state.activeTool !== previous.activeTool) {
       this.syncTool(state.activeTool);
     }
+    if (state.placing !== previous.placing) this.updateCursor();
     if (state.showFrameStats !== previous.showFrameStats) {
       this.stats.reset();
       this.lastStatsPush = 0;
@@ -765,6 +768,8 @@ export class CanvasController {
     el.addEventListener('wheel', this.onWheel, { passive: false });
     el.addEventListener('contextmenu', this.onContextMenu);
     el.addEventListener('dblclick', this.onDoubleClick);
+    el.addEventListener('dragover', this.onDragOver);
+    el.addEventListener('drop', this.onDrop);
   }
 
   private detachEvents(): void {
@@ -777,6 +782,8 @@ export class CanvasController {
     el.removeEventListener('wheel', this.onWheel);
     el.removeEventListener('contextmenu', this.onContextMenu);
     el.removeEventListener('dblclick', this.onDoubleClick);
+    el.removeEventListener('dragover', this.onDragOver);
+    el.removeEventListener('drop', this.onDrop);
   }
 
   private screenPoint(event: MouseEvent): Point {
@@ -801,8 +808,19 @@ export class CanvasController {
   private readonly onPointerDown = (event: PointerEvent): void => {
     if (!this.document) return;
     this.store.getState().activateDocument(this.documentId);
+    // 下面的 preventDefault 会让焦点留在原处：属性面板的输入框还拿着焦点的话，方向键、Delete 都到不了画布。
+    // 点画布就是离开输入框，输入框按失焦处理（改了的参数这时生效）。
+    const focused = document.activeElement;
+    if (focused instanceof HTMLElement && isTextInputTarget(focused)) focused.blur();
     const screen = this.screenPoint(event);
     if (screen.x < 0 || screen.y < 0) return; // 标尺区域
+    const placing = this.store.getState().placing;
+    if (placing && event.button === 0) {
+      // 在组件面板里点过组件：这一下是放组件，不交给工具
+      if (this.placeComponent(placing, screen)) this.store.getState().setPlacing(null);
+      event.preventDefault();
+      return;
+    }
     this.overlayCanvas.setPointerCapture(event.pointerId);
     this.hoverScreen = screen;
     this.applyEffects(
@@ -866,6 +884,34 @@ export class CanvasController {
     // 抓手工具双击：适合页面（Photoshop 习惯）
     if (this.tools.effective === 'hand') this.fitPage();
   };
+
+  /** 从组件面板拖过来的才接，别的（文件、文字）不接。 */
+  private readonly onDragOver = (event: DragEvent): void => {
+    if (!this.document || !event.dataTransfer?.types.includes(COMPONENT_DRAG_TYPE)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+  };
+
+  private readonly onDrop = (event: DragEvent): void => {
+    const kind = event.dataTransfer?.getData(COMPONENT_DRAG_TYPE);
+    if (!this.document || !kind || !isPlaceable(kind)) return;
+    event.preventDefault();
+    this.store.getState().activateDocument(this.documentId);
+    const screen = this.screenPoint(event);
+    if (screen.x < 0 || screen.y < 0) return;
+    this.placeComponent(kind, screen);
+    this.store.getState().setPlacing(null);
+  };
+
+  /** 把组件的左上角放在屏幕上这一点。点在页面外面时什么也不做，返回 false。 */
+  private placeComponent(kind: PlaceableComponent, screen: Point): boolean {
+    const hit = this.layout.pageAtPoint(screenToDoc(this.view, screen));
+    if (!hit) return false;
+    if (this.editor) this.editor.placeComponent(hit.index, kind, hit.local);
+    else this.store.getState().placeComponent(this.documentId, hit.index, kind, hit.local);
+    this.invalidate();
+    return true;
+  }
 
   // ---------- 拖动预览（方案 3.2） ----------
   //
@@ -1237,6 +1283,10 @@ export class CanvasController {
   }
 
   private updateCursor(): void {
+    if (this.store.getState().placing) {
+      this.setCursor('copy');
+      return;
+    }
     this.setCursor(this.tools.cursor(this.toolContext(), this.hoverScreen));
   }
 

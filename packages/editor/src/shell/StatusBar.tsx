@@ -1,3 +1,4 @@
+import { componentName } from '../document/components';
 import { format, t } from '../i18n';
 import { activeDocument, useEditorStore } from '../store/editorStore';
 import { ptToMm } from '../geometry';
@@ -12,6 +13,7 @@ export function StatusBar() {
   const showFrameStats = useEditorStore((s) => s.showFrameStats);
   const stats = useEditorStore((s) => s.frameStats);
   const running = useEditorStore((s) => s.benchmarkRunning);
+  const placing = useEditorStore((s) => s.placing);
 
   const pageIndex = doc?.currentPage ?? 0;
   const page = doc?.snapshot.pages[pageIndex];
@@ -25,12 +27,17 @@ export function StatusBar() {
       selectionText = format(t.status.selectionOneComponent, {
         kind: t.componentKinds[object.componentKind],
       });
+    } else if (object.component) {
+      selectionText = format(t.status.selectionOneComponent, {
+        kind: componentName(object.component.kind),
+      });
     } else {
       selectionText = format(t.status.selectionOne, { type: t.objectTypes[object.type] });
     }
   } else if (objects.length > 1) {
     selectionText = format(t.status.selectionMany, { n: objects.length });
   }
+  if (placing) selectionText = format(t.components.placing, { name: componentName(placing) });
 
   return (
     <footer className="mg-status">

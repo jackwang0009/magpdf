@@ -18,6 +18,8 @@ export const METHOD = {
   EDIT_DELETE: 'edit.delete',
   HISTORY_UNDO: 'history.undo',
   HISTORY_REDO: 'history.redo',
+  COMP_PLACE: 'comp.place',
+  COMP_UPDATE: 'comp.update',
   FIDELITY_CHECK: 'fidelity.check',
   RENDER_TILES: 'render.tiles',
   RENDER_CANCEL: 'render.cancel',
@@ -54,6 +56,7 @@ export const ERROR_CODE = {
   E_PAGE_OVERLAY_ONLY: 3004,
   E_INVALID_ARGUMENT: 3005,
   E_TILE_GENERATION_STALE: 3006,
+  E_COMP_INVALID: 5001,
   E_INTERNAL: 9001,
 } as const;
 

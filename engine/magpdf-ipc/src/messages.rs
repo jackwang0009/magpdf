@@ -173,6 +173,7 @@ error_codes! {
     /// 瓦片的代数对不上：槽位已被复用（《接口协议》3.3，主进程转成 HTTP 410）。
     /// 《接口协议》第 8 节里还没有这个码，是 V06 原型加的。
     TileGenerationStale = 3006, "E_TILE_GENERATION_STALE", "瓦片已被新内容替换";
+    CompInvalid = 5001, "E_COMP_INVALID", "组件参数不合法";
     Internal = 9001, "E_INTERNAL", "内部错误";
 }
 
@@ -211,6 +212,8 @@ names! {
         EDIT_DELETE = "edit.delete";
         HISTORY_UNDO = "history.undo";
         HISTORY_REDO = "history.redo";
+        COMP_PLACE = "comp.place";
+        COMP_UPDATE = "comp.update";
         FIDELITY_CHECK = "fidelity.check";
         RENDER_TILES = "render.tiles";
         RENDER_CANCEL = "render.cancel";
@@ -430,6 +433,107 @@ pub struct ObjectSummary {
     /// 这些对象仍然列出来，可以在图层面板里选中。《接口协议》5.3 里还没有这个字段：界面在本地按包围盒
     /// 做命中测试（悬停时每帧都要查，不能每次都问引擎），所以要引擎把这条规则的结果一起给出来。
     pub pickable: bool,
+    /// 本次会话里新加的对象（组件）。只能叠加内容的页上原有的对象不能改，新加的可以。
+    /// 《接口协议》5.3 里还没有这个字段。
+    pub added: bool,
+    /// 对象是组件时的类型和参数。《接口协议》5.3 的 `comp` 是 `{type, summary, hashOk, checks}`，
+    /// 原型只给类型和参数（见第 12 节）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comp: Option<ComponentInfo>,
+}
+
+// ---- 组件（《接口协议》6.3）----
+
+/// 组件现在的参数。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ComponentValues {
+    pub content: String,
+    /// 文本的字号，或条码的条高（pt）。
+    pub size: f32,
+}
+
+/// [`ObjectSummary::comp`]。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ComponentInfo {
+    /// `text` 或 `code128`。
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub params: ComponentValues,
+}
+
+/// 置入、修改组件时给的参数。省略的项：置入时用默认值，修改时沿用现在的值。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(export)]
+pub struct ComponentParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<f32>,
+}
+
+/// `comp.place` 的参数。原型只认 `text` 和 `code128` 两种；`at` 只能是点，是组件左上角的位置
+///（《接口协议》6.3 里还可以是矩形）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct CompPlaceParams {
+    pub doc_id: u32,
+    pub base_version: u32,
+    pub page_id: u32,
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub params: ComponentParams,
+    /// `[x, y]`，PDF 用户空间。
+    pub at: [f32; 2],
+}
+
+/// 参数检查的结果（《接口协议》5.3 `Check`）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum CheckSeverity {
+    Error,
+    Warning,
+}
+
+/// 一条参数检查结果。`E_COMP_INVALID` 的 `data.checks` 里也是它。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct Check {
+    pub severity: CheckSeverity,
+    /// 出问题的参数名。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    pub message: String,
+}
+
+/// `comp.place` 的返回值。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct CompPlaceResult {
+    /// 新组件的对象编号。
+    pub comp_id: u64,
+    pub version: u32,
+    /// 原型没有警告，恒为空。
+    pub checks: Vec<Check>,
+}
+
+/// `comp.update` 的参数：按新参数重新生成，左上角留在原处，编号不变。返回 [`EditResult`]。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct CompUpdateParams {
+    pub doc_id: u32,
+    pub base_version: u32,
+    pub comp_id: u64,
+    pub params: ComponentParams,
 }
 
 /// `obj.list` 一次最多返回的条数（《接口协议》5.3）。

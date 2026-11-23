@@ -348,6 +348,11 @@ export function EditorShell({
         return;
       }
       if (event.key === 'Escape') {
+        // 正在放组件的话，Esc 只取消放置
+        if (store.getState().placing) {
+          store.getState().setPlacing(null);
+          return;
+        }
         const controller = activeController();
         controller?.runCommand('edit.deselect');
         return;

@@ -760,6 +760,124 @@ async fn edits_are_refused_or_applied_but_never_half_done(sample: &str) {
     );
 }
 
+/// 组件原型（《接口协议》6.3 的 `comp.place`、`comp.update`）：置入、列出参数、改参数、移动、撤销。
+/// 用提单样本：原版 PDFium 上这一页只能叠加内容，组件是新加的对象，照样能放、能改、能移动。
+#[tokio::test]
+async fn components_are_placed_listed_updated_and_undone_over_the_pipe() {
+    let mut engine = Engine::start(None).await;
+    engine.hello().await;
+    let doc_id = engine.open("freight-bl-composite.pdf").await;
+    let before = engine.objects(doc_id).await;
+
+    let placed = engine
+        .call(
+            method::COMP_PLACE,
+            json!({
+                "docId": doc_id, "baseVersion": 0, "pageId": 0,
+                "type": "code128", "params": {}, "at": [100, 700],
+            }),
+        )
+        .await;
+    let comp_id = placed["compId"].as_u64().expect("compId");
+    assert_eq!(
+        (&placed["version"], &placed["checks"]),
+        (&json!(1), &json!([]))
+    );
+    let (_, changed) = engine.event(event::DOC_CHANGED).await;
+    assert_eq!(
+        changed["changes"][0]["added"],
+        json!([comp_id]),
+        "{changed}"
+    );
+
+    let objects = engine.objects(doc_id).await;
+    assert_eq!(objects.len(), before.len() + 1);
+    let component = objects.last().unwrap();
+    assert_eq!(component["id"], comp_id);
+    assert_eq!(component["kind"], "path");
+    assert_eq!(component["pickable"], true);
+    assert_eq!(component["added"], true);
+    assert!(before.iter().all(|o| o["added"] == false));
+    assert_eq!(
+        component["comp"],
+        json!({ "type": "code128", "params": { "content": "SAMPLE-0001", "size": 36.0 } })
+    );
+    let [left, _, _, top] = bbox(component);
+    assert!(
+        (left - 100.0).abs() < 0.01 && (top - 700.0).abs() < 0.01,
+        "{component}"
+    );
+    assert!(
+        before.iter().all(|o| o.get("comp").is_none()),
+        "原有对象不是组件"
+    );
+
+    // 只给内容：条高沿用原来的
+    let (version, changed) = engine
+        .edit(
+            method::COMP_UPDATE,
+            json!({ "docId": doc_id, "baseVersion": 1, "compId": comp_id, "params": { "content": "BL-0042" } }),
+        )
+        .await;
+    assert_eq!(version, 2);
+    assert_eq!(changed["changes"][0]["modified"], json!([comp_id]));
+    let updated = engine.objects(doc_id).await;
+    assert_eq!(
+        by_id(&updated, comp_id)["comp"]["params"],
+        json!({ "content": "BL-0042", "size": 36.0 })
+    );
+
+    let (version, _) = engine
+        .edit(
+            method::EDIT_TRANSFORM,
+            json!({ "docId": doc_id, "baseVersion": 2, "ids": [comp_id], "matrix": [1, 0, 0, 1, 10, -10] }),
+        )
+        .await;
+    assert_eq!(version, 3);
+
+    // 参数不合法：E_COMP_INVALID，data.checks 标出是哪个参数
+    let invalid = engine
+        .call_err(
+            method::COMP_UPDATE,
+            json!({ "docId": doc_id, "baseVersion": 3, "compId": comp_id, "params": { "content": "提单号" } }),
+        )
+        .await;
+    assert_eq!(invalid["code"], ErrorCode::CompInvalid.code(), "{invalid}");
+    assert_eq!(invalid["data"]["checks"][0]["key"], "content", "{invalid}");
+    assert_eq!(invalid["data"]["checks"][0]["severity"], "error");
+    let original = before[0]["id"].as_u64().unwrap();
+    let not_component = engine
+        .call_err(
+            method::COMP_UPDATE,
+            json!({ "docId": doc_id, "baseVersion": 3, "compId": original, "params": { "size": 20 } }),
+        )
+        .await;
+    assert_eq!(not_component["code"], ErrorCode::InvalidArgument.code());
+    let unknown = engine
+        .call_err(
+            method::COMP_PLACE,
+            json!({
+                "docId": doc_id, "baseVersion": 3, "pageId": 0,
+                "type": "seal", "params": {}, "at": [100, 700],
+            }),
+        )
+        .await;
+    assert_eq!(unknown["code"], ErrorCode::InvalidArgument.code());
+
+    // 撤销三步：移动、改参数、置入
+    for version in 4..=6 {
+        engine
+            .edit(method::HISTORY_UNDO, json!({ "docId": doc_id }))
+            .await;
+        assert_eq!(
+            engine.objects(doc_id).await.len(),
+            before.len() + usize::from(version < 6)
+        );
+    }
+    let restored = engine.objects(doc_id).await;
+    assert_eq!(restored, before);
+}
+
 impl Engine {
     /// 已经读到、还没被取走的 `fidelity.result` 有几条。
     fn buffered_fidelity_results(&self) -> usize {

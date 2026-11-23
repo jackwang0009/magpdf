@@ -7,8 +7,12 @@
 //! 一条命令可以作用于多个对象，记成一步撤销。命令是原子的：中途失败时把已经做了的部分撤回去，
 //! 文档和版本号都不变。撤销按后进先出；删除把对象摘下交给撤销记录，撤销时插回原来的层级。
 //! 历史步数默认 50，超出后丢掉最早的一步，那一步如果还握着已删除的对象，对象随之销毁。
+//!
+//! 组件（[`crate::component`]）置入时作为新对象插在页面最上面；改参数时生成一个新对象换掉旧的，编号不变。
+//! 本次会话里新加的对象不受页面保真校验限制：PDFium 把新对象写进追加的内容流，改它们只重新生成那一条流，
+//! 原有的流不动，所以只能叠加内容的页上也能放组件、移动组件。
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use magpdf_content::PdfDocument;
 use magpdf_content::map::map_page;
@@ -22,6 +26,7 @@ use pdfium_sys::{
 };
 
 use crate::compare::{Thresholds, compare};
+use crate::component::{ComponentProblem, ComponentSpec};
 
 /// 对象在一次会话内的稳定编号（《接口协议》5.1）。只在会话内有效，不写进文件。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -35,7 +40,7 @@ pub enum HitMode {
 }
 
 /// 对象摘要，图层面板和命中测试都用它。
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ObjectSummary {
     pub id: ObjectId,
     pub page: usize,
@@ -46,6 +51,10 @@ pub struct ObjectSummary {
     /// 在画布上点选、框选时算不算数。不可见文字、完全透明的对象、铺满页面的白底不算（方案 4.3），
     /// 它们仍然列在图层面板里，可以从那里选中。
     pub pickable: bool,
+    /// 对象是组件时的参数。
+    pub component: Option<ComponentSpec>,
+    /// 本次会话里新加的：只能叠加内容的页上也能改它。
+    pub added: bool,
 }
 
 /// 一页上的变化。
@@ -89,6 +98,11 @@ pub enum EditError {
     SingularMatrix,
     #[error("对象没有可恢复的填充色")]
     NoFill,
+    /// 组件参数不合法。
+    #[error("{}", .0.message)]
+    Component(ComponentProblem),
+    #[error("对象 {} 不是组件", .0.0)]
+    NotComponent(ObjectId),
 }
 
 pub type Result<T> = std::result::Result<T, EditError>;
@@ -121,6 +135,18 @@ enum Atom {
         slot: Option<(usize, usize)>,
         /// `Some` 表示对象当前不在页面上。
         object: Option<DetachedObject>,
+    },
+    /// 插入新对象，和删除正好相反。
+    Insert {
+        id: ObjectId,
+        slot: (usize, usize),
+        /// `Some` 表示对象当前不在页面上。
+        object: Option<DetachedObject>,
+    },
+    /// 换掉对象，编号不变（组件改参数）。正着做、反着做都是把页面上的和 `spare` 对调。
+    Replace {
+        id: ObjectId,
+        spare: Option<DetachedObject>,
     },
 }
 
@@ -199,6 +225,8 @@ pub struct Session<'lib> {
     fidelity: BTreeMap<usize, Option<&'static str>>,
     /// 刚校验出来、还没有被 [`Session::take_new_verdicts`] 取走的结论，按得出的先后。
     new_verdicts: Vec<(usize, Option<&'static str>)>,
+    /// 本次会话里新加的对象。改它们不用过保真校验。
+    created: BTreeSet<ObjectId>,
     undo: Vec<Command>,
     redo: Vec<Command>,
     limit: usize,
@@ -264,6 +292,7 @@ impl<'lib> Session<'lib> {
             hidden_layers: None,
             fidelity: BTreeMap::new(),
             new_verdicts: Vec::new(),
+            created: BTreeSet::new(),
             undo: Vec::new(),
             redo: Vec::new(),
             limit: DEFAULT_LIMIT,
@@ -328,10 +357,19 @@ impl<'lib> Session<'lib> {
         let count = page_obj.object_count();
         let page_box = page_obj.bounding_box();
         let ids = page_ids(&mut self.ids, &mut self.next_id, page, count);
+        let created = &self.created;
         Ok((0..count)
             .filter_map(|z| {
                 let object = page_obj.object(z)?;
-                Some(summary(*ids.get(z)?, page, z, &object, page_box))
+                let id = *ids.get(z)?;
+                Some(summary(
+                    id,
+                    page,
+                    z,
+                    &object,
+                    page_box,
+                    created.contains(&id),
+                ))
             })
             .collect())
     }
@@ -357,7 +395,7 @@ impl<'lib> Session<'lib> {
             if !object.bounds().is_some_and(|b| b.contains(x, y)) {
                 continue;
             }
-            let hit = summary(*id, page, z, &object, page_box);
+            let hit = summary(*id, page, z, &object, page_box, self.created.contains(id));
             if mode == HitMode::Top && !hit.pickable {
                 continue;
             }
@@ -522,6 +560,90 @@ impl<'lib> Session<'lib> {
         })
     }
 
+    /// 置入组件：左上角放在 `at`（PDF 用户空间），插在页面最上面。返回新对象的编号。
+    pub fn place_component(
+        &mut self,
+        page: usize,
+        spec: &ComponentSpec,
+        at: (f32, f32),
+    ) -> Result<(ObjectId, Change)> {
+        spec.validate().map_err(EditError::Component)?;
+        self.doc.release_pages(KEPT_PAGES);
+        let (count, object) = {
+            let page_obj = self.doc.keep_page(page)?;
+            (page_obj.object_count(), spec.build(&page_obj, at.0, at.1)?)
+        };
+        let _ = page_ids(&mut self.ids, &mut self.next_id, page, count);
+        self.next_id += 1;
+        let id = ObjectId(self.next_id);
+        let mut atom = Atom::Insert {
+            id,
+            slot: (page, count),
+            object: Some(object),
+        };
+        let mut log = ChangeLog::default();
+        self.apply(&mut atom, true, &mut log)?;
+        self.created.insert(id);
+        self.redo.clear();
+        self.undo.push(Command {
+            label: "置入组件",
+            atoms: vec![atom],
+        });
+        self.trim();
+        self.version += 1;
+        Ok((id, log.finish(self.version)))
+    }
+
+    /// 组件现在的参数。
+    pub fn component(&mut self, id: ObjectId) -> Result<ComponentSpec> {
+        self.doc.release_pages(KEPT_PAGES);
+        let (page, z) = self.locate(id)?;
+        let page_obj = self.doc.keep_page(page)?;
+        let object = page_obj.object(z).ok_or(EditError::NoObject(id))?;
+        ComponentSpec::read(&object).ok_or(EditError::NotComponent(id))
+    }
+
+    /// 改组件参数：按新参数重新生成，放在原来放置的位置（锚点），编号不变。
+    pub fn update_component(&mut self, id: ObjectId, spec: &ComponentSpec) -> Result<Change> {
+        spec.validate().map_err(EditError::Component)?;
+        self.doc.release_pages(KEPT_PAGES);
+        let (page, z) = self.locate(id)?;
+        if !self.created.contains(&id)
+            && let Some(reason) = self.check_fidelity(page)?
+        {
+            return Err(EditError::PageNotEditable { page, reason });
+        }
+        let replacement = {
+            let page_obj = self.doc.keep_page(page)?;
+            let object = page_obj.object(z).ok_or(EditError::NoObject(id))?;
+            let current = ComponentSpec::read(&object).ok_or(EditError::NotComponent(id))?;
+            let bounds = object.bounds().ok_or(EditError::NoObject(id))?;
+            // 包围盒的左上角不一定是放置时的锚点（文字的顶边在字形上）。按现在的参数在原点生成一份，
+            // 量出包围盒相对锚点偏了多少，减回去就是锚点；不然每改一次文字都会往下漂。
+            let probe = current.build(&page_obj, 0.0, 0.0)?;
+            let offset = probe.as_object().bounds().ok_or(EditError::NoObject(id))?;
+            spec.build(
+                &page_obj,
+                bounds.left - offset.left,
+                bounds.top - offset.top,
+            )?
+        };
+        let mut atom = Atom::Replace {
+            id,
+            spare: Some(replacement),
+        };
+        let mut log = ChangeLog::default();
+        self.apply(&mut atom, true, &mut log)?;
+        self.redo.clear();
+        self.undo.push(Command {
+            label: "改组件参数",
+            atoms: vec![atom],
+        });
+        self.trim();
+        self.version += 1;
+        Ok(log.finish(self.version))
+    }
+
     pub fn undo(&mut self) -> Result<Change> {
         self.doc.release_pages(KEPT_PAGES);
         let mut command = self.undo.pop().ok_or(EditError::NothingToUndo)?;
@@ -579,11 +701,11 @@ impl<'lib> Session<'lib> {
             return Err(EditError::NoTarget);
         }
         self.doc.release_pages(KEPT_PAGES);
-        // 先确认对象都在、所在的页都能改，再动文档。
+        // 先确认对象都在、所在的页都能改，再动文档。只动了本次会话新加的对象的页不用校验。
         let mut pages: Vec<usize> = Vec::new();
         for id in &targets {
             let (page, _) = self.locate(*id)?;
-            if !pages.contains(&page) {
+            if !pages.contains(&page) && !self.created.contains(id) {
                 pages.push(page);
             }
         }
@@ -666,34 +788,84 @@ impl<'lib> Session<'lib> {
             Atom::Delete { id, slot, object } => {
                 if forward {
                     let (page, z) = self.locate(*id)?;
-                    let (detached, was) = self.with_page(page, |page_obj| {
-                        let was = page_obj.object(z).and_then(|o| o.bounds());
-                        Ok((page_obj.detach_at(z)?, was))
-                    })?;
-                    if let Some(ids) = self.ids.get_mut(&page) {
-                        ids.remove(z);
-                    }
+                    *object = Some(self.take_out(*id, page, z, log)?);
                     *slot = Some((page, z));
-                    *object = Some(detached);
-                    log.page(page).removed.push(*id);
-                    log.painted(page, was);
                 } else {
-                    let (page, z) = slot.ok_or(EditError::NoObject(*id))?;
-                    let detached = object.as_mut().ok_or(EditError::NoObject(*id))?;
-                    let page_obj = self.doc.keep_page(page)?;
-                    page_obj.attach(detached, z)?;
-                    // 句柄已经归页面。生成内容流即使失败，撤销记录也不能再销毁它。
-                    *object = None;
-                    if let Some(ids) = self.ids.get_mut(&page) {
-                        ids.insert(z.min(ids.len()), *id);
-                    }
-                    let now = page_obj.object(z).and_then(|o| o.bounds());
-                    page_obj.generate_content()?;
-                    log.page(page).added.push(*id);
-                    log.painted(page, now);
+                    let slot = slot.ok_or(EditError::NoObject(*id))?;
+                    self.put_back(*id, slot, object, log)?;
                 }
             }
+            Atom::Insert { id, slot, object } => {
+                if forward {
+                    self.put_back(*id, *slot, object, log)?;
+                } else {
+                    let (page, z) = self.locate(*id)?;
+                    *object = Some(self.take_out(*id, page, z, log)?);
+                    *slot = (page, z);
+                }
+            }
+            Atom::Replace { id, spare } => {
+                let (page, z) = self.locate(*id)?;
+                let incoming = spare.as_mut().ok_or(EditError::NoObject(*id))?;
+                let (outgoing, was, now) = self.with_page(page, |page_obj| {
+                    let was = page_obj.object(z).and_then(|o| o.bounds());
+                    let mut outgoing = page_obj.detach_at(z)?;
+                    if let Err(err) = page_obj.attach(incoming, z) {
+                        let _ = page_obj.attach(&mut outgoing, z);
+                        return Err(err.into());
+                    }
+                    let now = page_obj.object(z).and_then(|o| o.bounds());
+                    Ok((outgoing, was, now))
+                })?;
+                *spare = Some(outgoing);
+                log.page(page).modified.push(*id);
+                log.painted(page, was);
+                log.painted(page, now);
+            }
         }
+        Ok(())
+    }
+
+    /// 把对象从页面上摘下来交给调用方，编号表跟着改。
+    fn take_out(
+        &mut self,
+        id: ObjectId,
+        page: usize,
+        z: usize,
+        log: &mut ChangeLog,
+    ) -> Result<DetachedObject> {
+        let (detached, was) = self.with_page(page, |page_obj| {
+            let was = page_obj.object(z).and_then(|o| o.bounds());
+            Ok((page_obj.detach_at(z)?, was))
+        })?;
+        if let Some(ids) = self.ids.get_mut(&page) {
+            ids.remove(z);
+        }
+        log.page(page).removed.push(id);
+        log.painted(page, was);
+        Ok(detached)
+    }
+
+    /// 把对象插到 `(页, 层级)`。插进去以后 `object` 变成 `None`。
+    fn put_back(
+        &mut self,
+        id: ObjectId,
+        (page, z): (usize, usize),
+        object: &mut Option<DetachedObject>,
+        log: &mut ChangeLog,
+    ) -> Result<()> {
+        let detached = object.as_mut().ok_or(EditError::NoObject(id))?;
+        let page_obj = self.doc.keep_page(page)?;
+        page_obj.attach(detached, z)?;
+        // 句柄已经归页面。生成内容流即使失败，撤销记录也不能再销毁它。
+        *object = None;
+        if let Some(ids) = self.ids.get_mut(&page) {
+            ids.insert(z.min(ids.len()), id);
+        }
+        let now = page_obj.object(z).and_then(|o| o.bounds());
+        page_obj.generate_content()?;
+        log.page(page).added.push(id);
+        log.painted(page, now);
         Ok(())
     }
 
@@ -973,6 +1145,7 @@ fn summary(
     z: usize,
     object: &PageObject<'_>,
     page_box: Option<Rect>,
+    added: bool,
 ) -> ObjectSummary {
     let bounds = object.bounds();
     ObjectSummary {
@@ -982,6 +1155,8 @@ fn summary(
         kind: object.kind(),
         bounds,
         pickable: !skipped_when_picking(object, bounds, page_box),
+        component: ComponentSpec::read(object),
+        added,
     }
 }
 
@@ -1022,6 +1197,7 @@ mod tests {
     use pdfium_sys::{Library, Matrix, PageObject, Rect, Rgba};
 
     use super::{EditError, HitMode, ObjectId, Session};
+    use crate::component::{ComponentKind, ComponentSpec};
 
     const DARK: Rgba = Rgba {
         r: 10,
@@ -1851,5 +2027,322 @@ mod tests {
             session.check_fidelity(0).unwrap(),
             Some("重新生成内容流后页面的画面变了")
         );
+    }
+
+    fn text_spec(content: &str, size: f32) -> ComponentSpec {
+        ComponentSpec {
+            kind: ComponentKind::Text,
+            content: content.to_owned(),
+            size,
+        }
+    }
+
+    fn barcode_spec(content: &str, height: f32) -> ComponentSpec {
+        ComponentSpec {
+            kind: ComponentKind::Code128,
+            content: content.to_owned(),
+            size: height,
+        }
+    }
+
+    fn summary_of(session: &mut Session<'_>, id: ObjectId) -> Option<super::ObjectSummary> {
+        session.objects(0).unwrap().into_iter().find(|o| o.id == id)
+    }
+
+    /// 置入、改参数、撤销、重做：编号不变，改参数时左上角留在原处，参数从对象的标记内容读回来。
+    #[test]
+    fn component_place_update_undo_round_trip() {
+        with_session(|session| {
+            let (id, change) = session
+                .place_component(0, &barcode_spec("ABC-123", 30.0), (100.0, 90.0))
+                .unwrap();
+            assert_eq!(change.version, 1);
+            assert_eq!(change.pages[0].added, vec![id]);
+            let placed = summary_of(session, id).expect("置入了");
+            assert_eq!(placed.z, 1, "插在最上面");
+            assert!(placed.added);
+            assert!(
+                !session.objects(0).unwrap()[0].added,
+                "原有的矩形不是新加的"
+            );
+            assert_eq!(placed.component, Some(barcode_spec("ABC-123", 30.0)));
+            let bounds = placed.bounds.unwrap();
+            assert!((bounds.left - 100.0).abs() < 0.01 && (bounds.top - 90.0).abs() < 0.01);
+            assert!((bounds.height() - 30.0).abs() < 0.01);
+            // 11 个模块 × (起始 + 7 个字符 + 校验) + 终止 13 个模块，终止符以条结尾
+            assert!(
+                (bounds.width() - (11.0 * 9.0 + 13.0)).abs() < 0.01,
+                "{bounds:?}"
+            );
+            assert_eq!(
+                session.hit_test(0, 110.0, 75.0, HitMode::Top).unwrap()[0].id,
+                id
+            );
+
+            let change = session
+                .update_component(id, &barcode_spec("42", 20.0))
+                .unwrap();
+            assert_eq!(change.pages[0].modified, vec![id]);
+            let updated = summary_of(session, id).expect("编号不变");
+            assert_eq!(updated.component, Some(barcode_spec("42", 20.0)));
+            let now = updated.bounds.unwrap();
+            assert!((now.left - 100.0).abs() < 0.01 && (now.top - 90.0).abs() < 0.01);
+            assert!(now.width() < bounds.width());
+
+            // 组件也能像别的对象一样移动；改参数沿用移动后的左上角。
+            session
+                .transform(&[id], Matrix::translation(-50.0, 0.0))
+                .unwrap();
+            session
+                .update_component(id, &text_spec("Hello", 10.0))
+                .unwrap();
+            let text = summary_of(session, id).unwrap();
+            assert_eq!(text.kind, pdfium_sys::ObjectKind::Text);
+            assert!((text.bounds.unwrap().left - 50.0).abs() < 1.5);
+            assert_eq!(
+                session.history(),
+                vec!["置入组件", "改组件参数", "变换", "改组件参数"]
+            );
+
+            for _ in 0..3 {
+                session.undo().unwrap();
+            }
+            assert_eq!(
+                summary_of(session, id).unwrap().component,
+                Some(barcode_spec("ABC-123", 30.0))
+            );
+            assert_eq!(session.undo().unwrap().pages[0].removed, vec![id]);
+            assert!(summary_of(session, id).is_none());
+            assert_eq!(session.redo().unwrap().pages[0].added, vec![id]);
+            assert_eq!(summary_of(session, id).unwrap().z, 1);
+
+            // 原有的矩形不是组件
+            let rect = session.objects(0).unwrap()[0].id;
+            assert!(matches!(
+                session.update_component(rect, &text_spec("x", 10.0)),
+                Err(EditError::NotComponent(_))
+            ));
+            assert!(matches!(
+                session.place_component(0, &text_spec("提单", 10.0), (10.0, 90.0)),
+                Err(EditError::Component(_))
+            ));
+            assert_eq!(session.history().len(), 1, "失败的命令不进历史");
+        });
+    }
+
+    /// 把一组条码画成 PPM 交给 ZXing 识别（`tests/prototypes/components/check_code128.py`）。
+    /// 平时不跑：`MAGPDF_COMPONENT_DUMP=<目录> cargo test -p magpdf-engine -- --ignored dump_code128`。
+    #[test]
+    #[ignore = "给 ZXing 识别用，要指定输出目录"]
+    fn dump_code128_samples_for_zxing() {
+        let Some(dir) = std::env::var_os("MAGPDF_COMPONENT_DUMP") else {
+            return;
+        };
+        let dir = std::path::PathBuf::from(dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let printable: String = (' '..='~').collect();
+        let samples = [
+            "ABC-123",
+            "0042",
+            "1234567890",
+            "12345",
+            "Hello World!",
+            "MAG/BL-2026-0001",
+            " lead and trail ",
+            &printable[..48],
+            &printable[48..],
+        ];
+        let _guard = crate::pdfium_lock::lock();
+        let lib = Library::init().expect("PDFium");
+        let mut expected = String::new();
+        for (index, content) in samples.iter().enumerate() {
+            let mut session = Session::create(&lib).unwrap();
+            let width = 40.0 + 11.0 * (content.len() as f32 + 3.0) + 13.0;
+            session.add_blank_page(width, 60.0).unwrap();
+            session
+                .place_component(0, &barcode_spec(content, 40.0), (20.0, 50.0))
+                .unwrap();
+            let bitmap = session
+                .page(0)
+                .unwrap()
+                .render(pdfium_sys::RenderOptions {
+                    scale: 2.0,
+                    ..Default::default()
+                })
+                .unwrap();
+            let mut ppm = format!("P6\n{} {}\n255\n", bitmap.width(), bitmap.height()).into_bytes();
+            for y in 0..bitmap.height() {
+                for x in 0..bitmap.width() {
+                    let [b, g, r, _] = bitmap.pixel(x, y);
+                    ppm.extend_from_slice(&[r, g, b]);
+                }
+            }
+            std::fs::write(dir.join(format!("code128-{index}.ppm")), ppm).unwrap();
+            expected.push_str(content);
+            expected.push('\n');
+        }
+        std::fs::write(dir.join("expected.txt"), expected).unwrap();
+    }
+
+    /// 文字的包围盒顶边在字形上，不在放置时的锚点上：改参数要按锚点重新生成，改几次都不能往下漂。
+    #[test]
+    fn updating_text_keeps_its_anchor() {
+        with_session(|session| {
+            let (id, _) = session
+                .place_component(0, &text_spec("Hello", 12.0), (20.0, 90.0))
+                .unwrap();
+            let start = summary_of_bounds(session, id);
+            for content in ["Hello", "Hello", "World", "x", "Hello"] {
+                session
+                    .update_component(id, &text_spec(content, 12.0))
+                    .unwrap();
+            }
+            let after = summary_of_bounds(session, id);
+            assert!(
+                (after.top - start.top).abs() < 0.01 && (after.left - start.left).abs() < 0.01,
+                "{start:?} -> {after:?}"
+            );
+            // 换字号再换回来，也回到原处
+            session
+                .update_component(id, &text_spec("Hello", 30.0))
+                .unwrap();
+            session
+                .update_component(id, &text_spec("Hello", 12.0))
+                .unwrap();
+            let back = summary_of_bounds(session, id);
+            assert!((back.top - start.top).abs() < 0.01, "{start:?} -> {back:?}");
+        });
+    }
+
+    fn summary_of_bounds(session: &mut Session<'_>, id: ObjectId) -> Rect {
+        summary_of(session, id).unwrap().bounds.unwrap()
+    }
+
+    /// 参数存在标记内容里，存盘再打开还认得出来。内容里的括号、反斜杠要在 PDF 字符串里转义。
+    #[test]
+    fn components_survive_save_and_reopen() {
+        use pdfium_sys::{Document, SaveFlags};
+
+        const TRICKY: &str = r"BL (No.) \0042) (";
+        with_session(|session| {
+            let (_, _) = session
+                .place_component(0, &text_spec(TRICKY, 14.0), (20.0, 95.0))
+                .unwrap();
+            session
+                .place_component(0, &barcode_spec("0042", 25.0), (100.0, 95.0))
+                .unwrap();
+            let bytes = session
+                .document()
+                .save_to_vec(SaveFlags::NO_INCREMENTAL)
+                .unwrap();
+            let doc = Document::load_bytes(session.lib, bytes, None).unwrap();
+            let mut reopened = Session::from_document(session.lib, doc);
+            let components: Vec<_> = reopened
+                .objects(0)
+                .unwrap()
+                .into_iter()
+                .filter_map(|o| o.component)
+                .collect();
+            assert_eq!(
+                components,
+                vec![text_spec(TRICKY, 14.0), barcode_spec("0042", 25.0)]
+            );
+        });
+    }
+
+    /// 只能叠加内容的页（这里是两页共用一条内容流）上也能放组件、移动、改参数：新对象写进追加的
+    /// 内容流，共用的那条一个字节都不变，另一页的画面不变，这一页组件以外的地方画面也不变。
+    /// 原有对象仍然不能改。
+    #[test]
+    fn components_go_on_overlay_only_pages_without_touching_existing_content() {
+        use pdfium_sys::{Document, RenderOptions, SaveFlags};
+
+        let _guard = crate::pdfium_lock::lock();
+        let lib = Library::init().expect("PDFium");
+        let body = b"0.1 0.2 0.3 rg 10 10 40 20 re f 0 0 1 rg 120 60 50 30 re f";
+        let pdf = build_minimal_pdf(&[
+            b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+            b"<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_vec(),
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] /Contents 5 0 R >>".to_vec(),
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] /Contents 5 0 R >>".to_vec(),
+            format!(
+                "<< /Length {} >>\nstream\n{}\nendstream",
+                body.len(),
+                std::str::from_utf8(body).unwrap()
+            )
+            .into_bytes(),
+        ]);
+        let render = |doc: &Document<'_>, page: usize| {
+            doc.page(page)
+                .unwrap()
+                .render(RenderOptions::default())
+                .unwrap()
+        };
+        let original = Document::load_bytes(&lib, pdf.clone(), None).unwrap();
+        let (before_0, before_1) = (render(&original, 0), render(&original, 1));
+
+        let doc = Document::load_bytes(&lib, pdf, None).unwrap();
+        let mut session = Session::from_document(&lib, doc);
+        let original_ids: Vec<ObjectId> =
+            session.objects(0).unwrap().iter().map(|o| o.id).collect();
+        let (id, _) = session
+            .place_component(0, &barcode_spec("MAG0001", 20.0), (60.0, 50.0))
+            .unwrap();
+        assert!(
+            session.check_fidelity(0).unwrap().is_some(),
+            "这一页只能叠加"
+        );
+        session
+            .transform(&[id], Matrix::translation(5.0, -5.0))
+            .unwrap();
+        session
+            .update_component(id, &barcode_spec("MAG0002", 20.0))
+            .unwrap();
+        assert!(matches!(
+            session.transform(&original_ids[..1], Matrix::translation(5.0, 0.0)),
+            Err(EditError::PageNotEditable { page: 0, .. })
+        ));
+        assert!(matches!(
+            session.transform(&[original_ids[0], id], Matrix::translation(5.0, 0.0)),
+            Err(EditError::PageNotEditable { page: 0, .. })
+        ));
+        let component = summary_of(&mut session, id).unwrap().bounds.unwrap();
+
+        let saved = session
+            .document()
+            .save_to_vec(SaveFlags::NO_INCREMENTAL)
+            .unwrap();
+        // PDFium 存盘时把没压缩的流压缩了，比解码后的内容。
+        let parsed = magpdf_content::PdfDocument::load(saved.clone()).unwrap();
+        let Some(super::PdfObject::Stream(shared)) = parsed.object(5) else {
+            panic!("共用的内容流还是 5 号对象");
+        };
+        assert_eq!(parsed.decode_stream(&shared), body, "共用的内容流原样留着");
+        let reopened = Document::load_bytes(&lib, saved, None).unwrap();
+        let (after_0, after_1) = (render(&reopened, 0), render(&reopened, 1));
+        assert_eq!(
+            crate::compare::compare(&before_1, &after_1, &Default::default()).diff_pixels,
+            0,
+            "另一页不变"
+        );
+        let mut outside = 0;
+        let mut inside = 0;
+        for y in 0..before_0.height() {
+            for x in 0..before_0.width() {
+                let (px, py) = (x as f32 + 0.5, 100.0 - (y as f32 + 0.5));
+                let near = px > component.left - 2.0
+                    && px < component.right + 2.0
+                    && py > component.bottom - 2.0
+                    && py < component.top + 2.0;
+                let differs = before_0.pixel(x, y) != after_0.pixel(x, y);
+                match (near, differs) {
+                    (false, true) => outside += 1,
+                    (true, true) => inside += 1,
+                    _ => {}
+                }
+            }
+        }
+        assert_eq!(outside, 0, "组件以外的地方画面不变");
+        assert!(inside > 100, "组件画上去了：{inside} 个像素");
     }
 }

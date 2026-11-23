@@ -1,3 +1,5 @@
+import type { Point } from '../geometry';
+import type { ComponentValues, PlaceableComponent } from './components';
 import type { Matrix } from './pageSpace';
 
 /** 对一页上的若干对象做同一个变换。 */
@@ -21,6 +23,10 @@ export interface DocumentEditor {
   /** 变换对象。几页上都有选中的对象时每页一条，各页的矩阵都是那一页的页面坐标里的。 */
   transformObjects(changes: readonly PageTransform[]): void;
   deleteObjects(ids: readonly string[]): void;
+  /** 置入组件，参数用默认值，左上角放在 `at`（页面坐标，pt）。放好之后选中它。 */
+  placeComponent(page: number, kind: PlaceableComponent, at: Point): void;
+  /** 改组件参数，只给要改的项。按新参数重新生成，左上角不动。 */
+  updateComponent(id: string, values: Partial<ComponentValues>): void;
   undo(): void;
   redo(): void;
 }
