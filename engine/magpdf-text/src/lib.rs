@@ -29,6 +29,7 @@ pub mod fontmatch;
 pub mod geom;
 pub mod glyph;
 pub mod layout;
+pub mod retext;
 pub mod shaping;
 pub mod subset;
 

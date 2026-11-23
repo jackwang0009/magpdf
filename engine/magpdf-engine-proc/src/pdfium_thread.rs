@@ -13,7 +13,9 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use magpdf_engine::component::{ComponentKind, ComponentSpec};
-use magpdf_engine::edit::{Change, EditError, HitMode, ObjectId, ObjectSummary, Session};
+use magpdf_engine::edit::{
+    Change, EditError, HitMode, ObjectId, ObjectSummary, ObjectText, Session, TextOutcome,
+};
 use magpdf_engine::save::{SaveError, write_replacing};
 use magpdf_ipc::messages::DocInfo;
 use pdfium_sys::{
@@ -242,6 +244,20 @@ pub enum Job {
         doc_id: u32,
         page_ids: Vec<u32>,
         reply: Reply<()>,
+    },
+    /// 文字对象现在的文字。
+    TextInfo {
+        doc_id: u32,
+        id: ObjectId,
+        reply: Reply<ObjectText>,
+    },
+    /// 改字。`base_version` 先核对文档版本。
+    SetText {
+        doc_id: u32,
+        base_version: u64,
+        id: ObjectId,
+        text: String,
+        reply: Reply<(Change, TextOutcome)>,
     },
     /// 完整重写保存到 `path`（`None` 时存回打开的文件）。成功后文档的路径换成存到的地方。
     Save {
@@ -518,6 +534,31 @@ impl EngineHandle {
         .await
     }
 
+    pub async fn text_info(
+        &self,
+        doc_id: u32,
+        id: ObjectId,
+    ) -> std::result::Result<ObjectText, EngineError> {
+        self.ask(|reply| Job::TextInfo { doc_id, id, reply }).await
+    }
+
+    pub async fn set_text(
+        &self,
+        doc_id: u32,
+        base_version: u64,
+        id: ObjectId,
+        text: String,
+    ) -> std::result::Result<(Change, TextOutcome), EngineError> {
+        self.ask(|reply| Job::SetText {
+            doc_id,
+            base_version,
+            id,
+            text,
+            reply,
+        })
+        .await
+    }
+
     /// 完整重写保存，`path` 为 `None` 时存回打开的文件。
     pub async fn save(
         &self,
@@ -671,6 +712,39 @@ impl PdfiumState {
                 reply,
             } => {
                 let _ = reply.send(self.save(doc_id, path));
+            }
+            Job::TextInfo { doc_id, id, reply } => {
+                let _ = reply.send(
+                    self.find_mut(doc_id)
+                        .and_then(|d| Ok(d.session.text_info(id)?)),
+                );
+            }
+            Job::SetText {
+                doc_id,
+                base_version,
+                id,
+                text,
+                reply,
+            } => {
+                let outcome = self.find_mut(doc_id).and_then(|d| {
+                    let version = d.session.version();
+                    if base_version != version {
+                        return Err(EngineError::VersionConflict {
+                            current: version,
+                            base: base_version,
+                        });
+                    }
+                    Ok(d.session.set_text(id, &text)?)
+                });
+                self.report_new_verdicts(doc_id);
+                if outcome.is_ok()
+                    && let Ok(d) = self.find_mut(doc_id)
+                    && d.unsaved()
+                    && d.dirty_since.is_none()
+                {
+                    d.dirty_since = Some(Instant::now());
+                }
+                let _ = reply.send(outcome);
             }
             Job::Shutdown => {}
         }

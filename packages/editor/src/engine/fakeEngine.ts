@@ -12,10 +12,14 @@ import type {
   DocSnapshotParams,
   EditDeleteParams,
   EditResult,
+  EditSetTextParams,
+  EditSetTextResult,
   EditTransformParams,
   FidelityCheckParams,
   FidelityResult,
   HistoryParams,
+  ObjDetail,
+  ObjGetParams,
   ObjListParams,
   ObjectKind,
   ObjectSummary,
@@ -38,7 +42,12 @@ export interface FakeObject {
   readonly pickable?: boolean;
   /** 置入的组件。假引擎里组件都是这次会话新加的 */
   comp?: { readonly type: string; params: { content: string; size: number } };
+  /** 文字对象的文字（`obj.get` 的文字详情）。`reason` 有值时不能改 */
+  text?: { content: string; font: string; readonly size: number; readonly reason?: string };
 }
+
+/** 假引擎改字时，写不出的字（非 ASCII）换成这个字体，和真引擎的第 3 级一样报“字体已替换”。 */
+export const FAKE_REPLACEMENT_FONT = 'SimHei';
 
 export interface FakePage {
   readonly pageId: number;
@@ -194,6 +203,10 @@ export class FakeEngine {
         return this.place(params as CompPlaceParams);
       case METHOD.COMP_UPDATE:
         return this.updateComponent(params as CompUpdateParams);
+      case METHOD.OBJ_GET:
+        return this.details(params as ObjGetParams);
+      case METHOD.EDIT_SET_TEXT:
+        return this.setText(params as EditSetTextParams);
       case METHOD.HISTORY_UNDO:
         return this.history(params as HistoryParams, 'undo');
       case METHOD.HISTORY_REDO:
@@ -407,6 +420,59 @@ export class FakeEngine {
         object.comp = before;
       },
     });
+  }
+
+  private details(params: ObjGetParams): ObjDetail[] {
+    const document = this.document(params.docId);
+    return params.ids.map((id) => {
+      const object = document.pages.flatMap((page) => page.objects).find((o) => o.id === id);
+      if (!object) throw { code: ERROR_CODE.E_OBJECT_NOT_FOUND, message: '对象不存在' };
+      const text = object.kind === 'text' && !object.comp ? object.text : undefined;
+      if (!text) return { id };
+      return {
+        id,
+        text: {
+          content: text.content,
+          font: text.font,
+          size: text.size,
+          editable: text.reason === undefined,
+          ...(text.reason ? { reason: text.reason } : {}),
+        },
+      };
+    });
+  }
+
+  /** 改字：ASCII 用原字体（第 1 级），别的字换成 `FAKE_REPLACEMENT_FONT`（第 3 级）。 */
+  private setText(params: EditSetTextParams): EditSetTextResult {
+    const document = this.document(params.docId);
+    const [index, [object]] = [...this.locate(document, params.baseVersion, [params.id])][0]!;
+    const before = object?.text;
+    if (!object || object.kind !== 'text' || object.comp || !before) {
+      throw invalid(`对象 ${params.id} 不是文字`);
+    }
+    if (params.text.length === 0 || before.reason) {
+      const error: RpcError = {
+        code: ERROR_CODE.E_TEXT_NOT_EDITABLE,
+        message: before.reason ?? '文字不能是空的',
+      };
+      throw error;
+    }
+    const ascii = /^[\x20-\x7e]*$/.test(params.text);
+    const after = {
+      ...before,
+      content: params.text,
+      font: ascii ? before.font : FAKE_REPLACEMENT_FONT,
+    };
+    const result = this.commit(document, {
+      pages: [index],
+      forward: () => {
+        object.text = after;
+      },
+      backward: () => {
+        object.text = before;
+      },
+    });
+    return { version: result.version, tier: ascii ? 1 : 3, fontReplaced: !ascii, font: after.font };
   }
 
   private checkVersion(document: FakeDocument, baseVersion: number): void {

@@ -79,6 +79,8 @@ export interface EditorState {
   placeComponent(id: string, page: number, kind: PlaceableComponent, at: Point): void;
   /** 模拟文档：改组件参数。 */
   updateComponent(id: string, objectId: string, values: Partial<ComponentValues>): void;
+  /** 模拟文档：改文字对象（外观是一段文字的）的文字。 */
+  setText(id: string, objectId: string, text: string): void;
   setPlacing(kind: PlaceableComponent | null): void;
   setStatusMessage(text: string | null): void;
   setTool(tool: ToolId): void;
@@ -288,6 +290,14 @@ export function createEditorStore(): EditorStore {
           const next = { ...object.component.values, ...values };
           return mockComponentObject(object.id, object.component.kind, next, object.bbox);
         });
+      },
+
+      setText(id, objectId, text) {
+        editObjects(id, [objectId], t.history.setText, (object) =>
+          object.appearance?.kind === 'text'
+            ? { ...object, appearance: { ...object.appearance, text } }
+            : object,
+        );
       },
 
       setPlacing(kind) {

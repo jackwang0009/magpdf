@@ -884,6 +884,105 @@ async fn components_are_placed_listed_updated_and_undone_over_the_pipe() {
     assert_eq!(restored, before);
 }
 
+/// 改原有文字（《接口协议》6.4 `obj.get` 的文字详情，原型的 `edit.setText`）：读出文字、改、换字体、出错、撤销。
+#[tokio::test]
+async fn existing_text_is_read_changed_and_undone_over_the_pipe() {
+    let mut engine = Engine::start(None).await;
+    engine.hello().await;
+    let doc_id = engine.open("color-devicergb.pdf").await;
+    let objects = engine.objects(doc_id).await;
+    let text_id = objects
+        .iter()
+        .find(|o| o["kind"] == "text")
+        .and_then(|o| o["id"].as_u64())
+        .expect("样本里有文字");
+
+    let placed = engine
+        .call(
+            method::COMP_PLACE,
+            json!({
+                "docId": doc_id, "baseVersion": 0, "pageId": 0,
+                "type": "text", "params": { "content": "Label" }, "at": [10, 50],
+            }),
+        )
+        .await;
+    let comp_id = placed["compId"].as_u64().unwrap();
+    engine.event(event::DOC_CHANGED).await;
+
+    let details = engine
+        .call(
+            method::OBJ_GET,
+            json!({ "docId": doc_id, "ids": [text_id, comp_id], "detail": "text" }),
+        )
+        .await;
+    let original = details[0]["text"]["content"].as_str().unwrap().to_owned();
+    assert!(!original.is_empty(), "{details}");
+    assert_eq!(details[0]["id"], text_id);
+    assert_eq!(
+        (&details[0]["text"]["font"], &details[0]["text"]["editable"]),
+        (&json!("Helvetica"), &json!(true)),
+        "{details}"
+    );
+    assert_eq!(
+        details[1],
+        json!({ "id": comp_id }),
+        "文本组件按组件改参数，不给文字详情"
+    );
+
+    let result = engine
+        .call(
+            method::EDIT_SET_TEXT,
+            json!({ "docId": doc_id, "baseVersion": 1, "id": text_id, "text": "MagPDF 123" }),
+        )
+        .await;
+    assert_eq!(
+        result,
+        json!({ "version": 2, "tier": 1, "fontReplaced": false, "font": "Helvetica" })
+    );
+    let (_, changed) = engine.event(event::DOC_CHANGED).await;
+    assert_eq!(changed["changes"][0]["modified"], json!([text_id]));
+    let read_back = engine
+        .call(
+            method::OBJ_GET,
+            json!({ "docId": doc_id, "ids": [text_id], "detail": "text" }),
+        )
+        .await;
+    assert_eq!(read_back[0]["text"]["content"], "MagPDF 123");
+
+    let empty = engine
+        .call_err(
+            method::EDIT_SET_TEXT,
+            json!({ "docId": doc_id, "baseVersion": 2, "id": text_id, "text": "" }),
+        )
+        .await;
+    assert_eq!(empty["code"], ErrorCode::TextNotEditable.code(), "{empty}");
+    let component = engine
+        .call_err(
+            method::EDIT_SET_TEXT,
+            json!({ "docId": doc_id, "baseVersion": 2, "id": comp_id, "text": "X" }),
+        )
+        .await;
+    assert_eq!(component["code"], ErrorCode::InvalidArgument.code());
+    let stale = engine
+        .call_err(
+            method::EDIT_SET_TEXT,
+            json!({ "docId": doc_id, "baseVersion": 1, "id": text_id, "text": "X" }),
+        )
+        .await;
+    assert_eq!(stale["code"], ErrorCode::VersionConflict.code());
+
+    engine
+        .edit(method::HISTORY_UNDO, json!({ "docId": doc_id }))
+        .await;
+    let undone = engine
+        .call(
+            method::OBJ_GET,
+            json!({ "docId": doc_id, "ids": [text_id], "detail": "text" }),
+        )
+        .await;
+    assert_eq!(undone[0]["text"]["content"], json!(original));
+}
+
 /// 保存（《接口协议》6.1 `doc.save`，原型只有完整重写）：存回原文件、另存为、事件、恢复文件跟着换路径、出错。
 #[tokio::test]
 async fn documents_are_saved_in_place_and_saved_as_a_new_file() {

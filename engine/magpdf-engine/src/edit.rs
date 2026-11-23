@@ -103,6 +103,37 @@ pub enum EditError {
     Component(ComponentProblem),
     #[error("对象 {} 不是组件", .0.0)]
     NotComponent(ObjectId),
+    /// 不是普通的文字对象（不是文字，或者是文本组件：组件改参数）。
+    #[error("对象 {} 不是能直接改字的文字对象", .0.0)]
+    NotText(ObjectId),
+    /// 这段文字改不了，内容是给用户看的说明。
+    #[error("{0}")]
+    Text(String),
+}
+
+pub use magpdf_text::retext::ObjectText;
+
+/// 改字的结果（方案 5.2 的哪一级）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextOutcome {
+    /// 1 用原字体，2 补字形，3 换字体
+    pub tier: u8,
+    /// 换了字体：界面提示“字体已替换”
+    pub font_replaced: bool,
+    /// 新对象用的字体
+    pub font: String,
+}
+
+/// 改字失败时给用户看的说法。
+fn text_problem(error: &magpdf_text::EditError) -> String {
+    match error {
+        magpdf_text::EditError::NotEditable => {
+            "这段文字没有 Unicode 映射，读不出原来的字，改不了".to_owned()
+        }
+        magpdf_text::EditError::Type3Font => "这段文字用的是 Type3 字体，原型改不了".to_owned(),
+        magpdf_text::EditError::NoTier(detail) => format!("找不到能显示这些字的字体（{detail}）"),
+        other => format!("改不了：{other}"),
+    }
 }
 
 pub type Result<T> = std::result::Result<T, EditError>;
@@ -614,6 +645,68 @@ impl<'lib> Session<'lib> {
     /// 完整重写成一份新文件的字节（方案 9.1，见 [`crate::save`]）。不改文档，撤销记录照旧。
     pub fn save_full(&self) -> std::result::Result<crate::save::Saved, crate::save::SaveError> {
         crate::save::full_save(self.lib, &self.doc, self.password.as_deref())
+    }
+
+    /// 文字对象现在的文字和能不能改（属性面板显示用）。文本组件不算：它的文字是组件参数。
+    pub fn text_info(&mut self, id: ObjectId) -> Result<ObjectText> {
+        self.doc.release_pages(KEPT_PAGES);
+        let (page, z) = self.locate(id)?;
+        let page_obj = self.doc.keep_page(page)?;
+        let object = page_obj.object(z).ok_or(EditError::NoObject(id))?;
+        if !object.is_text() || ComponentSpec::read(&object).is_some() {
+            return Err(EditError::NotText(id));
+        }
+        magpdf_text::retext::object_text(&page_obj, &object)
+            .map_err(|error| EditError::Text(text_problem(&error)))
+    }
+
+    /// 把文字对象的文字换成 `text`（方案 5.2 三级回退）：生成新的文字对象换掉旧的，编号不变，撤销换回旧对象。
+    /// 原有的对象要过保真校验（同移动、删除）。
+    pub fn set_text(&mut self, id: ObjectId, text: &str) -> Result<(Change, TextOutcome)> {
+        if text.is_empty() {
+            return Err(EditError::Text("文字不能是空的".to_owned()));
+        }
+        if text.chars().any(char::is_control) {
+            return Err(EditError::Text(
+                "原型只改一行字，不能有换行这类控制字符".to_owned(),
+            ));
+        }
+        self.doc.release_pages(KEPT_PAGES);
+        let (page, z) = self.locate(id)?;
+        if !self.created.contains(&id)
+            && let Some(reason) = self.check_fidelity(page)?
+        {
+            return Err(EditError::PageNotEditable { page, reason });
+        }
+        let (replacement, outcome) = {
+            let page_obj = self.doc.keep_page(page)?;
+            let object = page_obj.object(z).ok_or(EditError::NoObject(id))?;
+            if !object.is_text() || ComponentSpec::read(&object).is_some() {
+                return Err(EditError::NotText(id));
+            }
+            let made = magpdf_text::retext::retext_object(&self.doc, &page_obj, &object, text)
+                .map_err(|error| EditError::Text(text_problem(&error)))?;
+            let outcome = TextOutcome {
+                tier: made.tier.as_u8(),
+                font_replaced: made.font_replaced,
+                font: made.font,
+            };
+            (DetachedObject::adopt(made.object), outcome)
+        };
+        let mut atom = Atom::Replace {
+            id,
+            spare: Some(replacement),
+        };
+        let mut log = ChangeLog::default();
+        self.apply(&mut atom, true, &mut log)?;
+        self.redo.clear();
+        self.undo.push(Command {
+            label: "改字",
+            atoms: vec![atom],
+        });
+        self.trim();
+        self.version += 1;
+        Ok((log.finish(self.version), outcome))
     }
 
     /// 组件现在的参数。
@@ -2299,6 +2392,81 @@ mod tests {
             // 改了两次内容，三份子集只留最后一份
             assert!(saved.dropped >= 2, "去掉了 {} 个对象", saved.dropped);
         });
+    }
+
+    /// 改原有文字（方案 5.2）：读出原来的字；改成英文、改成中文（原字体里没有，换字体）；撤销、重做；
+    /// 存盘再打开提取得到新字；文本组件不走这条路。
+    #[test]
+    fn existing_text_can_be_changed_and_undone() {
+        use pdfium_sys::Document;
+
+        let _guard = crate::pdfium_lock::lock();
+        let lib = Library::init().expect("PDFium");
+        let sample = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/corpus/synthetic/color-devicergb.pdf");
+        let mut session = Session::open(&lib, &sample, None).unwrap();
+        let objects = session.objects(0).unwrap();
+        let text_id = objects
+            .iter()
+            .find(|o| o.kind == pdfium_sys::ObjectKind::Text)
+            .expect("样本里有文字")
+            .id;
+        let original = session.text_info(text_id).unwrap();
+        assert!(!original.text.is_empty());
+        assert_eq!(original.blocked, None, "{original:?}");
+
+        let (change, outcome) = session.set_text(text_id, "MagPDF 123").unwrap();
+        assert_eq!(change.pages[0].modified, vec![text_id]);
+        assert_eq!(
+            (outcome.tier, outcome.font_replaced, outcome.font.as_str()),
+            (1, false, "Helvetica"),
+            "不嵌入的 Helvetica 写英文用原字体"
+        );
+        assert_eq!(session.text_info(text_id).unwrap().text, "MagPDF 123");
+
+        session.undo().unwrap();
+        assert_eq!(session.text_info(text_id).unwrap().text, original.text);
+        session.redo().unwrap();
+        assert_eq!(session.text_info(text_id).unwrap().text, "MagPDF 123");
+
+        // 中文：原字体里没有，换一份覆盖的字体（没有中文字体的机器上跳过这一段）
+        let chinese = magpdf_text::fontmatch::FontLibrary::shared()
+            .candidates
+            .iter()
+            .any(|c| c.family == magpdf_text::fontmatch::Family::Hei);
+        if chinese {
+            let (_, outcome) = session.set_text(text_id, "提单号 MagPDF").unwrap();
+            assert!(outcome.font_replaced, "{outcome:?}");
+            assert!(
+                !["Thin", "Light", "Bold"]
+                    .iter()
+                    .any(|w| outcome.font.contains(w)),
+                "常规字重的 Helvetica 换成常规字重的黑体：{outcome:?}"
+            );
+            assert_eq!(session.text_info(text_id).unwrap().text, "提单号 MagPDF");
+        }
+
+        let expected = session.text_info(text_id).unwrap().text;
+        let saved = session.save_full().unwrap();
+        let reopened = Document::load_bytes(&lib, saved.bytes.to_vec(), None).unwrap();
+        let page = reopened.page(0).unwrap();
+        let chars = page.text().unwrap();
+        let extracted: String = (0..chars.char_count())
+            .filter_map(|i| chars.unicode(i).and_then(char::from_u32))
+            .collect();
+        assert!(extracted.contains(&expected), "提取出来是 {extracted:?}");
+
+        assert!(matches!(
+            session.set_text(text_id, "两\n行"),
+            Err(EditError::Text(_))
+        ));
+        let (component, _) = session
+            .place_component(0, &text_spec("Label", 10.0), (10.0, 50.0))
+            .unwrap();
+        assert!(matches!(
+            session.text_info(component),
+            Err(EditError::NotText(_))
+        ));
     }
 
     fn summary_of_bounds(session: &mut Session<'_>, id: ObjectId) -> Rect {

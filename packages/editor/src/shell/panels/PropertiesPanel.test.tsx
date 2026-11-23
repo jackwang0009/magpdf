@@ -3,9 +3,13 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import type { DocumentEditor, TextInfo } from '../../document/documentEditor';
+import type { PageObject } from '../../document/types';
 import { mmToPt } from '../../geometry';
 import { t } from '../../i18n';
 import { editorStore } from '../../store/editorStore';
+import { EditorHostContext } from '../editorHost';
+import type { EditorHost } from '../editorHost';
 import { PropertiesPanel } from './PropertiesPanel';
 
 declare global {
@@ -184,5 +188,142 @@ describe('属性面板：组件参数', () => {
     expect(view.querySelector('.mg-props-readonly')).toBeNull();
     expect(view.querySelector<HTMLInputElement>('#mg-comp-content')!.disabled).toBe(false);
     expect(view.textContent).toContain(t.properties.fontSize);
+  });
+});
+
+describe('属性面板：改原有文字', () => {
+  function addText(object: Partial<PageObject> = {}) {
+    act(() => {
+      const state = editorStore.getState();
+      const snapshot = state.documents['props-doc']!.snapshot;
+      state.updateSnapshot('props-doc', {
+        ...snapshot,
+        pages: [
+          {
+            ...snapshot.pages[0]!,
+            objects: [
+              {
+                id: 't1',
+                type: 'text',
+                name: '文字',
+                bbox: { x: 72, y: 72, width: 144, height: 12 },
+                ...object,
+              },
+            ],
+          },
+        ],
+      });
+      state.setSelection('props-doc', ['t1']);
+    });
+  }
+  const textInput = (view: HTMLElement) =>
+    view.querySelector<HTMLInputElement>('#mg-text-content')!;
+
+  /** 宿主打开的文档：文字向修改入口读，改了交给它。 */
+  function withEditor(info: TextInfo | null) {
+    const calls: [string, string][] = [];
+    const editor: DocumentEditor = {
+      transformObjects: () => undefined,
+      deleteObjects: () => undefined,
+      placeComponent: () => undefined,
+      updateComponent: () => undefined,
+      readText: () => Promise.resolve(info),
+      setText: (id, text) => calls.push([id, text]),
+      undo: () => undefined,
+      redo: () => undefined,
+    };
+    const host: EditorHost = {
+      openDocument: () => Promise.resolve(),
+      tileProvider: () => undefined,
+      documentEditor: () => editor,
+      onNotice: () => () => undefined,
+    };
+    return { host, calls };
+  }
+
+  async function renderWith(host: EditorHost): Promise<HTMLDivElement> {
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () =>
+      root!.render(
+        <EditorHostContext.Provider value={host}>
+          <PropertiesPanel />
+        </EditorHostContext.Provider>,
+      ),
+    );
+    return container;
+  }
+
+  it('引擎的文档：读出文字、字体、字号；空的不发，改了回车交给引擎', async () => {
+    addText();
+    const { host, calls } = withEditor({
+      content: 'BL NO. 0042',
+      font: 'Helvetica',
+      size: 10,
+      editable: true,
+    });
+    const view = await renderWith(host);
+    expect(textInput(view).value).toBe('BL NO. 0042');
+    expect(view.textContent).toContain('Helvetica');
+    expect(view.textContent).toContain('10 pt');
+
+    type(textInput(view), '');
+    act(() => textInput(view).dispatchEvent(new FocusEvent('focusout', { bubbles: true })));
+    expect(view.querySelector('[role="alert"]')?.textContent).toContain(t.properties.textEmpty);
+    expect(calls).toEqual([]);
+
+    type(textInput(view), 'BL NO. 0043');
+    act(() =>
+      textInput(view).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })),
+    );
+    expect(calls).toEqual([['t1', 'BL NO. 0043']]);
+    // 回车之后离开输入框不再发一遍
+    act(() => textInput(view).dispatchEvent(new FocusEvent('focusout', { bubbles: true })));
+    expect(calls).toHaveLength(1);
+  });
+
+  it('不能改的文字：输入框禁用，显示原因；不是文字（引擎说的）就不显示这一节', async () => {
+    addText();
+    const blocked = withEditor({
+      content: 'ABC',
+      font: 'T3',
+      size: 9,
+      editable: false,
+      reason: '这段文字用的是 Type 3 字体',
+    });
+    let view = await renderWith(blocked.host);
+    expect(textInput(view).disabled).toBe(true);
+    expect(view.textContent).toContain('Type 3');
+    act(() => root?.unmount());
+    container?.remove();
+
+    view = await renderWith(withEditor(null).host);
+    expect(textInput(view)).toBeNull();
+  });
+
+  it('模拟文档：外观里的文字，改了落在 store 上；只能叠加内容的页上不能改', () => {
+    addText({
+      appearance: { kind: 'text', text: 'SHIPPER', fontSize: 9, color: '#000' },
+    });
+    const view = render();
+    expect(textInput(view).value).toBe('SHIPPER');
+    type(textInput(view), 'CONSIGNEE');
+    act(() =>
+      textInput(view).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })),
+    );
+    const appearance = placed().appearance;
+    expect(appearance?.kind === 'text' && appearance.text).toBe('CONSIGNEE');
+    expect(editorStore.getState().documents['props-doc']!.history.at(-1)).toBe(t.history.setText);
+
+    act(() => {
+      const state = editorStore.getState();
+      const snapshot = state.documents['props-doc']!.snapshot;
+      state.updateSnapshot('props-doc', {
+        ...snapshot,
+        pages: [{ ...snapshot.pages[0]!, overlayOnly: { reason: '测试' } }],
+      });
+    });
+    expect(textInput(view).disabled).toBe(true);
   });
 });

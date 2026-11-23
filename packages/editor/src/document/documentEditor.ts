@@ -11,6 +11,18 @@ export interface PageTransform {
   readonly matrix: Matrix;
 }
 
+/** 文字对象现在的文字（属性面板显示、修改）。 */
+export interface TextInfo {
+  readonly content: string;
+  /** 字体名，去掉了子集前缀；读不出时为空 */
+  readonly font: string;
+  /** 字号（pt） */
+  readonly size: number;
+  readonly editable: boolean;
+  /** 不能改时的原因，可以直接显示 */
+  readonly reason?: string;
+}
+
 /**
  * 一份文档的修改入口。
  *
@@ -27,6 +39,10 @@ export interface DocumentEditor {
   placeComponent(page: number, kind: PlaceableComponent, at: Point): void;
   /** 改组件参数，只给要改的项。按新参数重新生成，左上角不动。 */
   updateComponent(id: string, values: Partial<ComponentValues>): void;
+  /** 读文字对象的文字。不是文字对象（或者是文本组件）时为 null。这一个要等引擎。 */
+  readText(id: string): Promise<TextInfo | null>;
+  /** 把文字对象的文字换掉（方案 5.2 三级回退）。换了字体时由宿主在状态栏上说一声。 */
+  setText(id: string, text: string): void;
   undo(): void;
   redo(): void;
 }

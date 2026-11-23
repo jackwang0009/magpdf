@@ -13,12 +13,16 @@ import type {
   DocSnapshotParams,
   EditDeleteParams,
   EditResult,
+  EditSetTextParams,
+  EditSetTextResult,
   EditTransformParams,
   EngineFailed,
   EngineRestored,
   FidelityCheckParams,
   FidelityResult,
   HistoryParams,
+  ObjDetail,
+  ObjGetParams,
   ObjListParams,
   ObjectKind,
   ObjectSummary,
@@ -28,7 +32,7 @@ import type {
 import type { TileProvider } from '../canvas/tileProvider';
 import { componentName, isPlaceable } from '../document/components';
 import type { ComponentValues, PlaceableComponent } from '../document/components';
-import type { DocumentEditor, PageTransform } from '../document/documentEditor';
+import type { DocumentEditor, PageTransform, TextInfo } from '../document/documentEditor';
 import {
   applyMatrix,
   displayMatrix,
@@ -498,6 +502,11 @@ export class EngineSession implements EditorHost {
         on((document) => this.placeComponent(document, page, kind, at)),
       updateComponent: (objectId, values) =>
         on((document) => this.updateComponent(document, objectId, values)),
+      readText: async (objectId) => {
+        const document = this.documents.get(id);
+        return document ? this.readText(document, objectId) : null;
+      },
+      setText: (objectId, text) => on((document) => this.setText(document, objectId, text)),
       undo: () => on((document) => this.stepHistory(document, METHOD.HISTORY_UNDO)),
       redo: () => on((document) => this.stepHistory(document, METHOD.HISTORY_REDO)),
     };
@@ -616,6 +625,48 @@ export class EngineSession implements EditorHost {
         return params;
       }),
     );
+  }
+
+  private async readText(document: EngineDocument, id: string): Promise<TextInfo | null> {
+    const [target] = engineIds([id]);
+    const docId = document.docId;
+    if (target === undefined || docId === null) return null;
+    const params: ObjGetParams = { docId, ids: [target], detail: 'text' };
+    const [detail] = await this.transport.request<ObjDetail[]>(METHOD.OBJ_GET, params);
+    const text = detail?.text;
+    if (!text) return null;
+    return {
+      content: text.content,
+      font: text.font,
+      size: text.size,
+      editable: text.editable,
+      ...(text.reason ? { reason: text.reason } : {}),
+    };
+  }
+
+  /**
+   * 改字。界面上不先改：新文字的样子（字体、宽度）要引擎生成之后才知道，`doc.changed` 到了重画、重新取对象。
+   * 换了字体时在状态栏上说一声（方案 5.2：字体替换要提示）。
+   */
+  private setText(document: EngineDocument, id: string, text: string): void {
+    const [target] = engineIds([id]);
+    const page = pageOfObject(id);
+    if (target === undefined || page === null || this.touchesFrozen(document, page, [id])) return;
+    this.enqueue(document, [], async () => {
+      const result = await this.command<EditSetTextResult>(
+        document,
+        METHOD.EDIT_SET_TEXT,
+        (docId, baseVersion) => {
+          const params: EditSetTextParams = { docId, baseVersion, id: target, text };
+          return params;
+        },
+      );
+      if (result.fontReplaced) {
+        this.store
+          .getState()
+          .setStatusMessage(format(t.properties.fontReplaced, { font: result.font }));
+      }
+    });
   }
 
   private stepHistory(document: EngineDocument, method: string): void {

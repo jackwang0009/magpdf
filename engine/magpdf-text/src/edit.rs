@@ -566,7 +566,10 @@ fn try_tier2(
     replace_with_face(doc, page, idx, &obj, &face, new_text)
 }
 
-fn embedded_full_face(font: &pdfium_sys::Font<'_>, new_text: &str) -> Option<Arc<FontFace>> {
+pub(crate) fn embedded_full_face(
+    font: &pdfium_sys::Font<'_>,
+    new_text: &str,
+) -> Option<Arc<FontFace>> {
     if font.is_embedded() != Some(true) {
         return None;
     }
@@ -614,21 +617,31 @@ pub(crate) fn covering_match<'a>(
     italic: bool,
     text: &str,
 ) -> Option<&'a crate::fontmatch::Candidate> {
-    if let Some(c) = lib.best_match(family, weight, italic)
-        && face_covers(lib, c, text)
-    {
-        return Some(c);
-    }
-    lib.candidates
-        .iter()
-        .filter(|c| c.embeddable() && c.family == family)
+    // 西文字体写中文：先找对应的中文字体（衬线 → 宋体，其余 → 黑体），不然排在前面的西文字体都写不出，
+    // 落到不管字重的兜底里（Helvetica 改中文曾经换成 NotoSansSC-Thin）
+    let cjk = text.chars().any(is_cjk);
+    let family = match family {
+        Family::Serif if cjk => Family::Song,
+        Family::Sans | Family::Mono | Family::Unknown if cjk => Family::Hei,
+        other => other,
+    };
+    lib.ranked(family, weight, italic)
+        .into_iter()
         .find(|c| face_covers(lib, c, text))
-        .or_else(|| {
-            lib.candidates
-                .iter()
-                .filter(|c| c.embeddable())
-                .find(|c| face_covers(lib, c, text))
-        })
+}
+
+/// 中日韩的字（统一汉字、扩展 A、兼容汉字、假名、谚文、全角标点）。
+fn is_cjk(c: char) -> bool {
+    matches!(
+        c,
+        '\u{3000}'..='\u{303f}'
+            | '\u{3040}'..='\u{30ff}'
+            | '\u{3400}'..='\u{4dbf}'
+            | '\u{4e00}'..='\u{9fff}'
+            | '\u{ac00}'..='\u{d7af}'
+            | '\u{f900}'..='\u{faff}'
+            | '\u{ff00}'..='\u{ffef}'
+    )
 }
 
 fn face_covers(lib: &FontLibrary, cand: &crate::fontmatch::Candidate, text: &str) -> bool {
@@ -645,37 +658,7 @@ fn replace_with_face(
     face: &FontFace,
     new_text: &str,
 ) -> std::result::Result<(), SkipOrErr> {
-    let (subset, charcodes) = match subset_text(face, new_text) {
-        Ok(v) => v,
-        Err(SkipOrErr::Skip(s)) => return Err(SkipOrErr::Skip(s)),
-        Err(e) => return Err(e),
-    };
-    let loaded = load_subset_font(doc, &subset)
-        .map_err(|reason| SkipOrErr::Skip(TierSkipped::LoadFont { reason }))?;
-    let matrix = old.matrix().ok_or_else(|| {
-        SkipOrErr::Skip(TierSkipped::ReplaceFailed {
-            reason: "读不到文字矩阵".into(),
-        })
-    })?;
-    let size = old.font_size().unwrap_or(12.0);
-    let fill = old.fill_color();
-    let stroke = old.stroke_color();
-    let mode = old.text_render_mode();
-    let new_obj = PageObject::new_text(page, &loaded, size, matrix).map_err(EditError::from)?;
-    // 复合字体走 Identity-H，字符码必须是子集后的 GID；不要用 SetText（反查 cmap 常得到空 ToUnicode）。
-    if !new_obj.set_charcodes(&charcodes) {
-        page.destroy_object(new_obj);
-        return Err(SkipOrErr::Skip(TierSkipped::SetCharcodesFailed));
-    }
-    if let Some(c) = fill {
-        let _ = new_obj.set_fill_color(c);
-    }
-    if let Some(c) = stroke {
-        let _ = new_obj.set_stroke_color(c);
-    }
-    if let Some(m) = mode {
-        let _ = new_obj.set_text_render_mode(m);
-    }
+    let new_obj = build_with_face(doc, page, old, face, new_text)?;
     // `remove_object` 会销毁旧对象，必须在插入新对象之前用它的句柄。
     // 这里重新按 index 取出旧对象再移除，避免和 `old` 借用冲突。
     let old_live = page.object(old_index).ok_or(EditError::NoTextPage)?;
@@ -684,6 +667,46 @@ fn replace_with_face(
         .map_err(EditError::from)?;
     page.generate_content().map_err(EditError::from)?;
     Ok(())
+}
+
+/// 用 `face` 的子集生成一个替换 `old` 的文字对象（矩阵、字号、颜色、渲染模式照抄），还没插进页面。
+pub(crate) fn build_with_face(
+    doc: &Document<'_>,
+    page: &Page<'_>,
+    old: &PageObject<'_>,
+    face: &FontFace,
+    new_text: &str,
+) -> std::result::Result<PageObject<'static>, SkipOrErr> {
+    let (subset, charcodes) = subset_text(face, new_text)?;
+    let loaded = load_subset_font(doc, &subset)
+        .map_err(|reason| SkipOrErr::Skip(TierSkipped::LoadFont { reason }))?;
+    let matrix = old.matrix().ok_or_else(|| {
+        SkipOrErr::Skip(TierSkipped::ReplaceFailed {
+            reason: "读不到文字矩阵".into(),
+        })
+    })?;
+    let size = old.font_size().unwrap_or(12.0);
+    let new_obj = PageObject::new_text(page, &loaded, size, matrix).map_err(EditError::from)?;
+    // 复合字体走 Identity-H，字符码必须是子集后的 GID；不要用 SetText（反查 cmap 常得到空 ToUnicode）。
+    if !new_obj.set_charcodes(&charcodes) {
+        page.destroy_object(new_obj);
+        return Err(SkipOrErr::Skip(TierSkipped::SetCharcodesFailed));
+    }
+    copy_text_style(old, &new_obj);
+    Ok(new_obj)
+}
+
+/// 把 `old` 的填充色、描边色、文字渲染模式抄到 `new` 上（矩阵、字号建对象时就给了）。
+pub(crate) fn copy_text_style(old: &PageObject<'_>, new: &PageObject<'_>) {
+    if let Some(c) = old.fill_color() {
+        let _ = new.set_fill_color(c);
+    }
+    if let Some(c) = old.stroke_color() {
+        let _ = new.set_stroke_color(c);
+    }
+    if let Some(m) = old.text_render_mode() {
+        let _ = new.set_text_render_mode(m);
+    }
 }
 
 pub(crate) fn subset_text(
@@ -836,7 +859,10 @@ fn candidate_name_keys(c: &crate::fontmatch::Candidate) -> Vec<String> {
     keys
 }
 
-fn same_name_font<'a>(lib: &'a FontLibrary, name: &str) -> Option<&'a crate::fontmatch::Candidate> {
+pub(crate) fn same_name_font<'a>(
+    lib: &'a FontLibrary,
+    name: &str,
+) -> Option<&'a crate::fontmatch::Candidate> {
     if let Some(c) = lib.by_name(name) {
         return Some(c);
     }

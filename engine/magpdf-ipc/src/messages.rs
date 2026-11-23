@@ -175,6 +175,7 @@ error_codes! {
     /// 瓦片的代数对不上：槽位已被复用（《接口协议》3.3，主进程转成 HTTP 410）。
     /// 《接口协议》第 8 节里还没有这个码，是 V06 原型加的。
     TileGenerationStale = 3006, "E_TILE_GENERATION_STALE", "瓦片已被新内容替换";
+    TextNotEditable = 4001, "E_TEXT_NOT_EDITABLE", "文字不能改";
     CompInvalid = 5001, "E_COMP_INVALID", "组件参数不合法";
     Internal = 9001, "E_INTERNAL", "内部错误";
 }
@@ -210,7 +211,10 @@ names! {
         DOC_SNAPSHOT = "doc.snapshot";
         OBJ_LIST = "obj.list";
         OBJ_HIT_TEST = "obj.hitTest";
+        OBJ_GET = "obj.get";
         EDIT_TRANSFORM = "edit.transform";
+        /// 不在《接口协议》里：原型用一条命令代替 `text.beginEdit`、`text.preview`、`text.commit`。
+        EDIT_SET_TEXT = "edit.setText";
         EDIT_SET_STYLE = "edit.setStyle";
         EDIT_DELETE = "edit.delete";
         HISTORY_UNDO = "history.undo";
@@ -642,7 +646,76 @@ pub struct ObjHitTestParams {
     pub mode: HitMode,
 }
 
+/// `obj.get` 要哪一类详情。原型只有 `text`。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum ObjDetailKind {
+    Text,
+}
+
+/// `obj.get` 的参数（《接口协议》6.4）。返回 `ObjDetail[]`，和 `ids` 一一对应。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ObjGetParams {
+    pub doc_id: u32,
+    pub ids: Vec<u64>,
+    pub detail: ObjDetailKind,
+}
+
+/// 文字对象的文字（`obj.get` 的 `detail: "text"`）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct TextDetail {
+    pub content: String,
+    /// 字体名（去掉了子集前缀）
+    pub font: String,
+    /// 字号（pt）
+    pub size: f32,
+    pub editable: bool,
+    /// 不能改时的原因，可以直接显示
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// 一个对象的详情。不是文字对象（或者是文本组件）时 `text` 省略。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ObjDetail {
+    pub id: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<TextDetail>,
+}
+
 // ---- 编辑与撤销（《接口协议》6.5、6.8）----
+
+/// `edit.setText` 的参数：把文字对象的文字换掉（方案 5.2 三级回退），编号不变。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct EditSetTextParams {
+    pub doc_id: u32,
+    pub base_version: u32,
+    pub id: u64,
+    pub text: String,
+}
+
+/// `edit.setText` 的返回值。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct EditSetTextResult {
+    pub version: u32,
+    /// 用的是哪一级：1 原字体，2 补字形，3 换字体
+    pub tier: u8,
+    /// 换了字体：界面提示“字体已替换”（方案 5.2）
+    pub font_replaced: bool,
+    /// 新文字用的字体
+    pub font: String,
+}
 
 /// `edit.transform` 的参数。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]

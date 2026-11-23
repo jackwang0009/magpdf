@@ -230,6 +230,16 @@ export const zhCN = {
     name: '名称',
     type: '类型',
     page: '所在页',
+    /** 文字对象：改原有的文字（方案 5.2） */
+    text: '文字',
+    font: '字体',
+    textLoading: '正在读取文字…',
+    textUnreadable: '读不出这段文字',
+    textEmpty: '文字不能是空的',
+    /** 原型的限制，显示在文字下面 */
+    textEditNote: '只改一行字。原字体写不出时换成系统字体，状态栏会提示',
+    /** 状态栏：改字换了字体 */
+    fontReplaced: '字体已替换为 {font}',
   },
   layers: {
     filterPlaceholder: '筛选图层',
@@ -272,6 +282,7 @@ export const zhCN = {
     delete: '删除 {n} 个对象',
     placeComponent: '置入组件',
     updateComponent: '改组件参数',
+    setText: '改字',
   },
   placeholder: {
     panel: '{name}面板在 P1 实现',

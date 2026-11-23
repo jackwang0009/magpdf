@@ -14,7 +14,9 @@ export const METHOD = {
   DOC_SNAPSHOT: 'doc.snapshot',
   OBJ_LIST: 'obj.list',
   OBJ_HIT_TEST: 'obj.hitTest',
+  OBJ_GET: 'obj.get',
   EDIT_TRANSFORM: 'edit.transform',
+  EDIT_SET_TEXT: 'edit.setText',
   EDIT_SET_STYLE: 'edit.setStyle',
   EDIT_DELETE: 'edit.delete',
   HISTORY_UNDO: 'history.undo',
@@ -60,6 +62,7 @@ export const ERROR_CODE = {
   E_PAGE_OVERLAY_ONLY: 3004,
   E_INVALID_ARGUMENT: 3005,
   E_TILE_GENERATION_STALE: 3006,
+  E_TEXT_NOT_EDITABLE: 4001,
   E_COMP_INVALID: 5001,
   E_INTERNAL: 9001,
 } as const;

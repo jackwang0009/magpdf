@@ -228,16 +228,14 @@ impl FontLibrary {
         self.candidates
             .iter()
             .filter(|c| c.embeddable())
-            .min_by_key(|c| {
-                (
-                    c.family_score(family),
-                    (c.weight - weight).abs(),
-                    u8::from(c.italic != italic),
-                    u8::from(!c.builtin),
-                    family_name_rank(c),
-                    c.name.clone(),
-                )
-            })
+            .min_by_key(|c| match_key(c, family, weight, italic))
+    }
+
+    /// 可以嵌入的字体按和 [`Self::best_match`] 一样的先后排好：族、字重、斜体、内置、常用中文字体、名字。
+    pub fn ranked(&self, family: Family, weight: i32, italic: bool) -> Vec<&Candidate> {
+        let mut ranked: Vec<_> = self.candidates.iter().filter(|c| c.embeddable()).collect();
+        ranked.sort_by_cached_key(|c| match_key(c, family, weight, italic));
+        ranked
     }
 
     /// 名字完全一致的字体（第 2 级的"系统里装有同名字体"）。
@@ -277,6 +275,22 @@ impl FontLibrary {
 }
 
 /// 系统自带的常见字体优先级（同族同字重时先选这些）。
+fn match_key(
+    c: &Candidate,
+    family: Family,
+    weight: i32,
+    italic: bool,
+) -> (u8, i32, u8, u8, u8, String) {
+    (
+        c.family_score(family),
+        (c.weight - weight).abs(),
+        u8::from(c.italic != italic),
+        u8::from(!c.builtin),
+        family_name_rank(c),
+        c.name.clone(),
+    )
+}
+
 fn family_name_rank(c: &Candidate) -> u8 {
     let ps = c.name.to_ascii_lowercase();
     const PREFERRED: [&str; 6] = [

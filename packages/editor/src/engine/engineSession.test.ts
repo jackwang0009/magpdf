@@ -7,7 +7,7 @@ import type { HostNotice } from '../shell/editorHost';
 import { createEditorStore } from '../store/editorStore';
 import { EngineSession } from './engineSession';
 import type { EngineSessionOptions } from './engineSession';
-import { FAKE_OVERLAY_REASON, FakeEngine } from './fakeEngine';
+import { FAKE_OVERLAY_REASON, FAKE_REPLACEMENT_FONT, FakeEngine } from './fakeEngine';
 import type { FakeObject, FakePage } from './fakeEngine';
 
 /** 第 1 页：300×440，不旋转。整页白底（点不中）、一行文字、一个方框。 */
@@ -20,7 +20,12 @@ function frontPage(): FakePage {
     cropBox: [0, 0, 300, 440],
     objects: [
       { id: 1, kind: 'path', bbox: [0, 0, 300, 440], pickable: false },
-      { id: 2, kind: 'text', bbox: [20, 400, 120, 420] },
+      {
+        id: 2,
+        kind: 'text',
+        bbox: [20, 400, 120, 420],
+        text: { content: 'BL NO. 0042', font: 'Helvetica', size: 10 },
+      },
       { id: 3, kind: 'path', bbox: [50, 100, 250, 300] },
     ],
   };
@@ -734,6 +739,70 @@ describe('EngineSession：组件（P0 原型）', () => {
     await flush();
     expect(objects(0).map((o) => o.id)).toEqual(['p0-1', 'p0-2', 'p0-3']);
     expect(store.getState().documents['engine-1']!.selection).toEqual([]);
+  });
+});
+
+describe('EngineSession：改原有文字（方案 5.2）', () => {
+  it('读文字：只问引擎要这一个对象；不是文字对象时为 null', async () => {
+    const { engine, editor } = await attached();
+    await expect(editor.readText('p0-2')).resolves.toEqual({
+      content: 'BL NO. 0042',
+      font: 'Helvetica',
+      size: 10,
+      editable: true,
+    });
+    expect(engine.transport.sent(METHOD.OBJ_GET)).toEqual([{ docId: 1, ids: [2], detail: 'text' }]);
+    await expect(editor.readText('p0-3')).resolves.toBeNull();
+  });
+
+  it('改字：发给引擎，版本号往前走；原字体写得出时不提示', async () => {
+    const { engine, editor, store, snapshot } = await attached();
+    editor.setText('p0-2', 'BL NO. 0043');
+    await flush();
+    expect(engine.transport.sent(METHOD.EDIT_SET_TEXT)).toEqual([
+      { docId: 1, baseVersion: 0, id: 2, text: 'BL NO. 0043' },
+    ]);
+    expect(snapshot()).toMatchObject({ version: 1, dirty: true });
+    expect((await editor.readText('p0-2'))?.content).toBe('BL NO. 0043');
+    expect(store.getState().statusMessage).toBeNull();
+
+    editor.undo();
+    await flush();
+    expect((await editor.readText('p0-2'))?.content).toBe('BL NO. 0042');
+  });
+
+  it('换了字体：状态栏说换成了什么字体', async () => {
+    const { editor, store } = await attached();
+    editor.setText('p0-2', '提单号 0042');
+    await flush();
+    expect(store.getState().statusMessage?.text).toBe(
+      format(t.properties.fontReplaced, { font: FAKE_REPLACEMENT_FONT }),
+    );
+  });
+
+  it('只能叠加内容的页上原有的文字不发；引擎拒绝时把原因告诉用户', async () => {
+    const { engine, editor, notices } = await attached();
+    engine.page(1, 20).objects[1]!.text = {
+      content: 'BL NO. 0042',
+      font: 'T3Font',
+      size: 10,
+      reason: '这段文字用的是 Type 3 字体',
+    };
+    editor.setText('p0-2', 'X');
+    await flush();
+    expect(notices).toHaveLength(1);
+    expect(notices[0]!.message).toContain('Type 3');
+
+    // 上面那条命令已经顺带校验过这一页，结论直接推送
+    engine.transport.emit(EVENT.FIDELITY_RESULT, {
+      docId: 1,
+      pageId: 20,
+      status: 'overlayOnly',
+      reason: FAKE_OVERLAY_REASON,
+    });
+    editor.setText('p0-2', 'Y');
+    await flush();
+    expect(engine.transport.sent(METHOD.EDIT_SET_TEXT)).toHaveLength(1);
   });
 });
 

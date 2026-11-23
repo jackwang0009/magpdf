@@ -19,12 +19,13 @@ use magpdf_ipc::messages::{
     self, BenchEngineParams, Check, CheckSeverity, Color, ColorSpace, CompPlaceParams,
     CompPlaceResult, CompUpdateParams, ComponentInfo, ComponentValues, DocChanged, DocCloseParams,
     DocInfo, DocOpenParams, DocSaveParams, DocSaveResult, DocSaved, DocSnapshot, DocSnapshotParams,
-    EchoParams, EditDeleteParams, EditResult, EditSetStyleParams, EditTransformParams, ErrorCode,
-    Fidelity, FidelityCheckParams, FidelityResult, HelloParams, HelloResult, HistoryParams,
-    JsonValue, LayerMode, OBJ_LIST_MAX, ObjHitTestParams, ObjListParams, PageChange, PageInfo,
+    EchoParams, EditDeleteParams, EditResult, EditSetStyleParams, EditSetTextParams,
+    EditSetTextResult, EditTransformParams, ErrorCode, Fidelity, FidelityCheckParams,
+    FidelityResult, HelloParams, HelloResult, HistoryParams, JsonValue, LayerMode, OBJ_LIST_MAX,
+    ObjDetail, ObjDetailKind, ObjGetParams, ObjHitTestParams, ObjListParams, PageChange, PageInfo,
     PingParams, RenderTilesParams, RenderTilesResult, Request, RequestId, Response,
-    RoundtripParams, RoundtripResult, RpcError, SaveMode, StallParams, TileCoord, TileFetchParams,
-    TileFetchResult, method,
+    RoundtripParams, RoundtripResult, RpcError, SaveMode, StallParams, TextDetail, TileCoord,
+    TileFetchParams, TileFetchResult, method,
 };
 use magpdf_ipc::shm::{self, Layout, MappedRegion};
 use magpdf_ipc::{PROTOCOL_VERSION, pipe, pump};
@@ -32,7 +33,9 @@ use pdfium_sys::Matrix;
 use tokio::net::windows::named_pipe::NamedPipeServer;
 use tokio::sync::mpsc;
 
-use crate::pdfium_thread::{EditOp, EngineHandle, Layer, Notice, PageFidelity, SnapshotConfig};
+use crate::pdfium_thread::{
+    EditOp, EngineError, EngineHandle, Layer, Notice, PageFidelity, SnapshotConfig,
+};
 use crate::recovery::{DocRecovery, RecoveryFile};
 use crate::slots::{SlotTable, TileKey};
 
@@ -650,6 +653,50 @@ async fn handle_request(
             let hits: Vec<messages::ObjectSummary> = hits.iter().map(wire_object).collect();
             Ok(Some(frame::response_ok(id, &hits)))
         }
+        method::OBJ_GET => {
+            let p: ObjGetParams = decode(params)?;
+            let ObjDetailKind::Text = p.detail;
+            let mut details = Vec::with_capacity(p.ids.len());
+            for object in p.ids {
+                let text = match engine.engine.text_info(p.doc_id, ObjectId(object)).await {
+                    Ok(text) => Some(TextDetail {
+                        content: text.text,
+                        font: text.font,
+                        size: text.size,
+                        editable: text.blocked.is_none(),
+                        reason: text.blocked,
+                    }),
+                    Err(EngineError::Edit(EditError::NotText(_))) => None,
+                    // 读不出字（比如字形没有 Unicode）：仍然是文字对象，只是不能改
+                    Err(EngineError::Edit(EditError::Text(reason))) => Some(TextDetail {
+                        content: String::new(),
+                        font: String::new(),
+                        size: 0.0,
+                        editable: false,
+                        reason: Some(reason),
+                    }),
+                    Err(e) => return Err(map_engine_error(e)),
+                };
+                details.push(ObjDetail { id: object, text });
+            }
+            Ok(Some(frame::response_ok(id, &details)))
+        }
+        method::EDIT_SET_TEXT => {
+            let p: EditSetTextParams = decode(params)?;
+            let (change, outcome) = engine
+                .engine
+                .set_text(p.doc_id, u64::from(p.base_version), ObjectId(p.id), p.text)
+                .await
+                .map_err(map_engine_error)?;
+            announce_change(engine, p.doc_id, &change, out);
+            let result = EditSetTextResult {
+                version: wire_version(change.version),
+                tier: outcome.tier,
+                font_replaced: outcome.font_replaced,
+                font: outcome.font,
+            };
+            Ok(Some(frame::response_ok(id, &result)))
+        }
         method::EDIT_TRANSFORM => {
             let p: EditTransformParams = decode(params)?;
             let [a, b, c, d, e, f] = p.matrix;
@@ -1013,6 +1060,17 @@ async fn run_edit(
         .edit(doc_id, base_version.map(u64::from), op)
         .await
         .map_err(map_engine_error)?;
+    announce_change(engine, doc_id, &change, out);
+    Ok(change)
+}
+
+/// 推送 `doc.changed`。
+fn announce_change(
+    engine: &Arc<Engine>,
+    doc_id: u32,
+    change: &Change,
+    out: &mpsc::UnboundedSender<Outgoing>,
+) {
     let version = wire_version(change.version);
     let changed = DocChanged {
         doc_id,
@@ -1031,7 +1089,6 @@ async fn run_edit(
         pages_changed: false,
     };
     engine.event_to(out, messages::event::DOC_CHANGED, &changed);
-    Ok(change)
 }
 
 /// 文档版本号在协议里是 32 位。
@@ -1082,8 +1139,7 @@ fn rgb_bytes(color: &Color) -> std::result::Result<(u8, u8, u8), RpcError> {
     Ok((byte(r), byte(g), byte(b)))
 }
 
-fn map_engine_error(e: crate::pdfium_thread::EngineError) -> RpcError {
-    use crate::pdfium_thread::EngineError;
+fn map_engine_error(e: EngineError) -> RpcError {
     if let EngineError::Edit(EditError::Component(problem)) = &e {
         return comp_invalid(problem);
     }
@@ -1119,8 +1175,10 @@ fn edit_error_code(error: &EditError) -> ErrorCode {
         | EditError::SingularMatrix
         | EditError::NothingToUndo
         | EditError::NothingToRedo
-        | EditError::NotComponent(_) => ErrorCode::InvalidArgument,
+        | EditError::NotComponent(_)
+        | EditError::NotText(_) => ErrorCode::InvalidArgument,
         EditError::Component(_) => ErrorCode::CompInvalid,
+        EditError::Text(_) => ErrorCode::TextNotEditable,
         EditError::Pdfium(_) | EditError::NoFill => ErrorCode::Internal,
     }
 }

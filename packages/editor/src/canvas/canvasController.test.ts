@@ -124,6 +124,8 @@ describe('工具产生的修改交给谁', () => {
       deleteObjects: (ids) => calls.push(['delete', ids]),
       placeComponent: (page, kind, at) => calls.push(['place', page, kind, at]),
       updateComponent: (id, values) => calls.push(['update', id, values]),
+      readText: () => Promise.resolve(null),
+      setText: (id, text) => calls.push(['setText', id, text]),
       undo: () => calls.push(['undo']),
       redo: () => calls.push(['redo']),
     };
@@ -377,6 +379,8 @@ describe('拖动预览（方案 3.2）', () => {
       deleteObjects: () => undefined,
       placeComponent: () => undefined,
       updateComponent: () => undefined,
+      readText: () => Promise.resolve(null),
+      setText: () => undefined,
       undo: () => undefined,
       redo: () => undefined,
     };
@@ -791,6 +795,8 @@ describe('置入组件（P0 原型）', () => {
       deleteObjects: () => undefined,
       placeComponent: (page, kind, at) => calls.push([page, kind, at]),
       updateComponent: () => undefined,
+      readText: () => Promise.resolve(null),
+      setText: () => undefined,
       undo: () => undefined,
       redo: () => undefined,
     };
@@ -837,6 +843,8 @@ describe('置入组件（P0 原型）', () => {
       deleteObjects: () => undefined,
       placeComponent: (page, kind, at) => calls.push([page, kind, at]),
       updateComponent: () => undefined,
+      readText: () => Promise.resolve(null),
+      setText: () => undefined,
       undo: () => undefined,
       redo: () => undefined,
     };

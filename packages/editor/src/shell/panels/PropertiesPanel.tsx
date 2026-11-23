@@ -1,8 +1,9 @@
 import { Field, Icon, SectionHeader } from '@magpdf/ui';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { checkComponent, componentName, sizeLabel } from '../../document/components';
 import type { ComponentProblem, ComponentValues } from '../../document/components';
+import type { TextInfo } from '../../document/documentEditor';
 import { rectToRectMatrix } from '../../document/pageSpace';
 import type { PageObject } from '../../document/types';
 import { ptToMm } from '../../geometry';
@@ -137,6 +138,15 @@ export function PropertiesPanel() {
           apply={applyComponent}
         />
       ) : null}
+      {object.type === 'text' ? (
+        <TextFields
+          // 文档版本变了（改了字、撤销了）重新读一遍
+          key={`${object.id}|${doc.snapshot.version}`}
+          object={object}
+          readOnly={frozenHere}
+          documentId={documentId}
+        />
+      ) : null}
       {object.appearance?.kind === 'barcode' && !object.component ? (
         <>
           <SectionHeader title={t.properties.componentParams} />
@@ -260,6 +270,117 @@ function ComponentFields({
       <p className="mg-props-hint">
         {kind === 'text' ? t.properties.textNote : t.properties.barcodeNote}
       </p>
+    </>
+  );
+}
+
+/**
+ * 文字对象的文字（方案 5.2）：引擎打开的文档向引擎读，模拟文档用外观里的文字。回车或离开输入框时
+ * 文字变了才交给引擎；字体由引擎按三级回退挑，换了字体时状态栏会说。
+ */
+function TextFields({
+  object,
+  readOnly,
+  documentId,
+}: {
+  readonly object: PageObject;
+  readonly readOnly: boolean;
+  readonly documentId: string;
+}) {
+  const host = useEditorHost();
+  const editor = host?.documentEditor(documentId) ?? null;
+  const mock = object.appearance?.kind === 'text' ? object.appearance : null;
+  const [info, setInfo] = useState<TextInfo | null | 'loading' | 'failed'>(() =>
+    editor
+      ? 'loading'
+      : mock
+        ? { content: mock.text, font: '', size: mock.fontSize, editable: true }
+        : null,
+  );
+  const [content, setContent] = useState(typeof info === 'object' ? (info?.content ?? '') : '');
+  const [empty, setEmpty] = useState(false);
+  /** 已经交出去的文字：回车之后再离开输入框不再发一遍 */
+  const [sent, setSent] = useState<string | null>(null);
+  useEffect(() => {
+    if (!editor) return;
+    let current = true;
+    editor.readText(object.id).then(
+      (read) => {
+        if (!current) return;
+        setInfo(read);
+        setContent(read?.content ?? '');
+      },
+      (error: unknown) => {
+        console.error('读文字失败', error);
+        if (current) setInfo('failed');
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [editor, object.id]);
+  if (info === null) return null;
+  if (info === 'loading' || info === 'failed') {
+    return (
+      <>
+        <SectionHeader title={t.properties.text} />
+        <p className="mg-props-hint">
+          {info === 'loading' ? t.properties.textLoading : t.properties.textUnreadable}
+        </p>
+      </>
+    );
+  }
+  const locked = readOnly || !info.editable;
+  const commit = () => {
+    if (locked || content === info.content || content === sent) return;
+    if (content.length === 0) {
+      setEmpty(true);
+      return;
+    }
+    setEmpty(false);
+    setSent(content);
+    if (editor) editor.setText(object.id, content);
+    else editorStore.getState().setText(documentId, object.id, content);
+  };
+  const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter') commit();
+    if (event.key === 'Escape') {
+      setContent(info.content);
+      setEmpty(false);
+    }
+  };
+  return (
+    <>
+      <SectionHeader title={t.properties.text} />
+      <div className="mg-props-form">
+        <label htmlFor="mg-text-content">{t.properties.content}</label>
+        <input
+          id="mg-text-content"
+          className={`mg-input${empty ? ' mg-bad' : ''}`}
+          value={content}
+          disabled={locked}
+          spellCheck={false}
+          onChange={(event) => setContent(event.target.value)}
+          onBlur={commit}
+          onKeyDown={onKeyDown}
+        />
+        <label>{t.properties.font}</label>
+        <span className="mg-props-note">{info.font || '—'}</span>
+        <label>{t.properties.fontSize}</label>
+        <span className="mg-props-note">{`${Number(info.size.toFixed(2))} pt`}</span>
+      </div>
+      {empty ? (
+        <p className="mg-check-line mg-bad" role="alert">
+          <Icon name="close" size={12} /> {t.properties.textEmpty}
+        </p>
+      ) : info.reason ? (
+        <p className="mg-props-hint">{info.reason}</p>
+      ) : locked ? null : (
+        <>
+          <p className="mg-props-hint">{t.properties.applyHint}</p>
+          <p className="mg-props-hint">{t.properties.textEditNote}</p>
+        </>
+      )}
     </>
   );
 }

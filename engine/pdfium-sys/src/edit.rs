@@ -193,6 +193,32 @@ impl PageObject<'_> {
         Ok(obj)
     }
 
+    /// 用文档里已经有的一份字体（另一个文字对象正在用的，[`PageObject::font`]）新建文字对象，尚未插入页面。
+    /// 改字第 1 级（用原字体）用它：不嵌新字体，生成内容流时沿用原来的字体资源。
+    pub fn new_text_with_font(
+        page: &Page<'_>,
+        font: &Font<'_>,
+        font_size: f32,
+        position: Matrix,
+    ) -> Result<PageObject<'static>> {
+        // SAFETY: page 所属文档有效；font 是这份文档里某个文字对象正在用的字体，调用期间有效
+        //（新对象会自己持有一个引用）。
+        let handle = unsafe {
+            raw::FPDFPageObj_CreateTextObj(
+                page.document().raw_handle(),
+                font.raw_font_handle(),
+                font_size,
+            )
+        };
+        if handle.is_null() {
+            return Err(Error::PageObject);
+        }
+        // SAFETY: handle 是新对象，尚未归页面所有；寿命由调用方保证（插入页面或销毁）。
+        let obj = unsafe { PageObject::from_raw(handle) };
+        obj.set_matrix(position)?;
+        Ok(obj)
+    }
+
     /// 是否文字对象。
     pub fn is_text(&self) -> bool {
         self.kind() == ObjectKind::Text
