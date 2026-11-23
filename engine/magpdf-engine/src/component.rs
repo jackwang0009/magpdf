@@ -49,6 +49,14 @@ impl ComponentKind {
         }
     }
 
+    /// 历史记录里的叫法。西文名两边带空格，夹在中文里不用再加。
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::Text => "文本",
+            Self::Code128 => " Code 128 ",
+        }
+    }
+
     pub fn parse(name: &str) -> Option<Self> {
         match name {
             "text" => Some(Self::Text),

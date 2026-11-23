@@ -1,30 +1,58 @@
 import { Icon } from '@magpdf/ui';
 import type { IconName } from '@magpdf/ui';
-import { t } from '../../i18n';
+import { format, t } from '../../i18n';
 import { activeDocument, useEditorStore } from '../../store/editorStore';
 import type { PanelId } from '../../workspace/workspaceTypes';
+import { useEditorHost } from '../editorHost';
 import { PanelFrame } from './PanelFrame';
 
 /**
- * 历史记录：P0 只记录对象移动/缩放/删除的描述，撤销栈在 P1。
- * 文档快照里带 history 数组，这里倒序列出。
+ * 历史记录（方案 4.2）：最新的在上面。第一条是打开时的样子；撤销了的几步划掉显示，还能重做。
+ * 引擎打开的文档点哪一条就撤销或重做到哪一条；模拟文档只列出来。
  */
 export function HistoryPanel() {
   const doc = useEditorStore(activeDocument);
+  const host = useEditorHost();
+  if (!doc || doc.history.length === 0) {
+    return (
+      <PanelFrame>
+        <p className="mg-empty">{t.history.empty}</p>
+      </PanelFrame>
+    );
+  }
+  const editor = host?.documentEditor(doc.snapshot.id);
+  const at = doc.historyAt ?? doc.history.length - 1;
+  const steps = doc.history.map((label, index) => ({ label, index })).reverse();
   return (
     <PanelFrame>
-      {doc && doc.history.length > 0 ? (
-        <ol className="mg-history">
-          {[...doc.history].reverse().map((entry, index) => (
-            <li key={index} className={index === 0 ? 'mg-on' : ''}>
+      <ol className="mg-history">
+        {steps.map(({ label, index }) => {
+          const className = `mg-history-step${index === at ? ' mg-on' : ''}${index > at ? ' mg-undone' : ''}`;
+          const content = (
+            <>
               <span className="mg-history-dot" aria-hidden />
-              {entry}
+              <span className="mg-history-label">{label}</span>
+            </>
+          );
+          return (
+            <li key={index}>
+              {editor ? (
+                <button
+                  type="button"
+                  className={className}
+                  disabled={index === at}
+                  title={index === at ? undefined : format(t.history.jumpTo, { label })}
+                  onClick={() => editor.jumpHistory(index)}
+                >
+                  {content}
+                </button>
+              ) : (
+                <div className={className}>{content}</div>
+              )}
             </li>
-          ))}
-        </ol>
-      ) : (
-        <p className="mg-empty">{t.history.empty}</p>
-      )}
+          );
+        })}
+      </ol>
     </PanelFrame>
   );
 }

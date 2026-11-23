@@ -684,17 +684,37 @@
   margin: 0;
   padding: 0;
 }
-.mg-history li {
+.mg-history-step {
+  width: 100%;
   display: flex;
   align-items: center;
   gap: 8px;
   height: var(--mg-row-height);
   padding: 0 4px;
+  border: none;
+  background: transparent;
   color: var(--mg-text-muted);
+  font: inherit;
+  text-align: left;
+  cursor: default;
 }
-.mg-history li.mg-on {
+button.mg-history-step:not(:disabled):hover {
+  background: var(--mg-control-active);
+}
+.mg-history-step.mg-on {
   color: var(--mg-text);
   background: var(--mg-control-active);
+}
+/* 撤销了的几步：还能重做，划掉显示 */
+.mg-history-step.mg-undone {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+.mg-history-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .mg-history-dot {
   width: 6px;
@@ -702,7 +722,7 @@
   border-radius: 50%;
   background: var(--mg-line);
 }
-.mg-history li.mg-on .mg-history-dot {
+.mg-history-step.mg-on .mg-history-dot {
   background: var(--mg-accent);
 }
 

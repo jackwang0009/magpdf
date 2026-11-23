@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use magpdf_engine::component::{ComponentKind, ComponentSpec};
 use magpdf_engine::edit::{
-    Change, EditError, HitMode, ObjectId, ObjectSummary, ObjectText, Session, TextOutcome,
+    Change, EditError, History, HitMode, ObjectId, ObjectSummary, ObjectText, Session, TextOutcome,
 };
 use magpdf_engine::save::{SaveError, write_replacing};
 use magpdf_ipc::messages::DocInfo;
@@ -80,6 +80,10 @@ pub enum EditOp {
     },
     Undo,
     Redo,
+    /// 撤销或重做到只有前 `applied` 步生效（历史记录面板）。
+    Jump {
+        applied: usize,
+    },
 }
 
 /// 分层渲染里的一层（拖动预览，方案 3.2）。
@@ -244,6 +248,11 @@ pub enum Job {
         doc_id: u32,
         page_ids: Vec<u32>,
         reply: Reply<()>,
+    },
+    /// 撤销栈的样子（历史记录面板）。
+    History {
+        doc_id: u32,
+        reply: Reply<History>,
     },
     /// 文字对象现在的文字。
     TextInfo {
@@ -534,6 +543,10 @@ impl EngineHandle {
         .await
     }
 
+    pub async fn history(&self, doc_id: u32) -> std::result::Result<History, EngineError> {
+        self.ask(|reply| Job::History { doc_id, reply }).await
+    }
+
     pub async fn text_info(
         &self,
         doc_id: u32,
@@ -712,6 +725,9 @@ impl PdfiumState {
                 reply,
             } => {
                 let _ = reply.send(self.save(doc_id, path));
+            }
+            Job::History { doc_id, reply } => {
+                let _ = reply.send(self.find_mut(doc_id).map(|d| d.session.history()));
             }
             Job::TextInfo { doc_id, id, reply } => {
                 let _ = reply.send(
@@ -1056,6 +1072,7 @@ impl PdfiumState {
             }
             EditOp::Undo => session.undo()?,
             EditOp::Redo => session.redo()?,
+            EditOp::Jump { applied } => session.jump(applied)?,
         })
     }
 

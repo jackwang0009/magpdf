@@ -109,6 +109,8 @@ pub enum EditError {
     /// 这段文字改不了，内容是给用户看的说明。
     #[error("{0}")]
     Text(String),
+    #[error("历史记录只有 {total} 步，跳不到第 {applied} 步")]
+    NoHistoryStep { applied: usize, total: usize },
 }
 
 pub use magpdf_text::retext::ObjectText;
@@ -195,8 +197,76 @@ enum Atom {
 
 /// 一条命令：若干步，撤销时整体撤回。
 struct Command {
-    label: &'static str,
+    /// 历史记录面板上显示的说法
+    label: String,
+    /// 做这一步的时刻，Unix 毫秒
+    at_ms: u64,
     atoms: Vec<Atom>,
+}
+
+/// 历史记录里的一步（《接口协议》6.8 `history.list`）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HistoryEntry {
+    pub label: String,
+    /// 做这一步的时刻，Unix 毫秒
+    pub at_ms: u64,
+}
+
+/// 撤销栈的样子：做过的几步在前（从早到晚），撤销了的几步接在后面（下一个要重做的在前）。
+/// `applied` 是做过的步数，也就是 `entries` 里前 `applied` 条现在生效。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct History {
+    pub entries: Vec<HistoryEntry>,
+    pub applied: usize,
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+}
+
+/// 几次撤销、重做合成一个变化（历史记录面板一次跳几步）。
+#[derive(Default)]
+struct MergedChange {
+    pages: BTreeMap<usize, PageChange>,
+}
+
+impl MergedChange {
+    fn add(&mut self, change: Change) {
+        for page in change.pages {
+            match self.pages.entry(page.page) {
+                std::collections::btree_map::Entry::Vacant(slot) => {
+                    slot.insert(page);
+                }
+                std::collections::btree_map::Entry::Occupied(mut slot) => {
+                    let merged = slot.get_mut();
+                    for (into, from) in [
+                        (&mut merged.added, page.added),
+                        (&mut merged.removed, page.removed),
+                        (&mut merged.modified, page.modified),
+                    ] {
+                        for id in from {
+                            if !into.contains(&id) {
+                                into.push(id);
+                            }
+                        }
+                    }
+                    merged.area = match (merged.area, page.area) {
+                        (Some(a), Some(b)) => Some(union(a, b)),
+                        _ => None,
+                    };
+                }
+            }
+        }
+    }
+
+    fn finish(self, version: u64) -> Change {
+        Change {
+            version,
+            pages: self.pages.into_values().collect(),
+        }
+    }
 }
 
 /// 边执行边攒变化，最后按页整理成 [`Change`]。
@@ -383,11 +453,6 @@ impl<'lib> Session<'lib> {
         !self.redo.is_empty()
     }
 
-    /// 从早到晚的撤销标签，供历史记录面板显示。
-    pub fn history(&self) -> Vec<&'static str> {
-        self.undo.iter().map(|c| c.label).collect()
-    }
-
     pub fn page_count(&self) -> usize {
         self.doc.page_count()
     }
@@ -572,7 +637,13 @@ impl<'lib> Session<'lib> {
     /// 把矩阵左乘到每个对象上。撤销时用逆矩阵再变一次。
     pub fn transform(&mut self, ids: &[ObjectId], matrix: Matrix) -> Result<Change> {
         let inverse = matrix.inverse().ok_or(EditError::SingularMatrix)?;
-        self.execute("变换", ids, |id| Atom::Transform {
+        let moved_only = (matrix.a, matrix.b, matrix.c, matrix.d) == (1.0, 0.0, 0.0, 1.0);
+        let label = if moved_only {
+            "移动 {n} 个对象"
+        } else {
+            "变换 {n} 个对象"
+        };
+        self.execute(label, ids, |id| Atom::Transform {
             id,
             forward: matrix,
             inverse,
@@ -581,7 +652,7 @@ impl<'lib> Session<'lib> {
 
     /// 改填充色，颜色和不透明度都按 `color` 设。撤销恢复改之前的颜色。
     pub fn set_fill(&mut self, ids: &[ObjectId], color: Rgba) -> Result<Change> {
-        self.execute("填充色", ids, |id| Atom::Fill {
+        self.execute("改 {n} 个对象的填充色", ids, |id| Atom::Fill {
             id,
             before: None,
             after: color,
@@ -591,7 +662,7 @@ impl<'lib> Session<'lib> {
 
     /// 改填充色，只换颜色，各个对象的不透明度不动。
     pub fn set_fill_rgb(&mut self, ids: &[ObjectId], r: u8, g: u8, b: u8) -> Result<Change> {
-        self.execute("填充色", ids, |id| Atom::Fill {
+        self.execute("改 {n} 个对象的填充色", ids, |id| Atom::Fill {
             id,
             before: None,
             after: Rgba { r, g, b, a: 255 },
@@ -601,7 +672,7 @@ impl<'lib> Session<'lib> {
 
     /// 删除对象。对象留在撤销记录里，直到这一步被丢掉。
     pub fn delete(&mut self, ids: &[ObjectId]) -> Result<Change> {
-        self.execute("删除", ids, |id| Atom::Delete {
+        self.execute("删除 {n} 个对象", ids, |id| Atom::Delete {
             id,
             slot: None,
             object: None,
@@ -632,13 +703,8 @@ impl<'lib> Session<'lib> {
         let mut log = ChangeLog::default();
         self.apply(&mut atom, true, &mut log)?;
         self.created.insert(id);
-        self.redo.clear();
-        self.undo.push(Command {
-            label: "置入组件",
-            atoms: vec![atom],
-        });
-        self.trim();
-        self.version += 1;
+        let label = format!("置入{}", spec.kind.display_name());
+        self.record(label.trim_end().to_owned(), vec![atom]);
         Ok((id, log.finish(self.version)))
     }
 
@@ -699,13 +765,7 @@ impl<'lib> Session<'lib> {
         };
         let mut log = ChangeLog::default();
         self.apply(&mut atom, true, &mut log)?;
-        self.redo.clear();
-        self.undo.push(Command {
-            label: "改字",
-            atoms: vec![atom],
-        });
-        self.trim();
-        self.version += 1;
+        self.record("改字".to_owned(), vec![atom]);
         Ok((log.finish(self.version), outcome))
     }
 
@@ -749,13 +809,7 @@ impl<'lib> Session<'lib> {
         };
         let mut log = ChangeLog::default();
         self.apply(&mut atom, true, &mut log)?;
-        self.redo.clear();
-        self.undo.push(Command {
-            label: "改组件参数",
-            atoms: vec![atom],
-        });
-        self.trim();
-        self.version += 1;
+        self.record(format!("改{}参数", spec.kind.display_name()), vec![atom]);
         Ok(log.finish(self.version))
     }
 
@@ -841,11 +895,66 @@ impl<'lib> Session<'lib> {
                 return Err(err);
             }
         }
+        let label = label.replace("{n}", &atoms.len().to_string());
+        self.record(label, atoms);
+        Ok(log.finish(self.version))
+    }
+
+    /// 一条做成了的命令记进撤销栈：重做的那几步作废，版本号加 1。
+    fn record(&mut self, label: String, atoms: Vec<Atom>) {
         self.redo.clear();
-        self.undo.push(Command { label, atoms });
+        self.undo.push(Command {
+            label,
+            at_ms: now_ms(),
+            atoms,
+        });
         self.trim();
         self.version += 1;
-        Ok(log.finish(self.version))
+    }
+
+    /// 撤销栈的样子（历史记录面板，《接口协议》6.8 `history.list`）。
+    pub fn history(&self) -> History {
+        let entry = |command: &Command| HistoryEntry {
+            label: command.label.clone(),
+            at_ms: command.at_ms,
+        };
+        History {
+            entries: self
+                .undo
+                .iter()
+                .map(entry)
+                .chain(self.redo.iter().rev().map(entry))
+                .collect(),
+            applied: self.undo.len(),
+        }
+    }
+
+    /// 撤销或重做到 [`History::entries`] 里只有前 `applied` 步生效（历史记录面板点了一条，
+    /// 《接口协议》6.8 `history.jump`）。几步合成一个变化；版本号每一步都加 1，和逐步撤销一样。
+    /// 中途有一步撤不回去就停在那里，返回已经走了的几步（一步也没走成时报错）。
+    pub fn jump(&mut self, applied: usize) -> Result<Change> {
+        let total = self.undo.len() + self.redo.len();
+        if applied > total {
+            return Err(EditError::NoHistoryStep { applied, total });
+        }
+        let mut merged = MergedChange::default();
+        let mut moved = false;
+        while self.undo.len() != applied {
+            let step = if self.undo.len() > applied {
+                self.undo()
+            } else {
+                self.redo()
+            };
+            match step {
+                Ok(change) => {
+                    merged.add(change);
+                    moved = true;
+                }
+                Err(err) if !moved => return Err(err),
+                Err(_) => break,
+            }
+        }
+        Ok(merged.finish(self.version))
     }
 
     /// 正向（`forward` 为真）或反向执行一步，并把变化记进 `log`。
@@ -1412,7 +1521,7 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(fill_of(session, 0).r, 1);
-            assert_eq!(session.history(), vec!["填充色"]);
+            assert_eq!(applied_labels(session), ["改 1 个对象的填充色"]);
             session.undo().unwrap();
             assert_eq!(fill_of(session, 0), DARK);
 
@@ -1431,7 +1540,7 @@ mod tests {
             assert_eq!(session.redo().unwrap().pages[0].removed, vec![id]);
             assert!(session.objects(0).unwrap().is_empty());
             session.undo().unwrap();
-            assert!(session.history().is_empty());
+            assert!(applied_labels(session).is_empty());
         });
     }
 
@@ -1554,7 +1663,7 @@ mod tests {
             // 删掉最下面和最上面两个，剩下中间那个。
             let change = session.delete(&[a, c, a]).unwrap();
             assert_eq!(change.pages[0].removed, vec![a, c]);
-            assert_eq!(session.history(), vec!["删除"]);
+            assert_eq!(applied_labels(session), ["删除 2 个对象"]);
             assert_eq!(
                 session
                     .objects(0)
@@ -1785,7 +1894,7 @@ mod tests {
             session
                 .transform(&[id], Matrix::translation(5.0, 0.0))
                 .unwrap();
-            assert_eq!(session.history(), vec!["变换"]);
+            assert_eq!(applied_labels(session), ["移动 1 个对象"]);
             session.undo().unwrap();
             assert!(session.undo().is_err());
         });
@@ -2215,8 +2324,13 @@ mod tests {
             assert_eq!(text.kind, pdfium_sys::ObjectKind::Text);
             assert!((text.bounds.unwrap().left - 50.0).abs() < 1.5);
             assert_eq!(
-                session.history(),
-                vec!["置入组件", "改组件参数", "变换", "改组件参数"]
+                applied_labels(session),
+                [
+                    "置入 Code 128",
+                    "改 Code 128 参数",
+                    "移动 1 个对象",
+                    "改文本参数"
+                ]
             );
 
             for _ in 0..3 {
@@ -2241,7 +2355,12 @@ mod tests {
                 session.place_component(0, &text_spec("两\n行", 10.0), (10.0, 90.0)),
                 Err(EditError::Component(_))
             ));
-            assert_eq!(session.history().len(), 1, "失败的命令不进历史");
+            let history = session.history();
+            assert_eq!(
+                (history.applied, history.entries.len()),
+                (1, 4),
+                "失败的命令不进历史，也不清掉重做"
+            );
         });
     }
 
@@ -2467,6 +2586,84 @@ mod tests {
             session.text_info(component),
             Err(EditError::NotText(_))
         ));
+    }
+
+    /// 撤销栈里现在生效的几步的说法，从早到晚。
+    fn applied_labels(session: &Session<'_>) -> Vec<String> {
+        let history = session.history();
+        history
+            .entries
+            .into_iter()
+            .take(history.applied)
+            .map(|e| e.label)
+            .collect()
+    }
+
+    /// 历史记录面板（《接口协议》6.8）：列出每一步，点哪一步跳到哪一步，几步合成一个变化。
+    #[test]
+    fn history_lists_steps_and_jumps_back_and_forth() {
+        with_session(|session| {
+            let id = session.objects(0).unwrap()[0].id;
+            let start = left_of(session, id);
+            session
+                .transform(&[id], Matrix::translation(10.0, 0.0))
+                .unwrap();
+            let scale = Matrix {
+                a: 2.0,
+                b: 0.0,
+                c: 0.0,
+                d: 2.0,
+                e: 0.0,
+                f: 0.0,
+            };
+            session.transform(&[id], scale).unwrap();
+            session.delete(&[id]).unwrap();
+            let history = session.history();
+            assert_eq!(
+                history
+                    .entries
+                    .iter()
+                    .map(|e| e.label.as_str())
+                    .collect::<Vec<_>>(),
+                ["移动 1 个对象", "变换 1 个对象", "删除 1 个对象"]
+            );
+            assert_eq!(history.applied, 3);
+            assert!(history.entries.iter().all(|e| e.at_ms > 0));
+            assert!(history.entries.windows(2).all(|w| w[0].at_ms <= w[1].at_ms));
+
+            // 跳回第 1 步之后：撤销了删除和缩放，合成一个变化；版本号走两步
+            let change = session.jump(1).unwrap();
+            assert_eq!(change.version, 5);
+            assert_eq!(change.pages.len(), 1);
+            assert_eq!(change.pages[0].added, vec![id]);
+            assert!((left_of(session, id) - start - 10.0).abs() < 0.6);
+            let history = session.history();
+            assert_eq!((history.applied, history.entries.len()), (1, 3));
+
+            session.jump(3).unwrap();
+            assert!(summary_of(session, id).is_none());
+            session.jump(0).unwrap();
+            assert!((left_of(session, id) - start).abs() < 0.6);
+            assert_eq!(session.version(), 10);
+
+            // 原地不动：不改版本号，没有变化
+            let still = session.jump(0).unwrap();
+            assert_eq!((still.version, still.pages.len()), (10, 0));
+            assert!(matches!(
+                session.jump(4),
+                Err(EditError::NoHistoryStep {
+                    applied: 4,
+                    total: 3
+                })
+            ));
+
+            // 跳回去之后做新的修改：后面那几步作废
+            session
+                .transform(&[id], Matrix::translation(1.0, 0.0))
+                .unwrap();
+            let history = session.history();
+            assert_eq!((history.applied, history.entries.len()), (1, 1));
+        });
     }
 
     fn summary_of_bounds(session: &mut Session<'_>, id: ObjectId) -> Rect {

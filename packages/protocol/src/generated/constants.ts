@@ -21,6 +21,8 @@ export const METHOD = {
   EDIT_DELETE: 'edit.delete',
   HISTORY_UNDO: 'history.undo',
   HISTORY_REDO: 'history.redo',
+  HISTORY_LIST: 'history.list',
+  HISTORY_JUMP: 'history.jump',
   COMP_PLACE: 'comp.place',
   COMP_UPDATE: 'comp.update',
   FIDELITY_CHECK: 'fidelity.check',

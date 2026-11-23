@@ -128,6 +128,7 @@ describe('工具产生的修改交给谁', () => {
       setText: (id, text) => calls.push(['setText', id, text]),
       undo: () => calls.push(['undo']),
       redo: () => calls.push(['redo']),
+      jumpHistory: (index) => calls.push(['jump', index]),
     };
     return { editor, calls };
   }
@@ -383,6 +384,7 @@ describe('拖动预览（方案 3.2）', () => {
       setText: () => undefined,
       undo: () => undefined,
       redo: () => undefined,
+      jumpHistory: () => undefined,
     };
 
     const container = document.createElement('div');
@@ -799,6 +801,7 @@ describe('置入组件（P0 原型）', () => {
       setText: () => undefined,
       undo: () => undefined,
       redo: () => undefined,
+      jumpHistory: () => undefined,
     };
     const { store, controller, press } = mount(editor);
     try {
@@ -847,6 +850,7 @@ describe('置入组件（P0 原型）', () => {
       setText: () => undefined,
       undo: () => undefined,
       redo: () => undefined,
+      jumpHistory: () => undefined,
     };
     const { controller, drag } = mount(editor);
     try {

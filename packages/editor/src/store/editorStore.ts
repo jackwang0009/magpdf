@@ -26,8 +26,13 @@ export interface DocumentState {
   readonly selection: readonly string[];
   /** 视口中占比最大的页（状态栏、页面面板高亮） */
   readonly currentPage: number;
-  /** 历史记录面板的占位数据：最近的操作描述 */
+  /** 历史记录面板：第一条是打开时的样子，之后每一步一条，从早到晚 */
   readonly history: readonly string[];
+  /**
+   * 现在是 `history` 里哪一条之后的样子；后面的几步撤销了，还能重做。缺省是最后一条
+   * （模拟文档不记撤销）。
+   */
+  readonly historyAt?: number;
 }
 
 export type ComponentView = 'grid' | 'list';
@@ -81,6 +86,8 @@ export interface EditorState {
   updateComponent(id: string, objectId: string, values: Partial<ComponentValues>): void;
   /** 模拟文档：改文字对象（外观是一段文字的）的文字。 */
   setText(id: string, objectId: string, text: string): void;
+  /** 换掉历史记录（引擎的撤销栈变了）：`entries` 从打开时的样子数起，`at` 是现在在哪一条之后。 */
+  setHistory(id: string, entries: readonly string[], at: number): void;
   setPlacing(kind: PlaceableComponent | null): void;
   setStatusMessage(text: string | null): void;
   setTool(tool: ToolId): void;
@@ -290,6 +297,14 @@ export function createEditorStore(): EditorStore {
           const next = { ...object.component.values, ...values };
           return mockComponentObject(object.id, object.component.kind, next, object.bbox);
         });
+      },
+
+      setHistory(id, entries, at) {
+        updateDocument(id, (doc) =>
+          doc.historyAt === at && sameIds(doc.history, entries)
+            ? doc
+            : { ...doc, history: [...entries], historyAt: at },
+        );
       },
 
       setText(id, objectId, text) {

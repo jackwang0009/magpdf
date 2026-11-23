@@ -983,6 +983,92 @@ async fn existing_text_is_read_changed_and_undone_over_the_pipe() {
     assert_eq!(undone[0]["text"]["content"], json!(original));
 }
 
+/// 历史记录（《接口协议》6.8 `history.list`、`history.jump`）：列出每一步，一次跳几步，越界报错。
+#[tokio::test]
+async fn history_is_listed_and_jumped_over_the_pipe() {
+    let mut engine = Engine::start(None).await;
+    engine.hello().await;
+    let doc_id = engine.open("color-devicergb.pdf").await;
+    let before = engine.objects(doc_id).await;
+    let target = before
+        .iter()
+        .find(|o| o["kind"] == "path" && o["pickable"] == true)
+        .and_then(|o| o["id"].as_u64())
+        .expect("样本里有方块");
+
+    let empty = engine
+        .call(method::HISTORY_LIST, json!({ "docId": doc_id }))
+        .await;
+    assert_eq!(empty, json!({ "entries": [], "current": 0 }));
+
+    engine
+        .edit(
+            method::EDIT_TRANSFORM,
+            json!({ "docId": doc_id, "baseVersion": 0, "ids": [target], "matrix": [1, 0, 0, 1, 5, 0] }),
+        )
+        .await;
+    engine
+        .edit(
+            method::EDIT_DELETE,
+            json!({ "docId": doc_id, "baseVersion": 1, "ids": [target] }),
+        )
+        .await;
+    let list = engine
+        .call(method::HISTORY_LIST, json!({ "docId": doc_id }))
+        .await;
+    assert_eq!(list["current"], 2);
+    let entries = list["entries"].as_array().unwrap();
+    assert_eq!(
+        entries
+            .iter()
+            .map(|e| (e["index"].as_u64().unwrap(), e["label"].as_str().unwrap()))
+            .collect::<Vec<_>>(),
+        [(1, "移动 1 个对象"), (2, "删除 1 个对象")]
+    );
+    assert!(entries.iter().all(|e| e["time"].as_u64().unwrap() > 0));
+
+    // 跳回打开时的样子：两步合成一条 doc.changed，删掉的对象回来了
+    let (version, changed) = engine
+        .edit(method::HISTORY_JUMP, json!({ "docId": doc_id, "index": 0 }))
+        .await;
+    assert_eq!(version, 4);
+    assert_eq!(changed["changes"].as_array().unwrap().len(), 1, "{changed}");
+    assert_eq!(changed["changes"][0]["added"], json!([target]));
+    assert_eq!(engine.objects(doc_id).await, before);
+    let list = engine
+        .call(method::HISTORY_LIST, json!({ "docId": doc_id }))
+        .await;
+    assert_eq!(
+        (&list["current"], list["entries"].as_array().unwrap().len()),
+        (&json!(0), 2)
+    );
+
+    let (version, _) = engine
+        .edit(method::HISTORY_JUMP, json!({ "docId": doc_id, "index": 2 }))
+        .await;
+    assert_eq!(version, 6);
+    // 原地不动：版本号不变，不推送 doc.changed
+    let still = engine
+        .call(method::HISTORY_JUMP, json!({ "docId": doc_id, "index": 2 }))
+        .await;
+    assert_eq!(still, json!({ "version": 6 }));
+    // 事件先于应答发出：应答到了还没有，就是没发
+    assert!(
+        !engine
+            .events
+            .iter()
+            .any(|(_, name, _)| name == event::DOC_CHANGED)
+    );
+    let beyond = engine
+        .call_err(method::HISTORY_JUMP, json!({ "docId": doc_id, "index": 3 }))
+        .await;
+    assert_eq!(
+        beyond["code"],
+        ErrorCode::InvalidArgument.code(),
+        "{beyond}"
+    );
+}
+
 /// 保存（《接口协议》6.1 `doc.save`，原型只有完整重写）：存回原文件、另存为、事件、恢复文件跟着换路径、出错。
 #[tokio::test]
 async fn documents_are_saved_in_place_and_saved_as_a_new_file() {

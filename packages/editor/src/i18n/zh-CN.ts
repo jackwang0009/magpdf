@@ -283,6 +283,8 @@ export const zhCN = {
     placeComponent: '置入组件',
     updateComponent: '改组件参数',
     setText: '改字',
+    /** 历史记录面板：悬停在一条上的说明 */
+    jumpTo: '回到“{label}”之后的样子',
   },
   placeholder: {
     panel: '{name}面板在 P1 实现',

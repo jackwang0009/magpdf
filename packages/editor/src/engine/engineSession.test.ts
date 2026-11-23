@@ -806,6 +806,64 @@ describe('EngineSession：改原有文字（方案 5.2）', () => {
   });
 });
 
+describe('EngineSession：历史记录（方案 4.2）', () => {
+  const history = (store: ReturnType<typeof createEditorStore>) => {
+    const doc = store.getState().documents['engine-1']!;
+    return { entries: doc.history, at: doc.historyAt };
+  };
+
+  it('文档每变一次，历史记录跟着引擎的撤销栈换；撤销了的几步还在，位置往回走', async () => {
+    const { editor, store } = await attached();
+    expect(history(store)).toEqual({ entries: [t.history.opened], at: undefined });
+    editor.transformObjects([{ page: 0, ids: ['p0-2'], matrix: translationMatrix(5, 0) }]);
+    editor.deleteObjects(['p0-3']);
+    await flush();
+    expect(history(store)).toEqual({
+      entries: [t.history.opened, '移动 1 个对象', '删除 1 个对象'],
+      at: 2,
+    });
+    editor.undo();
+    await flush();
+    expect(history(store).at).toBe(1);
+  });
+
+  it('点历史记录的一条：一次跳过去，对象回到那时的样子；跳回打开时，再跳到最后', async () => {
+    const { engine, editor, store, objects } = await attached();
+    editor.transformObjects([{ page: 0, ids: ['p0-2'], matrix: translationMatrix(5, 0) }]);
+    editor.deleteObjects(['p0-3']);
+    await flush();
+    editor.jumpHistory(0);
+    await flush();
+    expect(engine.transport.sent(METHOD.HISTORY_JUMP)).toEqual([{ docId: 1, index: 0 }]);
+    expect(objects(0).map((o) => [o.id, o.bbox.x])).toEqual([
+      ['p0-1', 0],
+      ['p0-2', 20],
+      ['p0-3', 50],
+    ]);
+    expect(history(store).at).toBe(0);
+    expect(store.getState().documents['engine-1']!.snapshot.version).toBe(4);
+
+    editor.jumpHistory(2);
+    await flush();
+    expect(objects(0).map((o) => o.id)).toEqual(['p0-1', 'p0-2']);
+    expect(history(store).at).toBe(2);
+  });
+
+  it('引擎重启后历史记录只剩打开时：新引擎的撤销栈是空的', async () => {
+    const { engine, editor, store } = await attached();
+    editor.deleteObjects(['p0-3']);
+    await flush();
+    engine.transport.emit(EVENT.ENGINE_RESTARTING, {});
+    const restored = engine.restart([{ name: '提单.pdf', pages: fourPages() }]);
+    engine.transport.emit(EVENT.ENGINE_RESTORED, {
+      docIds: restored.map((d) => d.docId),
+      docs: restored,
+    });
+    await flush();
+    expect(history(store)).toEqual({ entries: [t.history.opened], at: 0 });
+  });
+});
+
 describe('EngineSession：自动备份（方案 9.3）', () => {
   it('引擎重启后从自动备份打开：标成没保存，提示说修改从备份里恢复了', async () => {
     const { engine, editor, notices, snapshot } = await attached();

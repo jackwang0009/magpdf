@@ -39,8 +39,18 @@ export function MenuBar({ workspace, showRulers, showFrameStats }: MenuBarProps)
   // 撤销记录在引擎里：只有引擎打开的文档能撤销、能保存，模拟文档不能
   const host = useEditorHost();
   const activeDocumentId = useEditorStore((s) => s.activeDocumentId);
-  const canUndo = Boolean(activeDocumentId && host?.documentEditor(activeDocumentId));
-  const canSave = canUndo && Boolean(host?.saveDocument);
+  const editable = Boolean(activeDocumentId && host?.documentEditor(activeDocumentId));
+  // 历史记录里现在在哪一条、一共几条（第一条是打开时的样子）
+  const historyAt = useEditorStore((s) => {
+    const doc = activeDocumentId ? s.documents[activeDocumentId] : undefined;
+    return doc ? (doc.historyAt ?? doc.history.length - 1) : 0;
+  });
+  const historyLength = useEditorStore((s) =>
+    activeDocumentId ? (s.documents[activeDocumentId]?.history.length ?? 0) : 0,
+  );
+  const canUndo = editable && historyAt > 0;
+  const canRedo = editable && historyAt < historyLength - 1;
+  const canSave = editable && Boolean(host?.saveDocument);
 
   const menus: Menu[] = [
     {
@@ -67,7 +77,7 @@ export function MenuBar({ workspace, showRulers, showFrameStats }: MenuBarProps)
       label: t.menu.edit,
       items: [
         { id: 'undo', label: t.menuItems.undo, command: 'edit.undo', disabled: !canUndo },
-        { id: 'redo', label: t.menuItems.redo, command: 'edit.redo', disabled: !canUndo },
+        { id: 'redo', label: t.menuItems.redo, command: 'edit.redo', disabled: !canRedo },
         { id: 'sep1', label: '', separator: true },
         { id: 'cut', label: t.menuItems.cut, disabled: true },
         { id: 'copy', label: t.menuItems.copy, disabled: true },

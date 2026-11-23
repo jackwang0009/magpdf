@@ -45,4 +45,6 @@ export interface DocumentEditor {
   setText(id: string, text: string): void;
   undo(): void;
   redo(): void;
+  /** 撤销或重做到历史记录的第 `index` 条之后（0 是打开时的样子），历史记录面板点了一条时用。 */
+  jumpHistory(index: number): void;
 }

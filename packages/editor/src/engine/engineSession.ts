@@ -20,6 +20,8 @@ import type {
   EngineRestored,
   FidelityCheckParams,
   FidelityResult,
+  HistoryJumpParams,
+  HistoryList,
   HistoryParams,
   ObjDetail,
   ObjGetParams,
@@ -114,6 +116,8 @@ interface EngineDocument {
   queue: Promise<void>;
   /** 刚置入的组件：它出现在对象列表里的时候选中它 */
   selectWhenListed: string | null;
+  /** 历史记录：`loading` 在取，`stale` 在取的那份回来之后还要再取一次 */
+  history: 'idle' | 'loading' | 'stale';
   readonly provider: EngineTileProvider;
   readonly editor: DocumentEditor;
 }
@@ -292,6 +296,7 @@ export class EngineSession implements EditorHost {
       pages: pagesOf(snapshot),
       queue: Promise.resolve(),
       selectWhenListed: null,
+      history: 'idle',
       provider: new EngineTileProvider({
         transport: this.transport,
         target: (page) => {
@@ -307,6 +312,8 @@ export class EngineSession implements EditorHost {
     this.documents.set(id, document);
     this.store.getState().openDocument(this.blankSnapshot(id, info.title, snapshot, info.unsaved));
     this.ensureAround(document, 0);
+    // 界面重新加载时，引擎里的文档可能已经改过几步
+    if (snapshot.version > 0) this.refreshHistory(document);
   }
 
   private snapshotOf(docId: number): Promise<DocSnapshot> {
@@ -509,7 +516,54 @@ export class EngineSession implements EditorHost {
       setText: (objectId, text) => on((document) => this.setText(document, objectId, text)),
       undo: () => on((document) => this.stepHistory(document, METHOD.HISTORY_UNDO)),
       redo: () => on((document) => this.stepHistory(document, METHOD.HISTORY_REDO)),
+      jumpHistory: (index) => on((document) => this.jumpHistory(document, index)),
     };
+  }
+
+  private jumpHistory(document: EngineDocument, index: number): void {
+    this.enqueue(document, [], () =>
+      this.command(document, METHOD.HISTORY_JUMP, (docId) => {
+        const params: HistoryJumpParams = { docId, index };
+        return params;
+      }),
+    );
+  }
+
+  /**
+   * 向引擎要一份撤销栈，换掉 store 里的历史记录。文档每变一次都要一份；上一份还没回来时只记下要再取，
+   * 回来之后再取一次，不让请求堆起来。
+   */
+  private refreshHistory(document: EngineDocument): void {
+    if (document.history === 'loading' || document.history === 'stale') {
+      document.history = 'stale';
+      return;
+    }
+    const docId = document.docId;
+    if (docId === null) return;
+    document.history = 'loading';
+    const params: HistoryParams = { docId };
+    this.transport
+      .request<HistoryList>(METHOD.HISTORY_LIST, params)
+      .then(
+        (list) => {
+          if (document.docId !== docId || !this.documents.has(document.id)) return;
+          this.store
+            .getState()
+            .setHistory(
+              document.id,
+              [t.history.opened, ...list.entries.map((entry) => entry.label)],
+              list.current,
+            );
+        },
+        (error: unknown) => {
+          if (!isEngineRestarted(error)) console.error('history.list 失败', error);
+        },
+      )
+      .finally(() => {
+        const again = document.history === 'stale';
+        document.history = 'idle';
+        if (again) this.refreshHistory(document);
+      });
   }
 
   private transformObjects(document: EngineDocument, changes: readonly PageTransform[]): void {
@@ -842,6 +896,7 @@ export class EngineSession implements EditorHost {
       const page = document.pages[index];
       if (page && (page.loaded || page.loading !== 0)) void this.loadPage(document, index);
     }
+    this.refreshHistory(document);
   }
 
   /**
@@ -894,6 +949,9 @@ export class EngineSession implements EditorHost {
             document.id,
             this.blankSnapshot(document.id, document.title, snapshot, match.unsaved),
           );
+        // 新引擎的撤销栈是空的：旧的几步撤销不了了
+        document.history = 'idle';
+        this.store.getState().setHistory(document.id, [t.history.opened], 0);
         const currentPage = this.store.getState().documents[document.id]?.currentPage ?? 0;
         this.ensureAround(document, currentPage);
       } catch (error) {

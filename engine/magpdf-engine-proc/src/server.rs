@@ -21,11 +21,11 @@ use magpdf_ipc::messages::{
     DocInfo, DocOpenParams, DocSaveParams, DocSaveResult, DocSaved, DocSnapshot, DocSnapshotParams,
     EchoParams, EditDeleteParams, EditResult, EditSetStyleParams, EditSetTextParams,
     EditSetTextResult, EditTransformParams, ErrorCode, Fidelity, FidelityCheckParams,
-    FidelityResult, HelloParams, HelloResult, HistoryParams, JsonValue, LayerMode, OBJ_LIST_MAX,
-    ObjDetail, ObjDetailKind, ObjGetParams, ObjHitTestParams, ObjListParams, PageChange, PageInfo,
-    PingParams, RenderTilesParams, RenderTilesResult, Request, RequestId, Response,
-    RoundtripParams, RoundtripResult, RpcError, SaveMode, StallParams, TextDetail, TileCoord,
-    TileFetchParams, TileFetchResult, method,
+    FidelityResult, HelloParams, HelloResult, HistoryJumpParams, HistoryList, HistoryParams,
+    JsonValue, LayerMode, OBJ_LIST_MAX, ObjDetail, ObjDetailKind, ObjGetParams, ObjHitTestParams,
+    ObjListParams, PageChange, PageInfo, PingParams, RenderTilesParams, RenderTilesResult, Request,
+    RequestId, Response, RoundtripParams, RoundtripResult, RpcError, SaveMode, StallParams,
+    TextDetail, TileCoord, TileFetchParams, TileFetchResult, method,
 };
 use magpdf_ipc::shm::{self, Layout, MappedRegion};
 use magpdf_ipc::{PROTOCOL_VERSION, pipe, pump};
@@ -774,6 +774,45 @@ async fn handle_request(
             let p: HistoryParams = decode(params)?;
             apply_edit(engine, id, p.doc_id, None, EditOp::Redo, out).await
         }
+        method::HISTORY_LIST => {
+            let p: HistoryParams = decode(params)?;
+            let history = engine
+                .engine
+                .history(p.doc_id)
+                .await
+                .map_err(map_engine_error)?;
+            let list = HistoryList {
+                entries: history
+                    .entries
+                    .into_iter()
+                    .zip(1..)
+                    .map(|(entry, index)| messages::HistoryEntry {
+                        index,
+                        label: entry.label,
+                        time: entry.at_ms,
+                    })
+                    .collect(),
+                current: u32::try_from(history.applied).unwrap_or(u32::MAX),
+            };
+            Ok(Some(frame::response_ok(id, &list)))
+        }
+        method::HISTORY_JUMP => {
+            let p: HistoryJumpParams = decode(params)?;
+            let op = EditOp::Jump {
+                applied: p.index as usize,
+            };
+            let change = engine
+                .engine
+                .edit(p.doc_id, None, op)
+                .await
+                .map_err(map_engine_error)?;
+            // 原地不动：文档没变，不推送 doc.changed（界面收到它会把文档标成已修改）
+            if !change.pages.is_empty() {
+                announce_change(engine, p.doc_id, &change, out);
+            }
+            let version = wire_version(change.version);
+            Ok(Some(frame::response_ok(id, &EditResult { version })))
+        }
         method::FIDELITY_CHECK => {
             let p: FidelityCheckParams = decode(params)?;
             // 结论不在应答里：每一页各发一条 fidelity.result（《接口协议》6.9）。
@@ -1176,7 +1215,8 @@ fn edit_error_code(error: &EditError) -> ErrorCode {
         | EditError::NothingToUndo
         | EditError::NothingToRedo
         | EditError::NotComponent(_)
-        | EditError::NotText(_) => ErrorCode::InvalidArgument,
+        | EditError::NotText(_)
+        | EditError::NoHistoryStep { .. } => ErrorCode::InvalidArgument,
         EditError::Component(_) => ErrorCode::CompInvalid,
         EditError::Text(_) => ErrorCode::TextNotEditable,
         EditError::Pdfium(_) | EditError::NoFill => ErrorCode::Internal,

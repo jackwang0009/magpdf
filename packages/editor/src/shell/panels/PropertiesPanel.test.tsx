@@ -231,6 +231,7 @@ describe('属性面板：改原有文字', () => {
       setText: (id, text) => calls.push([id, text]),
       undo: () => undefined,
       redo: () => undefined,
+      jumpHistory: () => undefined,
     };
     const host: EditorHost = {
       openDocument: () => Promise.resolve(),

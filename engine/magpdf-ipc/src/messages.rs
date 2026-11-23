@@ -219,6 +219,8 @@ names! {
         EDIT_DELETE = "edit.delete";
         HISTORY_UNDO = "history.undo";
         HISTORY_REDO = "history.redo";
+        HISTORY_LIST = "history.list";
+        HISTORY_JUMP = "history.jump";
         COMP_PLACE = "comp.place";
         COMP_UPDATE = "comp.update";
         FIDELITY_CHECK = "fidelity.check";
@@ -772,12 +774,44 @@ pub struct EditDeleteParams {
     pub ids: Vec<u64>,
 }
 
-/// `history.undo`、`history.redo` 的参数。
+/// `history.undo`、`history.redo`、`history.list` 的参数。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct HistoryParams {
     pub doc_id: u32,
+}
+
+/// 历史记录里的一步。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct HistoryEntry {
+    /// 第几步，从 1 数起（0 是打开时的样子，不列出来）
+    pub index: u32,
+    /// 可以直接显示的说法，如“移动 2 个对象”
+    pub label: String,
+    /// 做这一步的时刻，Unix 毫秒
+    pub time: u64,
+}
+
+/// `history.list` 的返回值：做过的几步在前（从早到晚），撤销了的接在后面；前 `current` 步现在生效。
+/// 撤销栈有上限，最早的几步丢掉之后，第 1 步不是打开之后的第一步。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct HistoryList {
+    pub entries: Vec<HistoryEntry>,
+    pub current: u32,
+}
+
+/// `history.jump` 的参数：撤销或重做到只有前 `index` 步生效。返回 [`EditResult`]。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct HistoryJumpParams {
+    pub doc_id: u32,
+    pub index: u32,
 }
 
 /// 修改命令、撤销、重做的返回值：新的文档版本号。

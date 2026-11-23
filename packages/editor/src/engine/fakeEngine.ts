@@ -17,6 +17,8 @@ import type {
   EditTransformParams,
   FidelityCheckParams,
   FidelityResult,
+  HistoryJumpParams,
+  HistoryList,
   HistoryParams,
   ObjDetail,
   ObjGetParams,
@@ -82,6 +84,9 @@ interface FakeDocument {
 }
 
 interface Step {
+  /** 历史记录里的说法 */
+  readonly label: string;
+  readonly time?: number;
   readonly pages: readonly number[];
   readonly forward: () => void;
   readonly backward: () => void;
@@ -211,6 +216,10 @@ export class FakeEngine {
         return this.history(params as HistoryParams, 'undo');
       case METHOD.HISTORY_REDO:
         return this.history(params as HistoryParams, 'redo');
+      case METHOD.HISTORY_LIST:
+        return this.historyList(params as HistoryParams);
+      case METHOD.HISTORY_JUMP:
+        return this.jump(params as HistoryJumpParams);
       case METHOD.FIDELITY_CHECK: {
         const { docId, pageIds } = params as FidelityCheckParams;
         // 先确认页都在；已经校验过的页也回一条结论
@@ -311,6 +320,7 @@ export class FakeEngine {
         object.bbox = boxes[i] ?? null;
       });
     return this.commit(document, {
+      label: `移动 ${objects.length} 个对象`,
       pages: [...found.keys()],
       forward: () => set(after),
       backward: () => set(before),
@@ -325,6 +335,7 @@ export class FakeEngine {
     );
     const gone = new Set(params.ids);
     return this.commit(document, {
+      label: `删除 ${gone.size} 个对象`,
       pages: [...found.keys()],
       forward: () => {
         for (const index of found.keys()) {
@@ -386,6 +397,7 @@ export class FakeEngine {
     };
     const index = document.pages.indexOf(page);
     const result = this.commit(document, {
+      label: '置入组件',
       pages: [index],
       forward: () => page.objects.push(object),
       backward: () => {
@@ -412,6 +424,7 @@ export class FakeEngine {
     };
     checkComponent(after.type, after.params);
     return this.commit(document, {
+      label: '改组件参数',
       pages: [index],
       forward: () => {
         object.comp = after;
@@ -464,6 +477,7 @@ export class FakeEngine {
       font: ascii ? before.font : FAKE_REPLACEMENT_FONT,
     };
     const result = this.commit(document, {
+      label: '改字',
       pages: [index],
       forward: () => {
         object.text = after;
@@ -486,9 +500,40 @@ export class FakeEngine {
 
   private commit(document: FakeDocument, step: Step): EditResult {
     step.forward();
-    document.undo.push(step);
+    document.undo.push({ ...step, time: Date.now() });
     document.redo.length = 0;
     return this.changed(document, step.pages);
+  }
+
+  private historyList(params: HistoryParams): HistoryList {
+    const document = this.document(params.docId);
+    const steps = [...document.undo, ...[...document.redo].reverse()];
+    return {
+      entries: steps.map((step, i) => ({ index: i + 1, label: step.label, time: step.time ?? 0 })),
+      current: document.undo.length,
+    };
+  }
+
+  /** 和真引擎一样：一步一步撤销或重做，版本号每步加 1，合成一条 `doc.changed`；原地不动时不推送。 */
+  private jump(params: HistoryJumpParams): EditResult {
+    const document = this.document(params.docId);
+    if (params.index > document.undo.length + document.redo.length) {
+      throw invalid(`历史记录跳不到第 ${params.index} 步`);
+    }
+    const pages = new Set<number>();
+    let steps = 0;
+    while (document.undo.length !== params.index) {
+      const back = document.undo.length > params.index;
+      const step = (back ? document.undo : document.redo).pop()!;
+      if (back) step.backward();
+      else step.forward();
+      (back ? document.redo : document.undo).push(step);
+      step.pages.forEach((page) => pages.add(page));
+      steps++;
+    }
+    if (steps === 0) return { version: document.version };
+    document.version += steps - 1;
+    return this.changed(document, [...pages]);
   }
 
   private history(params: HistoryParams, direction: 'undo' | 'redo'): EditResult {

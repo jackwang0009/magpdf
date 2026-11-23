@@ -4,7 +4,8 @@
  *
  * 用 color-devicergb.pdf：文字是不嵌入的 Helvetica。走一遍：
  *   点文字 → 属性面板显示原文和 Helvetica → 改成英文：原字体写得出，不提示换字体，画面变了
- *   → 改成中文：原字体写不出，换成系统字体，状态栏提示“字体已替换为 …” → 撤销两步，回到原文。
+ *   → 改成中文：原字体写不出，换成系统字体，状态栏提示“字体已替换为 …” → 撤销两步，回到原文
+ *   → 历史记录面板里两步“改字”划掉了，点最上面那条一次重做两步，又是中文。
  *
  * 先构建发布版（步骤见 smoke.mjs 开头），再运行：
  *   node apps/desktop/e2e/text.mjs
@@ -151,7 +152,34 @@ try {
   await page.mouse.click(target.center.x, target.center.y);
   await panelShows(page, original, '撤销之后面板读到原文');
   assert.equal((await documentState(page)).objects, before.objects);
-  await sleep(100);
+
+  // 5. 历史记录面板：两步“改字”都撤销了（划掉），现在在“打开文档”；点最上面那条，一次重做两步
+  await page.locator('.dv-tab', { hasText: '历史记录' }).click();
+  const steps = page.locator('.mg-history-step');
+  await waitFor('历史记录列出三条', async () => (await steps.count()) === 3, 3_000);
+  const listed = await steps.evaluateAll((items) =>
+    items.map((item) => ({
+      label: item.textContent,
+      on: item.classList.contains('mg-on'),
+      undone: item.classList.contains('mg-undone'),
+    })),
+  );
+  assert.deepEqual(listed, [
+    { label: '改字', on: false, undone: true },
+    { label: '改字', on: false, undone: true },
+    { label: '打开文档', on: true, undone: false },
+  ]);
+  await steps.first().click();
+  await editSettled(page, 6, '历史记录跳到最后一步');
+  await waitFor(
+    '最上面那条成了现在的位置',
+    async () => (await steps.first().getAttribute('class')).includes('mg-on'),
+    3_000,
+  );
+  await page.locator('.dv-tab', { hasText: '属性' }).click();
+  await panelShows(page, '提单号 0042', '跳回去之后面板读到中文');
+  await parkMouse(page);
+  await page.screenshot({ path: join(shots, 'text-history.png') });
 
   console.log(
     JSON.stringify({
@@ -160,6 +188,7 @@ try {
       english: 'MagPDF 123',
       chineseNotice: notice,
       undone: true,
+      historyJump: listed.length,
     }),
   );
 } finally {
