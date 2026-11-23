@@ -75,32 +75,49 @@ class SharedTileBuffers {
         if (error === 'gone') throw new TileGoneError(slot, generation);
         throw new Error(`取瓦片失败：${String(error)}`, { cause: error });
       }
-      const buffer = this.buffers.get(tile.index);
-      if (!buffer) throw new Error(`没有第 ${tile.index} 块共享缓冲区`);
-      // 先看写完的标记，拷出像素，再看写入前的标记：中间被下一次取瓦片盖掉的话两个对不上。
-      const marks = new Uint32Array(buffer, 0, 2);
-      if (marks[1] !== tile.tag) continue;
-      const pixels = new Uint8Array(buffer, SHARED_HEADER_BYTES, TILE_BYTES).slice();
-      if (marks[0] === tile.tag) return pixels;
+      const pixels = this.read(tile);
+      if (pixels) return pixels;
     }
     throw new Error('取瓦片失败：共享缓冲区一直被别的瓦片占着');
   }
+
+  /**
+   * 从缓冲区里拷出一块瓦片。先看写完的标记，拷出像素，再看写入前的标记：中间被下一次取瓦片盖掉的话
+   * 两个对不上，返回 `null`。
+   */
+  read(tile: SharedTile): Uint8Array | null {
+    const buffer = this.buffers.get(tile.index);
+    if (!buffer) return null;
+    const marks = new Uint32Array(buffer, 0, 2);
+    if (marks[1] !== tile.tag) return null;
+    const pixels = new Uint8Array(buffer, SHARED_HEADER_BYTES, TILE_BYTES).slice();
+    return marks[0] === tile.tag ? pixels : null;
+  }
 }
+
+/** 主进程随 `render.tileReady` 放进缓冲区、还没取走的瓦片最多记几块。 */
+const PUSHED_LIMIT = 64;
 
 /**
  * 界面到主进程的通道，Tauri 实现：
  * 请求走命令 `engine_request`，事件走 Tauri 事件，瓦片走自定义协议（方案 3.1）；
- * 主进程打开了共享缓冲区时，瓦片改走 `fetch_tile_shared`。
+ * 主进程打开了共享缓冲区时，瓦片改走共享缓冲区：`render.tileReady` 带着 `sharedBuffer` 的直接从缓冲区读，
+ * 不带的（或者读的时候已经被别的瓦片盖掉了）调 `fetch_tile_shared`。
  */
 export class TauriTransport implements EngineTransport {
   private readonly listeners = new Set<(event: EngineEvent) => void>();
   private readonly unlisten: Promise<() => void>;
   private readonly shared: Promise<SharedTileBuffers | null>;
+  /** 主进程随 `render.tileReady` 放进缓冲区的瓦片，键是 `槽位/代数`；取走就删 */
+  private readonly pushed = new Map<string, SharedTile>();
   /** 测试用：强制走自定义协议，好在同一个窗口里比两条路。 */
   forceProtocol = false;
+  /** 测试用：不用主进程随事件放好的瓦片，每块都调命令取。 */
+  ignorePushed = false;
 
   constructor() {
     this.unlisten = listen<EngineEvent>(ENGINE_EVENT, (event) => {
+      this.remember(event.payload);
       for (const listener of this.listeners) listener(event.payload);
     });
     this.unlisten.catch((error: unknown) => console.error('订阅引擎事件失败', error));
@@ -126,11 +143,31 @@ export class TauriTransport implements EngineTransport {
 
   async fetchTile(slot: number, generation: number): Promise<Uint8Array> {
     const shared = this.forceProtocol ? null : await this.shared;
-    if (shared) return shared.fetch(slot, generation);
+    if (shared) {
+      const key = `${slot}/${generation}`;
+      const tile = this.pushed.get(key);
+      this.pushed.delete(key);
+      const pixels = tile && !this.ignorePushed ? shared.read(tile) : null;
+      return pixels ?? shared.fetch(slot, generation);
+    }
     const response = await fetch(`${TILE_BASE}/${slot}/${generation}`, { cache: 'no-store' });
     if (response.status === 410) throw new TileGoneError(slot, generation);
     if (!response.ok) throw new Error(`取瓦片失败：HTTP ${response.status}`);
     return new Uint8Array(await response.arrayBuffer());
+  }
+
+  /** 记下主进程随 `render.tileReady` 放进缓冲区的瓦片。 */
+  private remember(event: EngineEvent): void {
+    if (event.method !== 'render.tileReady') return;
+    const params = event.params as
+      { slot?: number; generation?: number; sharedBuffer?: SharedTile } | undefined;
+    if (!params?.sharedBuffer) return;
+    this.pushed.set(`${params.slot}/${params.generation}`, params.sharedBuffer);
+    while (this.pushed.size > PUSHED_LIMIT) {
+      const oldest = this.pushed.keys().next().value;
+      if (oldest === undefined) break;
+      this.pushed.delete(oldest);
+    }
   }
 
   dispose(): void {

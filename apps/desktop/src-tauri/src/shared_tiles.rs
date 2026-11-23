@@ -3,7 +3,8 @@
 //! 《接口协议》3.3 的做法是界面经自定义协议 `magpdf://tile/…` 取像素。V06 量到这一段要 5.4–5.6 ms，
 //! 其中约 4.5 ms 花在 WebView2 接收 1 MB 的响应体上。这里换成：主进程建几块 WebView2 的共享缓冲区，
 //! 交给页面一次；取瓦片时界面调命令 `fetch_tile_shared`，主进程把共享内存里的像素直接拷进其中一块，
-//! 界面从那块缓冲区里读，不经过响应体。
+//! 界面从那块缓冲区里读，不经过响应体。主进程转发 `render.tileReady` 时也会先拷好，事件里带上位置，
+//! 界面连命令都不用调（`app.rs` 的 `push_tile`）。
 //!
 //! 默认不开：设了环境变量 `MAGPDF_TILE_TRANSPORT=shared-buffer` 才用，协议的写法没有改，换不换等协议
 //! 评审（C18）。WebView2 运行时太旧、没有这个接口时，界面退回自定义协议。
@@ -98,8 +99,15 @@ impl SharedTiles {
                 .environment()
                 .cast()
                 .map_err(|e| failed("WebView2 运行时没有 SharedBuffer 接口", e))?;
-            let mut slots = self.slots.lock().map_err(|_| "缓冲区表坏了".to_owned())?;
-            while slots.len() < BUFFER_COUNT {
+            // 建缓冲区不拿着表的锁：转发引擎事件的任务（`app.rs` 的 `push_tile`）也要拿这把锁，建 16 块的时候
+            // 一直拿着，启动时所有事件都得等它。
+            let existing = self
+                .slots
+                .lock()
+                .map_err(|_| "缓冲区表坏了".to_owned())?
+                .len();
+            let mut created = Vec::new();
+            for _ in existing..BUFFER_COUNT {
                 let buffer = environment
                     .CreateSharedBuffer((HEADER_BYTES + TILE_BYTES) as u64)
                     .map_err(|e| failed("建不了共享缓冲区", e))?;
@@ -107,13 +115,18 @@ impl SharedTiles {
                 buffer
                     .Buffer(&mut base)
                     .map_err(|e| failed("取不到共享缓冲区的地址", e))?;
-                slots.push(Arc::new(Slot {
+                created.push(Arc::new(Slot {
                     buffer,
                     base: base as usize,
                     writing: Mutex::new(()),
                     tag: AtomicU32::new(0),
                 }));
             }
+            let slots = {
+                let mut slots = self.slots.lock().map_err(|_| "缓冲区表坏了".to_owned())?;
+                slots.extend(created);
+                slots.clone()
+            };
             for (index, slot) in slots.iter().enumerate() {
                 let data = HSTRING::from(format!("{{\"magpdfTileBuffer\":{index}}}"));
                 core.PostSharedBufferToScript(

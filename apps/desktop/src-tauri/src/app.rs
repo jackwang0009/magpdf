@@ -11,7 +11,8 @@
 //!   `http://magpdf.localhost/tile/<槽位>/<代数>`）。打开了 [`crate::shared_tiles`] 时改走命令
 //!   `fetch_tile_shared`，像素放在 WebView2 的共享缓冲区里。
 //!
-//! 主进程到界面只有一个 Tauri 事件 [`ENGINE_EVENT`]，载荷是 `{ method, params }`：引擎推送的事件原样转发；
+//! 主进程到界面只有一个 Tauri 事件 [`ENGINE_EVENT`]，载荷是 `{ method, params }`：引擎推送的事件原样转发
+//! （打开了共享缓冲区时 `render.tileReady` 多带一个 `sharedBuffer`，见 [`push_tile`]）；
 //! 引擎重启时主进程自己发 `engine.restarting`、`engine.restored`、`engine.failed`。
 
 use std::path::{Path, PathBuf};
@@ -298,11 +299,39 @@ fn parse_tile_path(path: &str) -> Option<(u32, u32)> {
     parts.next().is_none().then_some((slot, generation))
 }
 
+/// 打开了共享缓冲区、页面也接好了时，`render.tileReady` 转给界面之前先把这块瓦片拷进一块缓冲区，事件里加上
+/// `sharedBuffer: {index, tag}`：界面收到事件就能直接读像素，不用再调命令取（省掉一次命令往返，约 0.9 ms）。
+/// 拷不成（没接好、代数已经变了）就原样转发，界面照旧去取。
+fn push_tile(shell: &Shell, params: &mut Value) {
+    let Some(tiles) = &shell.shared_tiles else {
+        return;
+    };
+    let number = |key: &str| {
+        params
+            .get(key)
+            .and_then(Value::as_u64)
+            .and_then(|v| u32::try_from(v).ok())
+    };
+    let (Some(slot), Some(generation)) = (number("slot"), number("generation")) else {
+        return;
+    };
+    if let Ok(tile) = tiles.fill(|out| shell.supervisor.read_tile_into(slot, generation, out))
+        && let Some(object) = params.as_object_mut()
+    {
+        object.insert("sharedBuffer".to_owned(), json!(tile));
+    }
+}
+
 /// 把监督者交出来的事件转给界面。
 async fn forward_events(app: AppHandle, mut events: UnboundedReceiver<HostEvent>) {
     while let Some(host_event) = events.recv().await {
         let (name, params) = match host_event {
-            HostEvent::Engine { method, params } => (method, params),
+            HostEvent::Engine { method, mut params } => {
+                if method == event::RENDER_TILE_READY {
+                    push_tile(&app.state::<Shell>(), &mut params);
+                }
+                (method, params)
+            }
             HostEvent::Restarting => (event::ENGINE_RESTARTING.to_owned(), json!({})),
             HostEvent::Restored { restored } => {
                 app.state::<Shell>().replace_docs(restored.clone());

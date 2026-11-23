@@ -4,7 +4,8 @@
  *
  * 起真实的桌面程序，打开共享缓冲区（`MAGPDF_TILE_TRANSPORT=shared-buffer`），在 WebView2 里用 `performance.now()`
  * 计时：先渲染几块瓦片，再对同一块瓦片两条路各取 `MAGPDF_TILE_FETCHES` 次（取一次的耗时），以及 8 块同时取。
- * 两条路取到的像素逐字节比一遍。
+ * 两条路取到的像素逐字节比一遍。另外量“收到 render.tileReady 到像素到手”：自定义协议、共享缓冲区调命令取、
+ * 共享缓冲区直接读主进程随事件放好的，各 40 次，每次新渲染一块。
  *
  * 先构建发布版（步骤见 smoke.mjs 开头），再运行：
  *   node apps/desktop/e2e/tile-transport.mjs
@@ -119,13 +120,48 @@ async function measure(fetches) {
     same.push(a.length === b.length && a.every((v, i) => v === b[i]));
   }
 
+  // 收到 render.tileReady 到像素到手：每次新渲染一块，事件一到就取。共享缓冲区分两种：主进程随事件放好的
+  // 直接读（默认），和不用放好的、调命令取（ignorePushed）。
+  const afterEvent = async (protocol, ignorePushed) => {
+    transport.forceProtocol = protocol;
+    transport.ignorePushed = ignorePushed;
+    const times = [];
+    let pushedHits = 0;
+    for (let i = 0; i < 40; i++) {
+      const got = new Promise((resolve, reject) => {
+        const stop = transport.onEvent(({ method, params }) => {
+          if (method !== 'render.tileReady') return;
+          stop();
+          if (params.sharedBuffer) pushedHits++;
+          const start = performance.now();
+          transport
+            .fetchTile(params.slot, params.generation)
+            .then(() => resolve(performance.now() - start), reject);
+        });
+      });
+      await transport.request('render.tiles', {
+        docId: doc.docId,
+        pageId: 0,
+        scale: 2 + (i % 4),
+        tiles: [{ x: (i % 2) * 512, y: 0 }],
+        priority: 'visible',
+      });
+      times.push(await got);
+    }
+    return { ...stats(times), pushedHits };
+  };
+
   const result = {
     identical: same.every(Boolean),
     protocol: await one(true),
     sharedBuffer: await one(false),
     eightProtocol: await eight(true),
     eightSharedBuffer: await eight(false),
+    afterEventProtocol: await afterEvent(true, false),
+    afterEventSharedCommand: await afterEvent(false, true),
+    afterEventSharedPushed: await afterEvent(false, false),
   };
   transport.forceProtocol = false;
+  transport.ignorePushed = false;
   return result;
 }
