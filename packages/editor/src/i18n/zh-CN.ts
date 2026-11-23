@@ -240,6 +240,12 @@ export const zhCN = {
     textEditNote: '只改一行字。原字体写不出时换成系统字体，状态栏会提示',
     /** 状态栏：改字换了字体 */
     fontReplaced: '字体已替换为 {font}',
+    /** 颜色（填充色能改，描边色只显示） */
+    colors: '颜色',
+    fill: '填充',
+    stroke: '描边',
+    colorInvalid: '颜色写成 #RRGGBB，比如 #1A6FD0',
+    colorNote: '原型只改填充色，写成 RGB；原来是 CMYK 或专色的会变成 RGB',
   },
   layers: {
     filterPlaceholder: '筛选图层',
@@ -283,6 +289,7 @@ export const zhCN = {
     placeComponent: '置入组件',
     updateComponent: '改组件参数',
     setText: '改字',
+    setFill: '改 {n} 个对象的填充色',
     /** 历史记录面板：悬停在一条上的说明 */
     jumpTo: '回到“{label}”之后的样子',
   },

@@ -62,6 +62,8 @@ function hostWith(jumps: number[]): EditorHost {
     updateComponent: () => undefined,
     readText: () => Promise.resolve(null),
     setText: () => undefined,
+    readStyle: () => Promise.resolve({ fill: null, stroke: null }),
+    setFill: () => undefined,
     undo: () => undefined,
     redo: () => undefined,
     jumpHistory: (index) => jumps.push(index),

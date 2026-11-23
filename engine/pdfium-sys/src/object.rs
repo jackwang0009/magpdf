@@ -1,4 +1,4 @@
-use std::ffi::{c_uint, c_ulong};
+use std::ffi::{c_int, c_uint, c_ulong};
 use std::marker::PhantomData;
 
 use crate::error::{Error, Result};
@@ -127,6 +127,17 @@ impl PageObject<'_> {
         }
         // SAFETY: handle 是有效的文字对象；非文字对象时 PDFium 返回 UNKNOWN，上面已排除。
         TextRenderMode::from_raw(unsafe { raw::FPDFTextObj_GetTextRenderMode(self.handle) })
+    }
+
+    /// 路径怎么画：（填不填充，描不描边）。非路径对象返回 `None`。
+    pub fn path_draw_mode(&self) -> Option<(bool, bool)> {
+        if self.kind() != ObjectKind::Path {
+            return None;
+        }
+        let (mut fill, mut stroke): (c_int, raw::FPDF_BOOL) = (0, 0);
+        // SAFETY: handle 是有效的路径对象，两个输出指针有效。
+        let ok = unsafe { raw::FPDFPath_GetDrawMode(self.handle, &mut fill, &mut stroke) };
+        (ok != 0).then_some((fill != 0, stroke != 0))
     }
 
     /// 对象在页面坐标里的包围盒。

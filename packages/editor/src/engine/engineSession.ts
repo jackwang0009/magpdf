@@ -1,5 +1,6 @@
 import { ERROR_CODE, EVENT, METHOD, OBJ_LIST_MAX } from '@magpdf/protocol';
 import type {
+  Color,
   CompPlaceParams,
   CompPlaceResult,
   CompUpdateParams,
@@ -13,6 +14,7 @@ import type {
   DocSnapshotParams,
   EditDeleteParams,
   EditResult,
+  EditSetStyleParams,
   EditSetTextParams,
   EditSetTextResult,
   EditTransformParams,
@@ -34,7 +36,12 @@ import type {
 import type { TileProvider } from '../canvas/tileProvider';
 import { componentName, isPlaceable } from '../document/components';
 import type { ComponentValues, PlaceableComponent } from '../document/components';
-import type { DocumentEditor, PageTransform, TextInfo } from '../document/documentEditor';
+import type {
+  DocumentEditor,
+  PageTransform,
+  StyleInfo,
+  TextInfo,
+} from '../document/documentEditor';
 import {
   applyMatrix,
   displayMatrix,
@@ -514,6 +521,11 @@ export class EngineSession implements EditorHost {
         return document ? this.readText(document, objectId) : null;
       },
       setText: (objectId, text) => on((document) => this.setText(document, objectId, text)),
+      readStyle: async (objectId) => {
+        const document = this.documents.get(id);
+        return document ? this.readStyle(document, objectId) : { fill: null, stroke: null };
+      },
+      setFill: (objectIds, color) => on((document) => this.setFill(document, objectIds, color)),
       undo: () => on((document) => this.stepHistory(document, METHOD.HISTORY_UNDO)),
       redo: () => on((document) => this.stepHistory(document, METHOD.HISTORY_REDO)),
       jumpHistory: (index) => on((document) => this.jumpHistory(document, index)),
@@ -696,6 +708,33 @@ export class EngineSession implements EditorHost {
       editable: text.editable,
       ...(text.reason ? { reason: text.reason } : {}),
     };
+  }
+
+  private async readStyle(document: EngineDocument, id: string): Promise<StyleInfo> {
+    const [target] = engineIds([id]);
+    const docId = document.docId;
+    if (target === undefined || docId === null) return { fill: null, stroke: null };
+    const params: ObjGetParams = { docId, ids: [target], detail: 'style' };
+    const [detail] = await this.transport.request<ObjDetail[]>(METHOD.OBJ_GET, params);
+    return {
+      fill: detail?.style?.fill ? colorToHex(detail.style.fill) : null,
+      stroke: detail?.style?.stroke ? colorToHex(detail.style.stroke) : null,
+    };
+  }
+
+  /** 改填充色。界面上不先改（画面是引擎画的），`doc.changed` 到了重画。 */
+  private setFill(document: EngineDocument, ids: readonly string[], color: string): void {
+    const targets = engineIds(ids);
+    const fill = hexToColor(color);
+    if (targets.length === 0 || !fill) return;
+    const pages = [...new Set(ids.map(pageOfObject).filter((page) => page !== null))];
+    if (pages.some((page) => this.touchesFrozen(document, page, ids))) return;
+    this.enqueue(document, [], () =>
+      this.command(document, METHOD.EDIT_SET_STYLE, (docId, baseVersion) => {
+        const params: EditSetStyleParams = { docId, baseVersion, ids: targets, fill };
+        return params;
+      }),
+    );
   }
 
   /**
@@ -1026,6 +1065,26 @@ function toPageObject(page: number, summary: ObjectSummary, display: Matrix): Pa
     ...(pickable ? {} : { pickable: false }),
     ...(kind && comp ? { component: { kind, values: { ...comp.params } } } : {}),
     ...(summary.added ? { added: true } : {}),
+  };
+}
+
+/** 协议里的 RGB 颜色（分量 0–1）换成 `#rrggbb`。 */
+function colorToHex(color: Color): string {
+  const hex = (c: number | undefined) =>
+    Math.round(Math.min(1, Math.max(0, c ?? 0)) * 255)
+      .toString(16)
+      .padStart(2, '0');
+  const [r, g, b] = color.components;
+  return `#${hex(r)}${hex(g)}${hex(b)}`;
+}
+
+/** `#rrggbb` 换成协议里的 RGB 颜色；写错了返回 null。 */
+function hexToColor(hex: string): Color | null {
+  const match = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+  if (!match) return null;
+  return {
+    space: 'rgb',
+    components: match.slice(1, 4).map((part) => parseInt(part, 16) / 255),
   };
 }
 

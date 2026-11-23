@@ -115,6 +115,15 @@ pub enum EditError {
 
 pub use magpdf_text::retext::ObjectText;
 
+/// 对象画出来用的颜色（属性面板显示，《接口协议》6.4 `obj.get` 的 `style`）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ObjectStyle {
+    /// 填充色（文字的颜色）；不填充的路径、图像这类对象为 `None`
+    pub fill: Option<Rgba>,
+    /// 描边色；不描边时为 `None`
+    pub stroke: Option<Rgba>,
+}
+
 /// 改字的结果（方案 5.2 的哪一级）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TextOutcome {
@@ -769,6 +778,31 @@ impl<'lib> Session<'lib> {
         Ok((log.finish(self.version), outcome))
     }
 
+    /// 对象现在的颜色。路径看它画的时候填不填充、描不描边；文字按渲染模式；别的对象没有颜色可改。
+    pub fn style(&mut self, id: ObjectId) -> Result<ObjectStyle> {
+        use pdfium_sys::{ObjectKind, TextRenderMode};
+
+        self.doc.release_pages(KEPT_PAGES);
+        let (page, z) = self.locate(id)?;
+        let page_obj = self.doc.keep_page(page)?;
+        let object = page_obj.object(z).ok_or(EditError::NoObject(id))?;
+        let (filled, stroked) = match object.kind() {
+            ObjectKind::Path => object.path_draw_mode().unwrap_or((false, false)),
+            ObjectKind::Text => match object.text_render_mode() {
+                Some(TextRenderMode::Fill | TextRenderMode::FillClip) => (true, false),
+                Some(TextRenderMode::Stroke | TextRenderMode::StrokeClip) => (false, true),
+                Some(TextRenderMode::FillStroke | TextRenderMode::FillStrokeClip) => (true, true),
+                // 不可见、只做剪切：没有画出来的颜色
+                _ => (false, false),
+            },
+            _ => (false, false),
+        };
+        Ok(ObjectStyle {
+            fill: filled.then(|| object.fill_color()).flatten(),
+            stroke: stroked.then(|| object.stroke_color()).flatten(),
+        })
+    }
+
     /// 组件现在的参数。
     pub fn component(&mut self, id: ObjectId) -> Result<ComponentSpec> {
         self.doc.release_pages(KEPT_PAGES);
@@ -1420,7 +1454,7 @@ fn skipped_when_picking(
 mod tests {
     use pdfium_sys::{Library, Matrix, PageObject, Rect, Rgba};
 
-    use super::{EditError, HitMode, ObjectId, Session};
+    use super::{EditError, HitMode, ObjectId, ObjectStyle, Session};
     use crate::component::{ComponentKind, ComponentSpec};
 
     const DARK: Rgba = Rgba {
@@ -2586,6 +2620,26 @@ mod tests {
             session.text_info(component),
             Err(EditError::NotText(_))
         ));
+    }
+
+    /// 属性面板读颜色：填充的路径有填充色、没有描边色；改了填充色读到新的，撤销读回原来的。
+    #[test]
+    fn style_reports_what_is_painted() {
+        with_session(|session| {
+            let id = session.objects(0).unwrap()[0].id;
+            assert_eq!(
+                session.style(id).unwrap(),
+                ObjectStyle {
+                    fill: Some(DARK),
+                    stroke: None
+                }
+            );
+            session.set_fill_rgb(&[id], 200, 10, 20).unwrap();
+            let fill = session.style(id).unwrap().fill.unwrap();
+            assert_eq!((fill.r, fill.g, fill.b, fill.a), (200, 10, 20, DARK.a));
+            session.undo().unwrap();
+            assert_eq!(session.style(id).unwrap().fill, Some(DARK));
+        });
     }
 
     /// 撤销栈里现在生效的几步的说法，从早到晚。

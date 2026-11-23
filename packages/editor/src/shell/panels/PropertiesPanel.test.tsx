@@ -3,10 +3,10 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import type { DocumentEditor, TextInfo } from '../../document/documentEditor';
+import type { DocumentEditor, StyleInfo, TextInfo } from '../../document/documentEditor';
 import type { PageObject } from '../../document/types';
 import { mmToPt } from '../../geometry';
-import { t } from '../../i18n';
+import { format, t } from '../../i18n';
 import { editorStore } from '../../store/editorStore';
 import { EditorHostContext } from '../editorHost';
 import type { EditorHost } from '../editorHost';
@@ -56,6 +56,59 @@ function type(input: HTMLInputElement, value: string) {
   act(() => {
     setter.call(input, value);
     input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
+/** 宿主打开的文档：文字、颜色向修改入口读，改了交给它。 */
+function withEditor(info: TextInfo | null, style: StyleInfo = { fill: null, stroke: null }) {
+  const calls: [string, string][] = [];
+  const fills: [readonly string[], string][] = [];
+  const editor: DocumentEditor = {
+    transformObjects: () => undefined,
+    deleteObjects: () => undefined,
+    placeComponent: () => undefined,
+    updateComponent: () => undefined,
+    readText: () => Promise.resolve(info),
+    setText: (id, text) => calls.push([id, text]),
+    readStyle: () => Promise.resolve(style),
+    setFill: (ids, color) => fills.push([ids, color]),
+    undo: () => undefined,
+    redo: () => undefined,
+    jumpHistory: () => undefined,
+  };
+  const host: EditorHost = {
+    openDocument: () => Promise.resolve(),
+    tileProvider: () => undefined,
+    documentEditor: () => editor,
+    onNotice: () => () => undefined,
+  };
+  return { host, calls, fills };
+}
+
+async function renderWith(host: EditorHost): Promise<HTMLDivElement> {
+  container = document.createElement('div');
+  document.body.append(container);
+  root = createRoot(container);
+  await act(async () =>
+    root!.render(
+      <EditorHostContext.Provider value={host}>
+        <PropertiesPanel />
+      </EditorHostContext.Provider>,
+    ),
+  );
+  return container;
+}
+
+/** 第 1 页上放一个对象并选中它。 */
+function addObject(object: PageObject) {
+  act(() => {
+    const state = editorStore.getState();
+    const snapshot = state.documents['props-doc']!.snapshot;
+    state.updateSnapshot('props-doc', {
+      ...snapshot,
+      pages: [{ ...snapshot.pages[0]!, objects: [object] }],
+    });
+    state.setSelection('props-doc', [object.id]);
   });
 }
 
@@ -219,43 +272,6 @@ describe('属性面板：改原有文字', () => {
   const textInput = (view: HTMLElement) =>
     view.querySelector<HTMLInputElement>('#mg-text-content')!;
 
-  /** 宿主打开的文档：文字向修改入口读，改了交给它。 */
-  function withEditor(info: TextInfo | null) {
-    const calls: [string, string][] = [];
-    const editor: DocumentEditor = {
-      transformObjects: () => undefined,
-      deleteObjects: () => undefined,
-      placeComponent: () => undefined,
-      updateComponent: () => undefined,
-      readText: () => Promise.resolve(info),
-      setText: (id, text) => calls.push([id, text]),
-      undo: () => undefined,
-      redo: () => undefined,
-      jumpHistory: () => undefined,
-    };
-    const host: EditorHost = {
-      openDocument: () => Promise.resolve(),
-      tileProvider: () => undefined,
-      documentEditor: () => editor,
-      onNotice: () => () => undefined,
-    };
-    return { host, calls };
-  }
-
-  async function renderWith(host: EditorHost): Promise<HTMLDivElement> {
-    container = document.createElement('div');
-    document.body.append(container);
-    root = createRoot(container);
-    await act(async () =>
-      root!.render(
-        <EditorHostContext.Provider value={host}>
-          <PropertiesPanel />
-        </EditorHostContext.Provider>,
-      ),
-    );
-    return container;
-  }
-
   it('引擎的文档：读出文字、字体、字号；空的不发，改了回车交给引擎', async () => {
     addText();
     const { host, calls } = withEditor({
@@ -326,5 +342,76 @@ describe('属性面板：改原有文字', () => {
       });
     });
     expect(textInput(view).disabled).toBe(true);
+  });
+});
+
+describe('属性面板：颜色', () => {
+  const box = { x: 72, y: 72, width: 144, height: 72 };
+  const fillInput = (view: HTMLElement) => view.querySelector<HTMLInputElement>('#mg-fill');
+  const press = (input: HTMLInputElement, key: string) =>
+    act(() => input.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })));
+
+  it('引擎的文档：读出填充色和描边色；写错了不发、标出原因，写对了回车交给引擎，不重复发', async () => {
+    addObject({ id: 'r1', type: 'path', name: '框', bbox: box });
+    const { host, fills } = withEditor(null, { fill: '#cc3333', stroke: '#000000' });
+    const view = await renderWith(host);
+    const input = fillInput(view)!;
+    expect(input.value).toBe('#cc3333');
+    expect(view.textContent).toContain(t.properties.stroke);
+    expect(view.textContent).toContain('#000000');
+
+    type(input, '红色');
+    press(input, 'Enter');
+    expect(view.querySelector('[role="alert"]')?.textContent).toContain(t.properties.colorInvalid);
+    expect(fills).toEqual([]);
+
+    type(input, '1A6FD0');
+    press(input, 'Enter');
+    expect(fills).toEqual([[['r1'], '#1a6fd0']]);
+    expect(input.value).toBe('#1a6fd0');
+    act(() => input.dispatchEvent(new FocusEvent('focusout', { bubbles: true })));
+    expect(fills).toHaveLength(1);
+  });
+
+  it('不填充也不描边的对象（图像）、组件不显示颜色', async () => {
+    addObject({ id: 'i1', type: 'image', name: '图', bbox: box });
+    let view = await renderWith(withEditor(null).host);
+    expect(view.textContent).not.toContain(t.properties.colors);
+    act(() => root?.unmount());
+    container?.remove();
+
+    act(() => editorStore.getState().placeComponent('props-doc', 0, 'code128', { x: 30, y: 40 }));
+    view = await renderWith(withEditor(null, { fill: '#000000', stroke: null }).host);
+    expect(fillInput(view)).toBeNull();
+  });
+
+  it('模拟文档：方块的填充色改了落在 store 上；只能叠加内容的页上不能改', () => {
+    addObject({
+      id: 'r1',
+      type: 'path',
+      name: '框',
+      bbox: box,
+      appearance: { kind: 'rect', fill: '#ff0000' },
+    });
+    const view = render();
+    const input = fillInput(view)!;
+    expect(input.value).toBe('#ff0000');
+    type(input, '#00FF00');
+    press(input, 'Enter');
+    const appearance = placed().appearance;
+    expect(appearance?.kind === 'rect' && appearance.fill).toBe('#00ff00');
+    expect(editorStore.getState().documents['props-doc']!.history.at(-1)).toBe(
+      format(t.history.setFill, { n: 1 }),
+    );
+
+    act(() => {
+      const state = editorStore.getState();
+      const snapshot = state.documents['props-doc']!.snapshot;
+      state.updateSnapshot('props-doc', {
+        ...snapshot,
+        pages: [{ ...snapshot.pages[0]!, overlayOnly: { reason: '测试' } }],
+      });
+    });
+    expect(fillInput(view)!.disabled).toBe(true);
   });
 });

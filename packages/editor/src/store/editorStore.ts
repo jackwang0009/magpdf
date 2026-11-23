@@ -86,6 +86,8 @@ export interface EditorState {
   updateComponent(id: string, objectId: string, values: Partial<ComponentValues>): void;
   /** 模拟文档：改文字对象（外观是一段文字的）的文字。 */
   setText(id: string, objectId: string, text: string): void;
+  /** 模拟文档：改填充色（`#rrggbb`）。方块改填充，文字和文字条改颜色。 */
+  setFill(id: string, objectIds: readonly string[], color: string): void;
   /** 换掉历史记录（引擎的撤销栈变了）：`entries` 从打开时的样子数起，`at` 是现在在哪一条之后。 */
   setHistory(id: string, entries: readonly string[], at: number): void;
   setPlacing(kind: PlaceableComponent | null): void;
@@ -296,6 +298,19 @@ export function createEditorStore(): EditorStore {
           if (!object.component) return object;
           const next = { ...object.component.values, ...values };
           return mockComponentObject(object.id, object.component.kind, next, object.bbox);
+        });
+      },
+
+      setFill(id, objectIds, color) {
+        editObjects(id, objectIds, format(t.history.setFill, { n: objectIds.length }), (object) => {
+          const look = object.appearance;
+          if (look?.kind === 'rect' && look.fill) {
+            return { ...object, appearance: { ...look, fill: color } };
+          }
+          if (look?.kind === 'text' || look?.kind === 'textBars') {
+            return { ...object, appearance: { ...look, color } };
+          }
+          return object;
         });
       },
 

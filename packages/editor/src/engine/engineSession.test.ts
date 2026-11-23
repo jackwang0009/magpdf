@@ -26,7 +26,7 @@ function frontPage(): FakePage {
         bbox: [20, 400, 120, 420],
         text: { content: 'BL NO. 0042', font: 'Helvetica', size: 10 },
       },
-      { id: 3, kind: 'path', bbox: [50, 100, 250, 300] },
+      { id: 3, kind: 'path', bbox: [50, 100, 250, 300], fill: [0.8, 0.2, 0.2] },
     ],
   };
 }
@@ -803,6 +803,36 @@ describe('EngineSession：改原有文字（方案 5.2）', () => {
     editor.setText('p0-2', 'Y');
     await flush();
     expect(engine.transport.sent(METHOD.EDIT_SET_TEXT)).toHaveLength(1);
+  });
+});
+
+describe('EngineSession：颜色', () => {
+  it('读颜色换成 #rrggbb；改填充色发 edit.setStyle（RGB，分量 0–1），引擎改了再读是新的', async () => {
+    const { engine, editor } = await attached();
+    await expect(editor.readStyle('p0-3')).resolves.toEqual({ fill: '#cc3333', stroke: null });
+    expect(engine.transport.sent(METHOD.OBJ_GET)).toEqual([
+      { docId: 1, ids: [3], detail: 'style' },
+    ]);
+    editor.setFill(['p0-3'], '#1a6fd0');
+    await flush();
+    const [sent] = engine.transport.sent(METHOD.EDIT_SET_STYLE) as {
+      fill: { components: number[] };
+    }[];
+    expect(sent).toMatchObject({ docId: 1, baseVersion: 0, ids: [3] });
+    expect(sent!.fill.components.map((c) => Math.round(c * 255))).toEqual([0x1a, 0x6f, 0xd0]);
+    await expect(editor.readStyle('p0-3')).resolves.toEqual({ fill: '#1a6fd0', stroke: null });
+
+    // 写得不对的、只能叠加内容的页上原有的对象，都不发
+    editor.setFill(['p0-3'], 'red');
+    engine.transport.emit(EVENT.FIDELITY_RESULT, {
+      docId: 1,
+      pageId: 20,
+      status: 'overlayOnly',
+      reason: FAKE_OVERLAY_REASON,
+    });
+    editor.setFill(['p0-3'], '#000000');
+    await flush();
+    expect(engine.transport.sent(METHOD.EDIT_SET_STYLE)).toHaveLength(1);
   });
 });
 

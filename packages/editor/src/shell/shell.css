@@ -579,6 +579,26 @@
 .mg-input:disabled {
   color: var(--mg-text-muted);
 }
+/* 颜色：色块在前，十六进制写法跟在后面 */
+.mg-color-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.mg-color-field .mg-input {
+  flex: 1;
+}
+.mg-color-field .mg-mono {
+  font-family: var(--mg-mono-font-family);
+}
+.mg-swatch {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--mg-line);
+  border-radius: 2px;
+}
 /* 带单位的数值框：输入框占满，单位跟在后面 */
 .mg-mm-field {
   display: flex;

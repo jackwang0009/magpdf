@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { checkComponent, componentName, sizeLabel } from '../../document/components';
 import type { ComponentProblem, ComponentValues } from '../../document/components';
-import type { TextInfo } from '../../document/documentEditor';
+import type { StyleInfo, TextInfo } from '../../document/documentEditor';
 import { rectToRectMatrix } from '../../document/pageSpace';
 import type { PageObject } from '../../document/types';
 import { ptToMm } from '../../geometry';
@@ -138,6 +138,15 @@ export function PropertiesPanel() {
           apply={applyComponent}
         />
       ) : null}
+      {object.component || object.type === 'component' ? null : (
+        <ColorFields
+          // 文档版本变了（改了颜色、撤销了）重新读一遍
+          key={`color|${object.id}|${doc.snapshot.version}`}
+          object={object}
+          readOnly={frozenHere}
+          documentId={documentId}
+        />
+      )}
       {object.type === 'text' ? (
         <TextFields
           // 文档版本变了（改了字、撤销了）重新读一遍
@@ -381,6 +390,123 @@ function TextFields({
           <p className="mg-props-hint">{t.properties.textEditNote}</p>
         </>
       )}
+    </>
+  );
+}
+
+/** 模拟文档的颜色：方块的填充和描边，文字、文字条的颜色。 */
+function mockStyle(object: PageObject): StyleInfo {
+  const look = object.appearance;
+  if (look?.kind === 'rect') return { fill: look.fill ?? null, stroke: look.stroke ?? null };
+  if (look?.kind === 'text' || look?.kind === 'textBars') return { fill: look.color, stroke: null };
+  return { fill: null, stroke: null };
+}
+
+/** `#rrggbb` 或 `rrggbb`（大小写都行）规整成 `#rrggbb`；写得不对时为 null。 */
+function normalizeHex(text: string): string | null {
+  const match = /^#?([0-9a-f]{6})$/i.exec(text.trim());
+  return match ? `#${match[1]!.toLowerCase()}` : null;
+}
+
+/**
+ * 颜色：填充色能改（回车或离开输入框生效），描边色只显示。不填充也不描边的对象（图像等）不显示这一节。
+ * 引擎打开的文档向引擎读，模拟文档用外观里的颜色。
+ */
+function ColorFields({
+  object,
+  readOnly,
+  documentId,
+}: {
+  readonly object: PageObject;
+  readonly readOnly: boolean;
+  readonly documentId: string;
+}) {
+  const host = useEditorHost();
+  const editor = host?.documentEditor(documentId) ?? null;
+  const [style, setStyle] = useState<StyleInfo | null>(() => (editor ? null : mockStyle(object)));
+  const [fill, setFill] = useState(style?.fill ?? '');
+  const [bad, setBad] = useState(false);
+  const [sent, setSent] = useState<string | null>(null);
+  useEffect(() => {
+    if (!editor) return;
+    let current = true;
+    editor.readStyle(object.id).then(
+      (read) => {
+        if (!current) return;
+        setStyle(read);
+        setFill(read.fill ?? '');
+      },
+      (error: unknown) => console.error('读颜色失败', error),
+    );
+    return () => {
+      current = false;
+    };
+  }, [editor, object.id]);
+  if (!style || (!style.fill && !style.stroke)) return null;
+  const commit = () => {
+    if (readOnly || !style.fill) return;
+    const color = normalizeHex(fill);
+    if (!color) {
+      setBad(true);
+      return;
+    }
+    setBad(false);
+    setFill(color);
+    if (color === style.fill.toLowerCase() || color === sent) return;
+    setSent(color);
+    if (editor) editor.setFill([object.id], color);
+    else editorStore.getState().setFill(documentId, [object.id], color);
+  };
+  const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter') commit();
+    if (event.key === 'Escape') {
+      setFill(style.fill ?? '');
+      setBad(false);
+    }
+  };
+  return (
+    <>
+      <SectionHeader title={t.properties.colors} />
+      <div className="mg-props-form">
+        {style.fill ? (
+          <>
+            <label htmlFor="mg-fill">{t.properties.fill}</label>
+            <span className="mg-color-field">
+              <span
+                className="mg-swatch"
+                style={{ background: normalizeHex(fill) ?? style.fill }}
+                aria-hidden
+              />
+              <input
+                id="mg-fill"
+                className={`mg-input mg-mono${bad ? ' mg-bad' : ''}`}
+                value={fill}
+                disabled={readOnly}
+                spellCheck={false}
+                onChange={(event) => setFill(event.target.value)}
+                onBlur={commit}
+                onKeyDown={onKeyDown}
+              />
+            </span>
+          </>
+        ) : null}
+        {style.stroke ? (
+          <>
+            <label>{t.properties.stroke}</label>
+            <span className="mg-color-field">
+              <span className="mg-swatch" style={{ background: style.stroke }} aria-hidden />
+              <span className="mg-props-note mg-mono">{style.stroke}</span>
+            </span>
+          </>
+        ) : null}
+      </div>
+      {bad ? (
+        <p className="mg-check-line mg-bad" role="alert">
+          <Icon name="close" size={12} /> {t.properties.colorInvalid}
+        </p>
+      ) : style.fill && !readOnly ? (
+        <p className="mg-props-hint">{t.properties.colorNote}</p>
+      ) : null}
     </>
   );
 }

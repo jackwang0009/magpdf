@@ -22,7 +22,7 @@ export type { PageLayoutOptions } from './document/pageLayout';
 export { linearHitTester } from './document/hitTest';
 export type { HitTester, MarqueeMode } from './document/hitTest';
 export * from './document/pageSpace';
-export type { DocumentEditor, PageTransform, TextInfo } from './document/documentEditor';
+export type { DocumentEditor, PageTransform, StyleInfo, TextInfo } from './document/documentEditor';
 
 // 视图
 export * from './view/viewState';

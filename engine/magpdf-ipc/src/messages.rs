@@ -648,12 +648,26 @@ pub struct ObjHitTestParams {
     pub mode: HitMode,
 }
 
-/// `obj.get` 要哪一类详情。原型只有 `text`。
+/// `obj.get` 要哪一类详情。原型有 `text`、`style`，没有 `raw`。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub enum ObjDetailKind {
     Text,
+    Style,
+}
+
+/// 对象画出来用的颜色（`obj.get` 的 `detail: "style"`）。原型只给 RGB，不透明度不在里面。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct StyleDetail {
+    /// 填充色（文字的颜色）；不填充的路径、图像这类对象省略
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill: Option<Color>,
+    /// 描边色；不描边时省略
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stroke: Option<Color>,
 }
 
 /// `obj.get` 的参数（《接口协议》6.4）。返回 `ObjDetail[]`，和 `ids` 一一对应。
@@ -682,7 +696,7 @@ pub struct TextDetail {
     pub reason: Option<String>,
 }
 
-/// 一个对象的详情。不是文字对象（或者是文本组件）时 `text` 省略。
+/// 一个对象的详情，只有请求的那一类。`text`：不是文字对象（或者是文本组件）时省略。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -690,6 +704,8 @@ pub struct ObjDetail {
     pub id: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<TextDetail>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style: Option<StyleDetail>,
 }
 
 // ---- 编辑与撤销（《接口协议》6.5、6.8）----

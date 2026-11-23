@@ -12,6 +12,7 @@ import type {
   DocSnapshotParams,
   EditDeleteParams,
   EditResult,
+  EditSetStyleParams,
   EditSetTextParams,
   EditSetTextResult,
   EditTransformParams,
@@ -46,6 +47,9 @@ export interface FakeObject {
   comp?: { readonly type: string; params: { content: string; size: number } };
   /** 文字对象的文字（`obj.get` 的文字详情）。`reason` 有值时不能改 */
   text?: { content: string; font: string; readonly size: number; readonly reason?: string };
+  /** 填充色、描边色（RGB，分量 0–1）；没有就是不填充、不描边 */
+  fill?: readonly number[] | undefined;
+  readonly stroke?: readonly number[];
 }
 
 /** 假引擎改字时，写不出的字（非 ASCII）换成这个字体，和真引擎的第 3 级一样报“字体已替换”。 */
@@ -202,6 +206,8 @@ export class FakeEngine {
         return this.transform(params as EditTransformParams);
       case METHOD.EDIT_DELETE:
         return this.remove(params as EditDeleteParams);
+      case METHOD.EDIT_SET_STYLE:
+        return this.setStyle(params as EditSetStyleParams);
       case METHOD.DOC_SAVE:
         return this.save(params as DocSaveParams);
       case METHOD.COMP_PLACE:
@@ -327,6 +333,27 @@ export class FakeEngine {
     });
   }
 
+  /** 和真引擎一样只认填充色。 */
+  private setStyle(params: EditSetStyleParams): EditResult {
+    const document = this.document(params.docId);
+    if (!params.fill) throw invalid('没有给出要改的样式');
+    const fill = [...params.fill.components];
+    const found = this.locate(document, params.baseVersion, params.ids);
+    const objects = [...found.values()].flat();
+    const before = objects.map((o) => o.fill);
+    return this.commit(document, {
+      label: `改 ${objects.length} 个对象的填充色`,
+      pages: [...found.keys()],
+      forward: () => {
+        for (const object of objects) object.fill = fill;
+      },
+      backward: () =>
+        objects.forEach((object, i) => {
+          object.fill = before[i];
+        }),
+    });
+  }
+
   private remove(params: EditDeleteParams): EditResult {
     const document = this.document(params.docId);
     const found = this.locate(document, params.baseVersion, params.ids);
@@ -440,6 +467,19 @@ export class FakeEngine {
     return params.ids.map((id) => {
       const object = document.pages.flatMap((page) => page.objects).find((o) => o.id === id);
       if (!object) throw { code: ERROR_CODE.E_OBJECT_NOT_FOUND, message: '对象不存在' };
+      if (params.detail === 'style') {
+        const rgb = (components: readonly number[]) => ({
+          space: 'rgb' as const,
+          components: [...components],
+        });
+        return {
+          id,
+          style: {
+            ...(object.fill ? { fill: rgb(object.fill) } : {}),
+            ...(object.stroke ? { stroke: rgb(object.stroke) } : {}),
+          },
+        };
+      }
       const text = object.kind === 'text' && !object.comp ? object.text : undefined;
       if (!text) return { id };
       return {

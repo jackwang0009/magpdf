@@ -25,7 +25,7 @@ use magpdf_ipc::messages::{
     JsonValue, LayerMode, OBJ_LIST_MAX, ObjDetail, ObjDetailKind, ObjGetParams, ObjHitTestParams,
     ObjListParams, PageChange, PageInfo, PingParams, RenderTilesParams, RenderTilesResult, Request,
     RequestId, Response, RoundtripParams, RoundtripResult, RpcError, SaveMode, StallParams,
-    TextDetail, TileCoord, TileFetchParams, TileFetchResult, method,
+    StyleDetail, TextDetail, TileCoord, TileFetchParams, TileFetchResult, method,
 };
 use magpdf_ipc::shm::{self, Layout, MappedRegion};
 use magpdf_ipc::{PROTOCOL_VERSION, pipe, pump};
@@ -655,9 +655,24 @@ async fn handle_request(
         }
         method::OBJ_GET => {
             let p: ObjGetParams = decode(params)?;
-            let ObjDetailKind::Text = p.detail;
             let mut details = Vec::with_capacity(p.ids.len());
             for object in p.ids {
+                if p.detail == ObjDetailKind::Style {
+                    let style = engine
+                        .engine
+                        .style(p.doc_id, ObjectId(object))
+                        .await
+                        .map_err(map_engine_error)?;
+                    details.push(ObjDetail {
+                        id: object,
+                        text: None,
+                        style: Some(StyleDetail {
+                            fill: style.fill.map(wire_color),
+                            stroke: style.stroke.map(wire_color),
+                        }),
+                    });
+                    continue;
+                }
                 let text = match engine.engine.text_info(p.doc_id, ObjectId(object)).await {
                     Ok(text) => Some(TextDetail {
                         content: text.text,
@@ -677,7 +692,11 @@ async fn handle_request(
                     }),
                     Err(e) => return Err(map_engine_error(e)),
                 };
-                details.push(ObjDetail { id: object, text });
+                details.push(ObjDetail {
+                    id: object,
+                    text,
+                    style: None,
+                });
             }
             Ok(Some(frame::response_ok(id, &details)))
         }
@@ -1162,6 +1181,15 @@ fn wire_object(object: &ObjectSummary) -> messages::ObjectSummary {
                 size: spec.size,
             },
         }),
+    }
+}
+
+/// 8 位 RGB 换成协议里的颜色（分量 0–1）。不透明度不在里面。
+fn wire_color(color: pdfium_sys::Rgba) -> Color {
+    let unit = |c: u8| f32::from(c) / 255.0;
+    Color {
+        space: ColorSpace::Rgb,
+        components: vec![unit(color.r), unit(color.g), unit(color.b)],
     }
 }
 

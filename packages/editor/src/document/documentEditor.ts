@@ -23,6 +23,12 @@ export interface TextInfo {
   readonly reason?: string;
 }
 
+/** 对象画出来用的颜色，`#rrggbb`；没有填充（描边）时为 null。 */
+export interface StyleInfo {
+  readonly fill: string | null;
+  readonly stroke: string | null;
+}
+
 /**
  * 一份文档的修改入口。
  *
@@ -43,6 +49,10 @@ export interface DocumentEditor {
   readText(id: string): Promise<TextInfo | null>;
   /** 把文字对象的文字换掉（方案 5.2 三级回退）。换了字体时由宿主在状态栏上说一声。 */
   setText(id: string, text: string): void;
+  /** 读对象的颜色。这一个要等引擎。 */
+  readStyle(id: string): Promise<StyleInfo>;
+  /** 改填充色（`#rrggbb`），不透明度不动。 */
+  setFill(ids: readonly string[], color: string): void;
   undo(): void;
   redo(): void;
   /** 撤销或重做到历史记录的第 `index` 条之后（0 是打开时的样子），历史记录面板点了一条时用。 */

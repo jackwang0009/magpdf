@@ -14,7 +14,8 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use magpdf_engine::component::{ComponentKind, ComponentSpec};
 use magpdf_engine::edit::{
-    Change, EditError, History, HitMode, ObjectId, ObjectSummary, ObjectText, Session, TextOutcome,
+    Change, EditError, History, HitMode, ObjectId, ObjectStyle, ObjectSummary, ObjectText, Session,
+    TextOutcome,
 };
 use magpdf_engine::save::{SaveError, write_replacing};
 use magpdf_ipc::messages::DocInfo;
@@ -248,6 +249,12 @@ pub enum Job {
         doc_id: u32,
         page_ids: Vec<u32>,
         reply: Reply<()>,
+    },
+    /// 对象现在的颜色。
+    Style {
+        doc_id: u32,
+        id: ObjectId,
+        reply: Reply<ObjectStyle>,
     },
     /// 撤销栈的样子（历史记录面板）。
     History {
@@ -543,6 +550,14 @@ impl EngineHandle {
         .await
     }
 
+    pub async fn style(
+        &self,
+        doc_id: u32,
+        id: ObjectId,
+    ) -> std::result::Result<ObjectStyle, EngineError> {
+        self.ask(|reply| Job::Style { doc_id, id, reply }).await
+    }
+
     pub async fn history(&self, doc_id: u32) -> std::result::Result<History, EngineError> {
         self.ask(|reply| Job::History { doc_id, reply }).await
     }
@@ -725,6 +740,9 @@ impl PdfiumState {
                 reply,
             } => {
                 let _ = reply.send(self.save(doc_id, path));
+            }
+            Job::Style { doc_id, id, reply } => {
+                let _ = reply.send(self.find_mut(doc_id).and_then(|d| Ok(d.session.style(id)?)));
             }
             Job::History { doc_id, reply } => {
                 let _ = reply.send(self.find_mut(doc_id).map(|d| d.session.history()));

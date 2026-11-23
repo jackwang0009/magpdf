@@ -68,6 +68,7 @@ export type { RpcError } from './generated/RpcError';
 export type { SaveMode } from './generated/SaveMode';
 export type { StallParams } from './generated/StallParams';
 export type { Stats } from './generated/Stats';
+export type { StyleDetail } from './generated/StyleDetail';
 export type { TextDetail } from './generated/TextDetail';
 export type { TileCoord } from './generated/TileCoord';
 export type { TileFetchParams } from './generated/TileFetchParams';

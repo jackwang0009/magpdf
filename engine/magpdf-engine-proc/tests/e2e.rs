@@ -983,6 +983,70 @@ async fn existing_text_is_read_changed_and_undone_over_the_pipe() {
     assert_eq!(undone[0]["text"]["content"], json!(original));
 }
 
+/// 颜色（《接口协议》6.4 `obj.get` 的 `style`、6.5 `edit.setStyle`）：读出填充色和描边色，改了填充色读到新的。
+#[tokio::test]
+async fn styles_are_read_and_changed_over_the_pipe() {
+    let mut engine = Engine::start(None).await;
+    engine.hello().await;
+    let doc_id = engine.open("color-devicergb.pdf").await;
+    let ids: Vec<u64> = engine
+        .objects(doc_id)
+        .await
+        .iter()
+        .map(|o| o["id"].as_u64().unwrap())
+        .collect();
+    let details = engine
+        .call(
+            method::OBJ_GET,
+            json!({ "docId": doc_id, "ids": ids, "detail": "style" }),
+        )
+        .await;
+    let styles: Vec<&Value> = details
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| &d["style"])
+        .collect();
+    // 样本里有只填充的方块、只描边的方框、又填充又描边的方块，还有文字
+    let has = |fill: bool, stroke: bool| {
+        styles
+            .iter()
+            .any(|s| s.get("fill").is_some() == fill && s.get("stroke").is_some() == stroke)
+    };
+    assert!(
+        has(true, false) && has(false, true) && has(true, true),
+        "{details}"
+    );
+    assert!(details[0].get("text").is_none(), "只给请求的那一类详情");
+
+    let filled = details
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["style"].get("fill").is_some() && d["style"].get("stroke").is_none())
+        .map(|d| d["id"].as_u64().unwrap())
+        .unwrap();
+    engine
+        .edit(
+            method::EDIT_SET_STYLE,
+            json!({
+                "docId": doc_id, "baseVersion": 0, "ids": [filled],
+                "fill": { "space": "rgb", "components": [0, 0, 1] },
+            }),
+        )
+        .await;
+    let after = engine
+        .call(
+            method::OBJ_GET,
+            json!({ "docId": doc_id, "ids": [filled], "detail": "style" }),
+        )
+        .await;
+    assert_eq!(
+        after[0]["style"],
+        json!({ "fill": { "space": "rgb", "components": [0.0, 0.0, 1.0] } })
+    );
+}
+
 /// 历史记录（《接口协议》6.8 `history.list`、`history.jump`）：列出每一步，一次跳几步，越界报错。
 #[tokio::test]
 async fn history_is_listed_and_jumped_over_the_pipe() {
