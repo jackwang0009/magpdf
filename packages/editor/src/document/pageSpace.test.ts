@@ -9,6 +9,7 @@ import {
   invertMatrix,
   pageTransformToUser,
   rectToRectMatrix,
+  rotationMatrix,
   transformRect,
   translationMatrix,
   userBoxToPageRect,
@@ -200,6 +201,19 @@ describe('矩阵运算', () => {
       transformRect([0, 1, -1, 0, 0, 0], { x: 10, y: 20, width: 30, height: 5 }),
       [-25, 10, -20, 40],
     );
+  });
+
+  it('绕一点旋转：中心不动；y 向下的坐标里正角度是顺时针', () => {
+    const center = { x: 100, y: 50 };
+    const quarter = rotationMatrix(center, 90);
+    const fixed = applyMatrix(quarter, 100, 50);
+    expect(fixed.x).toBeCloseTo(100, 9);
+    expect(fixed.y).toBeCloseTo(50, 9);
+    // 中心右边 10 的点转到中心下面 10（屏幕上顺时针）
+    const right = applyMatrix(quarter, 110, 50);
+    expect(right.x).toBeCloseTo(100, 9);
+    expect(right.y).toBeCloseTo(60, 9);
+    expectMatrix(composeMatrix(quarter, rotationMatrix(center, -90)), IDENTITY_MATRIX);
   });
 
   it('矩形到矩形：没有宽度的线只平移，不缩放', () => {

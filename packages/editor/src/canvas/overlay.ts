@@ -109,6 +109,20 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, scene: OverlayScene):
       ctx.strokeRect(hx, hy, size, size);
     }
     ctx.restore();
+    // 旋转时选框上方标出转了多少度（顺时针为正）
+    if (scene.rotation !== null) {
+      const label = `${formatDegrees(scene.rotation)}°`;
+      ctx.font = `${metrics.fontSizeSmall}px ${fontFamily}`;
+      const width = ctx.measureText(label).width + 8;
+      const x = Math.round(box.x + box.width / 2 - width / 2);
+      const y = Math.round(box.y - 24);
+      ctx.fillStyle = palette.accent;
+      ctx.fillRect(x, y, width, 16);
+      ctx.fillStyle = palette.handleFill;
+      ctx.textBaseline = 'middle';
+      ctx.textAlign = 'center';
+      ctx.fillText(label, x + width / 2, y + 8);
+    }
   }
 
   // 框选矩形
@@ -244,6 +258,12 @@ function drawRulers(ctx: CanvasRenderingContext2D, scene: OverlayScene): void {
   // 左上角
   ctx.fillStyle = palette.panel;
   ctx.fillRect(0, 0, RULER, RULER);
+}
+
+/** 角度：整数照写，否则留一位小数 */
+export function formatDegrees(degrees: number): string {
+  const rounded = Math.round(degrees * 10) / 10;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 }
 
 function crisp(v: number): number {

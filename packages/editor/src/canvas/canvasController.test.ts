@@ -567,6 +567,34 @@ describe('拖动预览（方案 3.2）', () => {
     }
   });
 
+  it('旋转：在选框角外按住转 90°，松手时交给修改入口的是页面坐标里绕对象中心的旋转', async () => {
+    const context = mount();
+    const { store, controller, edits, frame, deliver, client, pointer } = context;
+    try {
+      frame();
+      await deliver('page');
+      store.getState().setSelection('doc', ['p0-1']);
+      // 对象 (100, 100) 80×60，中心 (140, 130)；按在左上角往外 12 个像素（旋转热区）
+      const corner = client(100, 100);
+      const from = { x: corner.x - 12, y: corner.y - 12 };
+      const center = client(140, 130);
+      const to = { x: center.x - (from.y - center.y), y: center.y + (from.x - center.x) };
+      pointer('pointerdown', from);
+      pointer('pointermove', to);
+      pointer('pointerup', to);
+      expect(edits).toHaveLength(1);
+      const [change] = edits[0]!;
+      expect(change!.ids).toEqual(['p0-1']);
+      const m = change!.matrix;
+      expect(m[0]).toBeCloseTo(0, 6);
+      expect(m[1]).toBeCloseTo(1, 6);
+      expect(m[0] * 140 + m[2] * 130 + m[4]).toBeCloseTo(140, 4);
+      expect(m[1] * 140 + m[3] * 130 + m[5]).toBeCloseTo(130, 4);
+    } finally {
+      controller.dispose();
+    }
+  });
+
   it('锁定、隐藏的对象：点不中，全选也跳过；画面照常（锁定的不去掉）', async () => {
     const context = mount();
     const { store, controller, provider, frame, deliver, client, pointer } = context;

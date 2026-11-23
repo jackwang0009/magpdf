@@ -69,6 +69,8 @@ export type SelectState =
       readonly center: Point;
       readonly startAngle: number;
       readonly currentAngle: number;
+      /** 按着 Shift：按 15° 吸附 */
+      readonly snap: boolean;
       readonly ids: readonly string[];
     }
   /** 按住不能修改的对象在拖：什么都不动，光标提示“不行”，等鼠标抬起 */
@@ -164,7 +166,14 @@ function onPointerDown(
       const center = { x: docBox.x + docBox.width / 2, y: docBox.y + docBox.height / 2 };
       const angle = angleTo(center, event.doc);
       return transition<SelectState>(
-        { kind: 'rotating', center, startAngle: angle, currentAngle: angle, ids: ctx.selection },
+        {
+          kind: 'rotating',
+          center,
+          startAngle: angle,
+          currentAngle: angle,
+          snap: event.shift,
+          ids: ctx.selection,
+        },
         { type: 'overlay', overlay: { rotation: 0 } },
       );
     }
@@ -272,10 +281,14 @@ function onPointerMove(
       });
     }
     case 'rotating': {
-      const next = { ...state, currentAngle: angleTo(state.center, event.doc) };
+      const next = {
+        ...state,
+        currentAngle: angleTo(state.center, event.doc),
+        snap: event.shift,
+      };
       return transition<SelectState>(next, {
         type: 'overlay',
-        overlay: { rotation: next.currentAngle - next.startAngle },
+        overlay: { rotation: rotationDelta(next) },
       });
     }
     case 'refused':
@@ -329,9 +342,18 @@ function onPointerUp(
         },
       );
     }
-    case 'rotating':
-      // 旋转提交需要引擎侧的变换矩阵支持（P1）；P0 只保留状态与光标
-      return transition(idle, { type: 'overlay', overlay: null });
+    case 'rotating': {
+      const degrees = rotationDelta({
+        ...state,
+        currentAngle: angleTo(state.center, event.doc),
+        snap: event.shift,
+      });
+      const effects: ToolEffect[] = [{ type: 'overlay', overlay: null }];
+      if (Math.abs(degrees) >= 0.05) {
+        effects.push({ type: 'rotateObjects', ids: state.ids, center: state.center, degrees });
+      }
+      return transition(idle, ...effects);
+    }
     case 'refused':
       return transition(idle);
     case 'idle':
@@ -471,6 +493,18 @@ function scalePreview(state: Extract<SelectState, { kind: 'scaling' }>): Map<str
 
 function angleTo(center: Point, p: Point): number {
   return (Math.atan2(p.y - center.y, p.x - center.x) * 180) / Math.PI;
+}
+
+/** 从按下到现在转了多少度，落在 (-180, 180]；按着 Shift 时吸附到 15° 的倍数。 */
+function rotationDelta(state: {
+  readonly startAngle: number;
+  readonly currentAngle: number;
+  readonly snap: boolean;
+}): number {
+  let delta = (state.currentAngle - state.startAngle) % 360;
+  if (delta > 180) delta -= 360;
+  if (delta <= -180) delta += 360;
+  return state.snap ? Math.round(delta / 15) * 15 || 0 : delta;
 }
 
 function currentPage(ctx: ToolContext): number {

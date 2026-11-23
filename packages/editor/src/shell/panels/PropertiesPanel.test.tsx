@@ -3,7 +3,12 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import type { DocumentEditor, StyleInfo, TextInfo } from '../../document/documentEditor';
+import type {
+  DocumentEditor,
+  PageTransform,
+  StyleInfo,
+  TextInfo,
+} from '../../document/documentEditor';
 import type { PageObject } from '../../document/types';
 import { mmToPt } from '../../geometry';
 import { format, t } from '../../i18n';
@@ -63,8 +68,9 @@ function type(input: HTMLInputElement, value: string) {
 function withEditor(info: TextInfo | null, style: StyleInfo = { fill: null, stroke: null }) {
   const calls: [string, string][] = [];
   const fills: [readonly string[], string][] = [];
+  const transforms: PageTransform[][] = [];
   const editor: DocumentEditor = {
-    transformObjects: () => undefined,
+    transformObjects: (changes) => transforms.push([...changes]),
     deleteObjects: () => undefined,
     placeComponent: () => undefined,
     updateComponent: () => undefined,
@@ -83,7 +89,7 @@ function withEditor(info: TextInfo | null, style: StyleInfo = { fill: null, stro
     documentEditor: () => editor,
     onNotice: () => () => undefined,
   };
-  return { host, calls, fills };
+  return { host, calls, fills, transforms };
 }
 
 async function renderWith(host: EditorHost): Promise<HTMLDivElement> {
@@ -343,6 +349,56 @@ describe('属性面板：改原有文字', () => {
       });
     });
     expect(textInput(view).disabled).toBe(true);
+  });
+});
+
+describe('属性面板：旋转', () => {
+  const box = { x: 100, y: 200, width: 80, height: 40 };
+  const rotateInput = (view: HTMLElement) =>
+    view.querySelector<HTMLInputElement>(`input[aria-label="${t.properties.rotation}"]`)!;
+  const press = (input: HTMLInputElement, key: string) =>
+    act(() => input.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })));
+
+  it('引擎的文档：输入角度回车，交给修改入口的是绕对象中心的旋转，然后清空；0 度、写错的不发', async () => {
+    addObject({ id: 'r1', type: 'path', name: '框', bbox: box });
+    const { host, transforms } = withEditor(null);
+    const view = await renderWith(host);
+    const input = rotateInput(view);
+    type(input, '90°');
+    press(input, 'Enter');
+    expect(input.value).toBe('');
+    expect(transforms).toHaveLength(1);
+    const [change] = transforms[0]!;
+    expect(change).toMatchObject({ page: 0, ids: ['r1'] });
+    const m = change!.matrix;
+    // 中心 (140, 220) 不动，转 90°
+    expect(m[0] * 140 + m[2] * 220 + m[4]).toBeCloseTo(140, 6);
+    expect(m[1] * 140 + m[3] * 220 + m[5]).toBeCloseTo(220, 6);
+    expect(m[1]).toBeCloseTo(1, 9);
+    for (const wrong of ['0', '360', '向右', '']) {
+      type(input, wrong);
+      press(input, 'Enter');
+    }
+    expect(transforms).toHaveLength(1);
+  });
+
+  it('模拟文档转不了；只能叠加内容的页上原有的对象也转不了：输入框是灰的', async () => {
+    addObject({ id: 'r1', type: 'path', name: '框', bbox: box });
+    let view = render();
+    expect(rotateInput(view).disabled).toBe(true);
+    act(() => root?.unmount());
+    container?.remove();
+
+    act(() => {
+      const state = editorStore.getState();
+      const snapshot = state.documents['props-doc']!.snapshot;
+      state.updateSnapshot('props-doc', {
+        ...snapshot,
+        pages: [{ ...snapshot.pages[0]!, overlayOnly: { reason: '测试' } }],
+      });
+    });
+    view = await renderWith(withEditor(null).host);
+    expect(rotateInput(view).disabled).toBe(true);
   });
 });
 

@@ -96,6 +96,14 @@ export type ToolEffect =
       readonly from: Rect;
       readonly to: Rect;
     }
+  | {
+      readonly type: 'rotateObjects';
+      readonly ids: readonly string[];
+      /** 绕哪一点转（文档坐标）：选区包围盒的中心 */
+      readonly center: Point;
+      /** 转多少度，正的是顺时针（文档坐标 y 向下） */
+      readonly degrees: number;
+    }
   | { readonly type: 'deleteObjects'; readonly ids: readonly string[] }
   | { readonly type: 'setView'; readonly view: ViewState }
   | { readonly type: 'setTool'; readonly tool: ToolId }

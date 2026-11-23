@@ -4,7 +4,7 @@ import type { KeyboardEvent } from 'react';
 import { checkComponent, componentName, sizeLabel } from '../../document/components';
 import type { ComponentProblem, ComponentValues } from '../../document/components';
 import type { StyleInfo, TextInfo } from '../../document/documentEditor';
-import { rectToRectMatrix } from '../../document/pageSpace';
+import { rectToRectMatrix, rotationMatrix } from '../../document/pageSpace';
 import type { PageObject } from '../../document/types';
 import { ptToMm } from '../../geometry';
 import type { Rect } from '../../geometry';
@@ -124,7 +124,18 @@ export function PropertiesPanel() {
           onCommit={(height) => transformTo({ ...b, height })}
         />
         <label>{t.properties.rotation}</label>
-        <Field value="0°" />
+        <RotateField
+          disabled={frozenHere || !host?.documentEditor(documentId)}
+          onCommit={(degrees) =>
+            host?.documentEditor(documentId)?.transformObjects([
+              {
+                page: entry.page.index,
+                ids: [object.id],
+                matrix: rotationMatrix({ x: b.x + b.width / 2, y: b.y + b.height / 2 }, degrees),
+              },
+            ])
+          }
+        />
       </div>
       {fixedSize && !frozenHere ? (
         <p className="mg-props-hint">{t.properties.componentSizeHint}</p>
@@ -391,6 +402,45 @@ function TextFields({
         </>
       )}
     </>
+  );
+}
+
+/**
+ * 旋转：不是“现在转了多少度”（路径的坐标直接写在内容里，说不清），而是“再转多少度”。输入角度回车，
+ * 绕对象中心转过去（顺时针为正，和画布上旋转时标的一样），然后清空。写得不对的、0 度的不发。
+ */
+function RotateField({
+  disabled,
+  onCommit,
+}: {
+  readonly disabled: boolean;
+  readonly onCommit: (degrees: number) => void;
+}) {
+  const [text, setText] = useState('');
+  const commit = () => {
+    const degrees = Number(text.replace(/[°\s]/g, ''));
+    setText('');
+    if (text.trim() === '' || !Number.isFinite(degrees) || degrees % 360 === 0) return;
+    onCommit(degrees);
+  };
+  return (
+    <span className="mg-mm-field" title={t.properties.rotateHint}>
+      <input
+        className="mg-input"
+        aria-label={t.properties.rotation}
+        value={text}
+        placeholder="0"
+        inputMode="decimal"
+        disabled={disabled}
+        onChange={(event) => setText(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') commit();
+          if (event.key === 'Escape') setText('');
+        }}
+        onBlur={() => setText('')}
+      />
+      <span className="mg-field-unit">°</span>
+    </span>
   );
 }
 

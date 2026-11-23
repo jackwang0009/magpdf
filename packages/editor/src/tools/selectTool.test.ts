@@ -288,6 +288,47 @@ describe('选择工具状态机', () => {
     expect(selectTool.cursor({ kind: 'idle' }, context([]), screenOutside)).toBe('default');
   });
 
+  it('旋转松手：绕选区中心转过的角度交出去（顺时针为正）；按着 Shift 吸附到 15°；几乎没转不交', () => {
+    const ctx = context(['a']);
+    const rect = ctx.objectById('a')!.docRect;
+    const c = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+    const outside = { x: rect.x - 12, y: rect.y - 12 };
+    /** 把按下的点绕中心转 `deg` 度之后的位置 */
+    const turned = (deg: number) => {
+      const r = (deg * Math.PI) / 180;
+      const dx = outside.x - c.x;
+      const dy = outside.y - c.y;
+      return {
+        x: c.x + dx * Math.cos(r) - dy * Math.sin(r),
+        y: c.y + dx * Math.sin(r) + dy * Math.cos(r),
+      };
+    };
+    const rotate = (deg: number, shift = false) => {
+      const to = turned(deg);
+      const result = run(
+        { kind: 'idle' },
+        [
+          pointer('pointerdown', outside),
+          pointer('pointermove', to, { shift }),
+          pointer('pointerup', to, { shift }),
+        ],
+        ctx,
+      );
+      expect(result.state.kind).toBe('idle');
+      return result.effects.find((e) => e.type === 'rotateObjects');
+    };
+
+    const plain = rotate(30);
+    expect(plain).toMatchObject({ ids: ['a'], center: c });
+    expect(plain?.type === 'rotateObjects' && plain.degrees).toBeCloseTo(30, 6);
+    const back = rotate(-200);
+    expect(back?.type === 'rotateObjects' && back.degrees).toBeCloseTo(160, 6);
+    const snapped = rotate(37, true);
+    expect(snapped?.type === 'rotateObjects' && snapped.degrees).toBe(30);
+    expect(rotate(0.01)).toBeUndefined();
+    expect(rotate(5, true)).toBeUndefined();
+  });
+
   it('取消事件回到空闲并清掉叠加层', () => {
     const result = run(
       { kind: 'idle' },

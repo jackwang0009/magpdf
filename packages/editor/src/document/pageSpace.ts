@@ -72,6 +72,23 @@ export function rectToRectMatrix(from: Rect, to: Rect): Matrix {
 }
 
 /**
+ * 绕 `center` 转 `degrees` 度。坐标是 y 向下的（页面坐标、文档坐标），所以正的角度在屏幕上是顺时针。
+ */
+export function rotationMatrix(center: Point, degrees: number): Matrix {
+  const radians = (degrees * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  return [
+    cos,
+    sin,
+    -sin,
+    cos,
+    center.x - cos * center.x + sin * center.y,
+    center.y - sin * center.x - cos * center.y,
+  ];
+}
+
+/**
  * 文档坐标（各页从上到下排开的那个坐标系）里的一个变换，换成某一页的页面坐标里效果相同的变换。
  * 两个坐标系只差一个平移：`origin` 是这一页的左上角在文档坐标里的位置。
  */

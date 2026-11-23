@@ -205,6 +205,7 @@ export const zhCN = {
     multiSelection: '已选 {n} 个对象',
     transform: '变换',
     rotation: '旋转',
+    rotateHint: '输入角度回车，绕对象中心再转这么多（顺时针为正）',
     skew: '斜切',
     componentBadge: '组件',
     componentParams: '组件参数',

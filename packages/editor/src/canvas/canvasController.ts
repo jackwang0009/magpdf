@@ -7,6 +7,7 @@ import { PageLayout } from '../document/pageLayout';
 import {
   documentTransformToPage,
   rectToRectMatrix,
+  rotationMatrix,
   translationMatrix,
 } from '../document/pageSpace';
 import type { Matrix } from '../document/pageSpace';
@@ -1357,6 +1358,16 @@ export class CanvasController {
           state.resizeObjects(this.documentId, local);
           break;
         }
+        case 'rotateObjects':
+          // 模拟文档的对象只有轴对齐的包围盒，转不了；引擎的文档绕选区中心转，和移动、缩放一样是一条变换
+          if (this.editor) {
+            this.transformViaEditor(
+              this.editor,
+              effect.ids,
+              rotationMatrix(effect.center, effect.degrees),
+            );
+          }
+          break;
         case 'deleteObjects':
           if (this.editor) this.editor.deleteObjects(effect.ids);
           else state.deleteObjects(this.documentId, effect.ids);
