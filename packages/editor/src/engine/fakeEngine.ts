@@ -353,7 +353,7 @@ export class FakeEngine {
         size: params.params.size ?? 36,
       },
     };
-    checkComponent(comp.params);
+    checkComponent(comp.type, comp.params);
     const id = Math.max(0, ...document.pages.flatMap((p) => p.objects.map((o) => o.id))) + 1;
     const [x, y] = params.at;
     const object: FakeObject = {
@@ -388,7 +388,7 @@ export class FakeEngine {
         size: params.params.size ?? before.params.size,
       },
     };
-    checkComponent(after.params);
+    checkComponent(after.type, after.params);
     return this.commit(document, {
       pages: [index],
       forward: () => {
@@ -454,9 +454,9 @@ function invalid(detail: string): RpcError {
   return { code: ERROR_CODE.E_INVALID_ARGUMENT, message: '参数不合法', data: { detail } };
 }
 
-/** 和真引擎一样只认 ASCII 的内容；不合法时报 `E_COMP_INVALID`，`data.checks` 标出参数。 */
-function checkComponent(params: { content: string; size: number }): void {
-  if (/^[\x20-\x7e]+$/.test(params.content)) return;
+/** 和真引擎一样：条码只认 ASCII（文本什么字都行）；不合法时报 `E_COMP_INVALID`，`data.checks` 标出参数。 */
+function checkComponent(type: string, params: { content: string; size: number }): void {
+  if (type !== 'code128' || /^[\x20-\x7e]+$/.test(params.content)) return;
   const message = 'Code 128 只能编码英文字母、数字和常见符号（ASCII 32–126）';
   const error: RpcError = {
     code: ERROR_CODE.E_COMP_INVALID,

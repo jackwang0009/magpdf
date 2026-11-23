@@ -272,9 +272,18 @@ fn apply_tiers(
     Err(EditError::NoTier(detail))
 }
 
-enum SkipOrErr {
+pub(crate) enum SkipOrErr {
     Skip(TierSkipped),
     Err(EditError),
+}
+
+impl fmt::Display for SkipOrErr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Skip(skipped) => skipped.fmt(f),
+            Self::Err(error) => error.fmt(f),
+        }
+    }
 }
 
 impl From<EditError> for SkipOrErr {
@@ -598,7 +607,7 @@ fn try_tier3(
     replace_with_face(doc, page, idx, &obj, &face, new_text)
 }
 
-fn covering_match<'a>(
+pub(crate) fn covering_match<'a>(
     lib: &'a FontLibrary,
     family: Family,
     weight: i32,
@@ -677,7 +686,10 @@ fn replace_with_face(
     Ok(())
 }
 
-fn subset_text(face: &FontFace, text: &str) -> std::result::Result<(Subset, Vec<u32>), SkipOrErr> {
+pub(crate) fn subset_text(
+    face: &FontFace,
+    text: &str,
+) -> std::result::Result<(Subset, Vec<u32>), SkipOrErr> {
     let miss = coverage(face, text).missing;
     if !miss.is_empty() {
         return Err(SkipOrErr::Skip(TierSkipped::MissingGlyphs {
@@ -729,7 +741,7 @@ fn subset_text(face: &FontFace, text: &str) -> std::result::Result<(Subset, Vec<
     Ok((subset, charcodes))
 }
 
-fn load_subset_font<'doc>(
+pub(crate) fn load_subset_font<'doc>(
     doc: &'doc Document<'_>,
     subset: &Subset,
 ) -> std::result::Result<LoadedFont<'doc>, String> {

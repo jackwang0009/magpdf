@@ -226,7 +226,9 @@ impl PageObject<'_> {
     }
 
     /// 加一层标记内容（`FPDFPageObj_AddMark`），带几个字符串参数（`FPDFPageObjMark_SetStringParam`）。
-    /// 生成内容流时写成 `/名字 << 参数 >> BDC … EMC`，存盘之后重新打开还在。值按字节写，只放 ASCII。
+    /// 生成内容流时写成 `/名字 << 参数 >> BDC … EMC`，存盘之后重新打开还在。值按 UTF-8 字节写：PDFium 的
+    /// `GetParamStringValue`（[`PageObject::mark_string`]）读的时候也按 UTF-8 解，中文能原样读回来
+    ///（写成带 BOM 的 UTF-16BE 反而读不回来，试过）。
     pub fn add_string_mark(
         &self,
         doc: &crate::Document<'_>,

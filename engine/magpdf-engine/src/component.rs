@@ -7,15 +7,31 @@
 //!
 //! 原型的限制：
 //! - 一个组件就是一个对象：文本是一个文字对象，条码是一个路径对象（每根条一个矩形子路径），条码下面不带可读的字。
-//! - 文本用标准字体 Helvetica，不嵌入字体，只能写英文字母、数字和常见符号；中文要走 V08 的嵌入和子集化，没有接。
+//! - 文本只有一行。全是英文字母、数字和常见符号时用标准字体 Helvetica，不嵌入；有别的字（中文）时挑一份
+//!   覆盖这段文字的系统字体（先找黑体），只嵌用到的字（[`magpdf_text::compose`]），找不到就报参数不合法。
 //! - Code 128 是自己编的（全是数字且位数为偶数时用 C 码集，否则用 B 码集），没有用方案定的 Zint；
 //!   和 ZXing 的识别对过（`tests/prototypes/components/`）。
 //! - 改参数时只保留放置的位置（[`ComponentSpec::build`] 的锚点），用户做过的缩放、旋转不保留。
 
+use magpdf_text::compose::{ComposeError, new_text_object};
+use magpdf_text::fontmatch::Family;
 use pdfium_sys::{DetachedObject, LoadedFont, Matrix, Page, PageObject, Rgba};
 
 /// 标记内容的名字。
 pub const MARK: &str = "MagComponent";
+
+/// 文本组件最多几个字。
+const TEXT_MAX_CHARS: usize = 100;
+
+/// 生成组件失败。
+#[derive(Debug, thiserror::Error)]
+pub enum BuildError {
+    #[error(transparent)]
+    Pdfium(#[from] pdfium_sys::Error),
+    /// 找不到能显示这些字的字体（或者嵌不进去），说明可以直接给用户看。
+    #[error("{0}")]
+    Font(String),
+}
 
 /// 组件的种类。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,18 +110,27 @@ impl ComponentSpec {
         if self.content.is_empty() {
             return Err(content("内容不能是空的"));
         }
-        if !self.content.chars().all(|c| (' '..='~').contains(&c)) {
-            return Err(content(match self.kind {
-                ComponentKind::Text => {
-                    "原型的文本组件只能写英文字母、数字和常见符号（用的是不嵌入的标准字体 Helvetica）"
+        match self.kind {
+            ComponentKind::Text => {
+                if self.content.chars().any(char::is_control) {
+                    return Err(content(
+                        "原型的文本组件只有一行，不能有换行、制表符这类控制字符",
+                    ));
                 }
-                ComponentKind::Code128 => {
-                    "Code 128 只能编码英文字母、数字和常见符号（ASCII 32–126）"
+                if self.content.chars().count() > TEXT_MAX_CHARS {
+                    return Err(content("文本最多 100 个字"));
                 }
-            }));
-        }
-        if self.kind == ComponentKind::Code128 && self.content.chars().count() > 48 {
-            return Err(content("条码内容最多 48 个字符"));
+            }
+            ComponentKind::Code128 => {
+                if !self.content.chars().all(|c| (' '..='~').contains(&c)) {
+                    return Err(content(
+                        "Code 128 只能编码英文字母、数字和常见符号（ASCII 32–126）",
+                    ));
+                }
+                if self.content.chars().count() > 48 {
+                    return Err(content("条码内容最多 48 个字符"));
+                }
+            }
         }
         let (min, max) = self.kind.size_range();
         if !(self.size.is_finite() && (min..=max).contains(&self.size)) {
@@ -128,8 +153,25 @@ impl ComponentSpec {
         page: &Page<'_>,
         left: f32,
         top: f32,
-    ) -> pdfium_sys::Result<DetachedObject> {
+    ) -> Result<DetachedObject, BuildError> {
         let object = match self.kind {
+            ComponentKind::Text if !self.content.is_ascii() => {
+                let made = new_text_object(
+                    page.document(),
+                    page,
+                    &self.content,
+                    self.size,
+                    Matrix::translation(left, top - self.size),
+                    Family::Hei,
+                )
+                .map_err(|error| match error {
+                    ComposeError::NoFont { .. } => BuildError::Font(error.to_string()),
+                    ComposeError::Failed(reason) => {
+                        BuildError::Font(format!("这段文字的字体嵌不进去：{reason}"))
+                    }
+                })?;
+                DetachedObject::adopt(made.object)
+            }
             ComponentKind::Text => {
                 let font = LoadedFont::load_standard(page.document(), "Helvetica")?;
                 // Helvetica 的大写字母高约 0.72 em：基线放在左上角往下一个字号的地方。
@@ -316,11 +358,26 @@ mod tests {
         };
         assert!(spec(ComponentKind::Text, "Hello", 12.0).validate().is_ok());
         assert!(spec(ComponentKind::Text, "", 12.0).validate().is_err());
-        let problem = spec(ComponentKind::Text, "提单", 12.0)
+        assert!(
+            spec(ComponentKind::Text, "提单号 BL-0042", 12.0)
+                .validate()
+                .is_ok()
+        );
+        let problem = spec(ComponentKind::Text, "两\n行", 12.0)
             .validate()
             .unwrap_err();
         assert_eq!(problem.key, "content");
-        assert!(problem.message.contains("Helvetica"));
+        assert!(problem.message.contains("一行"));
+        assert!(
+            spec(ComponentKind::Text, &"字".repeat(101), 12.0)
+                .validate()
+                .is_err()
+        );
+        assert!(
+            spec(ComponentKind::Code128, "提单", 36.0)
+                .validate()
+                .is_err()
+        );
         assert!(
             spec(ComponentKind::Code128, "ABC-123", 36.0)
                 .validate()

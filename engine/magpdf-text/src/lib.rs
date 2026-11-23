@@ -19,6 +19,7 @@
 //! ```
 #![forbid(unsafe_code)]
 
+pub mod compose;
 pub mod edit;
 pub mod error;
 pub mod eval;

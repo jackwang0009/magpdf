@@ -11,13 +11,19 @@ describe('组件参数的检查（和引擎 component.rs 一致）', () => {
     expect(checkComponent('code128', COMPONENT_DEFAULTS.code128)).toBeNull();
   });
 
-  it('内容：不能空，只认 ASCII 32–126，条码最多 48 个字符', () => {
+  it('内容：不能空；文本可以写中文、只有一行、最多 100 个字；条码只认 ASCII 32–126、最多 48 个字符', () => {
     expect(checkComponent('text', { content: '', size: 12 })).toEqual({
       key: 'content',
       message: t.componentChecks.empty,
     });
-    expect(checkComponent('text', { content: '提单', size: 12 })?.message).toBe(
-      t.componentChecks.textAsciiOnly,
+    expect(checkComponent('text', { content: '提单号：BL-0042', size: 12 })).toBeNull();
+    expect(checkComponent('text', { content: '两\n行', size: 12 })?.message).toBe(
+      t.componentChecks.textControl,
+    );
+    expect(checkComponent('text', { content: '字'.repeat(100), size: 12 })).toBeNull();
+    expect(checkComponent('text', { content: '字'.repeat(101), size: 12 })?.key).toBe('content');
+    expect(checkComponent('code128', { content: '提单', size: 36 })?.message).toBe(
+      t.componentChecks.code128AsciiOnly,
     );
     expect(checkComponent('code128', { content: 'BL\t1', size: 36 })?.message).toBe(
       t.componentChecks.code128AsciiOnly,

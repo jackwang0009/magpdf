@@ -180,8 +180,8 @@ export const zhCN = {
   /** 组件参数的检查（和引擎 `component.rs` 一致） */
   componentChecks: {
     empty: '内容不能是空的',
-    textAsciiOnly:
-      '原型的文本组件只能写英文字母、数字和常见符号（用的是不嵌入的标准字体 Helvetica）',
+    textControl: '原型的文本组件只有一行，不能有换行、制表符这类控制字符',
+    textTooLong: '文本最多 {n} 个字',
     code128AsciiOnly: 'Code 128 只能编码英文字母、数字和常见符号（ASCII 32–126）',
     tooLong: '条码内容最多 {n} 个字符',
     sizeRange: '{what}要在 {min}–{max} pt 之间',
@@ -216,7 +216,7 @@ export const zhCN = {
     fontSize: '字号',
     componentText: '文本',
     /** 原型的限制，显示在组件参数下面 */
-    textNote: '标准字体 Helvetica，不嵌入，只能写英文',
+    textNote: '英文用标准字体 Helvetica（不嵌入）；有中文时嵌入系统字体，只嵌用到的字',
     barcodeNote: '模块宽度 1 pt（0.35 mm），不带可读文字',
     /** 输入框旁的提示 */
     applyHint: '回车或离开输入框后生效',

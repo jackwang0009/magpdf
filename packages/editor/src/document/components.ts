@@ -33,6 +33,7 @@ const SIZE_RANGE: Readonly<Record<PlaceableComponent, readonly [number, number]>
 };
 
 const CODE128_MAX_LENGTH = 48;
+const TEXT_MAX_LENGTH = 100;
 
 /** 从组件面板拖到画布上时，`dataTransfer` 里放组件种类用的类型。 */
 export const COMPONENT_DRAG_TYPE = 'application/x-magpdf-component';
@@ -49,17 +50,22 @@ export function checkComponent(
 ): ComponentProblem | null {
   const strings = t.componentChecks;
   if (values.content.length === 0) return { key: 'content', message: strings.empty };
-  if (!/^[\x20-\x7e]*$/.test(values.content)) {
-    return {
-      key: 'content',
-      message: kind === 'text' ? strings.textAsciiOnly : strings.code128AsciiOnly,
-    };
-  }
-  if (kind === 'code128' && values.content.length > CODE128_MAX_LENGTH) {
-    return {
-      key: 'content',
-      message: format(strings.tooLong, { n: CODE128_MAX_LENGTH }),
-    };
+  const chars = [...values.content];
+  if (kind === 'text') {
+    // 中文可以写：引擎会嵌一份系统字体的子集；只有一行，不能有控制字符
+    if (chars.some((c) => /\p{Cc}/u.test(c))) {
+      return { key: 'content', message: strings.textControl };
+    }
+    if (chars.length > TEXT_MAX_LENGTH) {
+      return { key: 'content', message: format(strings.textTooLong, { n: TEXT_MAX_LENGTH }) };
+    }
+  } else {
+    if (!/^[\x20-\x7e]*$/.test(values.content)) {
+      return { key: 'content', message: strings.code128AsciiOnly };
+    }
+    if (chars.length > CODE128_MAX_LENGTH) {
+      return { key: 'content', message: format(strings.tooLong, { n: CODE128_MAX_LENGTH }) };
+    }
   }
   const [min, max] = SIZE_RANGE[kind];
   if (!Number.isFinite(values.size) || values.size < min || values.size > max) {

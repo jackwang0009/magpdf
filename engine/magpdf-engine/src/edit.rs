@@ -26,7 +26,7 @@ use pdfium_sys::{
 };
 
 use crate::compare::{Thresholds, compare};
-use crate::component::{ComponentProblem, ComponentSpec};
+use crate::component::{BuildError, ComponentProblem, ComponentSpec};
 
 /// 对象在一次会话内的稳定编号（《接口协议》5.1）。只在会话内有效，不写进文件。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -106,6 +106,18 @@ pub enum EditError {
 }
 
 pub type Result<T> = std::result::Result<T, EditError>;
+
+impl From<BuildError> for EditError {
+    fn from(error: BuildError) -> Self {
+        match error {
+            BuildError::Pdfium(error) => Self::Pdfium(error),
+            BuildError::Font(message) => Self::Component(ComponentProblem {
+                key: "content",
+                message,
+            }),
+        }
+    }
+}
 
 const DEFAULT_LIMIT: usize = 50;
 
@@ -2133,7 +2145,7 @@ mod tests {
                 Err(EditError::NotComponent(_))
             ));
             assert!(matches!(
-                session.place_component(0, &text_spec("提单", 10.0), (10.0, 90.0)),
+                session.place_component(0, &text_spec("两\n行", 10.0), (10.0, 90.0)),
                 Err(EditError::Component(_))
             ));
             assert_eq!(session.history().len(), 1, "失败的命令不进历史");
@@ -2221,6 +2233,71 @@ mod tests {
                 .unwrap();
             let back = summary_of_bounds(session, id);
             assert!((back.top - start.top).abs() < 0.01, "{start:?} -> {back:?}");
+        });
+    }
+
+    /// 中文的文本组件：嵌一份只含这些字的系统字体子集；参数从标记内容读回来还是原来的字；改几次不漂；
+    /// 存盘再打开，参数和提取出来的文字都对。没有覆盖中文的字体时跳过（GitHub 的 Windows 机器上就缺）。
+    #[test]
+    fn chinese_text_components_embed_a_subset_and_round_trip() {
+        use magpdf_text::compose::new_text_object;
+        use magpdf_text::fontmatch::Family;
+        use pdfium_sys::Document;
+
+        with_session(|session| {
+            let probe = {
+                let page = session.doc.page(0).unwrap();
+                new_text_object(
+                    &session.doc,
+                    &page,
+                    "提单号",
+                    10.0,
+                    Matrix::IDENTITY,
+                    Family::Hei,
+                )
+                .map(|made| page.destroy_object(made.object))
+            };
+            if probe.is_err() {
+                eprintln!("跳过：这台机器上没有覆盖中文的字体");
+                return;
+            }
+            let (id, _) = session
+                .place_component(0, &text_spec("提单号：BL-0042", 12.0), (20.0, 90.0))
+                .unwrap();
+            let placed = summary_of(session, id).unwrap();
+            assert_eq!(placed.component, Some(text_spec("提单号：BL-0042", 12.0)));
+            let start = placed.bounds.unwrap();
+            for content in ["收货人", "提单号：BL-0042"] {
+                session
+                    .update_component(id, &text_spec(content, 12.0))
+                    .unwrap();
+            }
+            let after = summary_of_bounds(session, id);
+            assert!(
+                (after.top - start.top).abs() < 0.01 && (after.left - start.left).abs() < 0.01,
+                "{start:?} -> {after:?}"
+            );
+
+            let saved = session.save_full().unwrap();
+            let reopened = Document::load_bytes(session.lib, saved.bytes.to_vec(), None).unwrap();
+            let text: String = {
+                let page = reopened.page(0).unwrap();
+                let chars = page.text().unwrap();
+                (0..chars.char_count())
+                    .filter_map(|i| chars.unicode(i).and_then(char::from_u32))
+                    .collect()
+            };
+            assert!(text.contains("提单号：BL-0042"), "提取出来是 {text:?}");
+            let mut again = Session::from_document(session.lib, reopened);
+            let components: Vec<_> = again
+                .objects(0)
+                .unwrap()
+                .into_iter()
+                .filter_map(|o| o.component)
+                .collect();
+            assert_eq!(components, vec![text_spec("提单号：BL-0042", 12.0)]);
+            // 改了两次内容，三份子集只留最后一份
+            assert!(saved.dropped >= 2, "去掉了 {} 个对象", saved.dropped);
         });
     }
 

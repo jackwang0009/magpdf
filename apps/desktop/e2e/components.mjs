@@ -6,7 +6,8 @@
  * 这一页可以修改，流程一样）。走一遍：
  *   点 Code 128 → 点页面：条码出现在点的位置、被选中，画面上那一块变黑
  *   → 属性面板改内容：引擎重新生成，左上角不动；写中文：提示原因，不发命令
- *   → 方向键微移条码 → 把“文本”拖到页面上 → 点了组件又按 Esc：不放了 → 撤销四步，对象回到原样。
+ *   → 方向键微移条码 → 把“文本”拖到页面上，内容改成中文（嵌系统字体的子集）→ 点了组件又按 Esc：不放了
+ *   → 撤销五步，对象回到原样。
  *
  * 先构建发布版（步骤见 smoke.mjs 开头），再运行：
  *   node apps/desktop/e2e/components.mjs
@@ -197,16 +198,37 @@ try {
   assert.deepEqual(text.component.values, { content: 'Text', size: 12 });
   assert.ok(Math.abs(text.bbox.x - 60) < 2, `文本放在松手的地方：${JSON.stringify(text.bbox)}`);
 
+  // 文本写中文：引擎嵌一份系统字体的子集重新生成
+  await page.locator('#mg-comp-content').fill('收货人：上海');
+  await page.locator('#mg-comp-content').press('Enter');
+  await editSettled(page, 5, '文本改成中文');
+  const chinese = await waitFor(
+    '文本组件换成了中文',
+    async () => {
+      const found = await selectedComponent(page);
+      return found?.component.values.content === '收货人：上海' ? found : null;
+    },
+    5_000,
+  );
+  assert.ok(chinese.bbox.width > 50, `中文画出来了：${JSON.stringify(chinese.bbox)}`);
+  await parkMouse(page);
+  await page.screenshot({ path: join(shots, 'components-chinese.png') });
+
   // 5. 点了组件又按 Esc：不放了
   await page.locator('.mg-comp-item:not([disabled])', { hasText: '文本' }).first().click();
   assert.equal(await placing(page), 'text');
   await page.keyboard.press('Escape');
   assert.equal(await placing(page), null);
 
-  // 6. 撤销四步：拖进文本、微移、改内容、置入条码
-  for (let version = 5; version <= 8; version++) {
+  // 6. 撤销五步：文本改成中文、拖进文本、微移、改内容、置入条码（点画布让输入框交出焦点再按 Ctrl+Z）
+  const corner = await page.evaluate(() => {
+    const rect = window.__magpdf.controller().container.getBoundingClientRect();
+    return { x: rect.left + 6, y: rect.top + 6 };
+  });
+  await page.mouse.click(corner.x, corner.y);
+  for (let version = 6; version <= 10; version++) {
     await page.keyboard.press('Control+z');
-    await editSettled(page, version, `第 ${version - 4} 次撤销`);
+    await editSettled(page, version, `第 ${version - 5} 次撤销`);
   }
   const after = await documentState(page);
   assert.equal(after.objects, before.objects, '撤销之后对象数回到原样');
