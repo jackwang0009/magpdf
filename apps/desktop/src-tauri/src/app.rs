@@ -4,6 +4,8 @@
 //! - 命令 `engine_request`：文档类请求原样转给引擎，不解析业务字段。`session.*`、`bench.*`、`tile.fetch`
 //!   是主进程自己用的，`doc.open` 带着路径，都不让界面直接调。
 //! - 命令 `open_document_dialog`：主进程弹“打开”对话框，用户选了文件就交给引擎打开。界面拿不到任意路径。
+//! - 命令 `save_document_as`：主进程弹“另存为”对话框，让引擎存到用户选的地方。界面经 `engine_request` 发的
+//!   `doc.save` 只能存回打开的文件，带了路径就拒绝。
 //! - 命令 `open_documents`：主进程知道的、已经开着的文档（启动时命令行给的，或者界面重新加载之前打开的）。
 //! - 命令 `recoverable_documents`、`recover_documents`：上次没有正常退出时开着的文档，界面问过用户之后重新打开
 //!   （[`crate::leftover`]）。
@@ -21,7 +23,8 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Context, Result};
 use magpdf_ipc::host::{EngineLaunch, HostError, HostEvent, Supervisor};
 use magpdf_ipc::messages::{
-    DocInfo, EngineFailed, EngineRestored, ErrorCode, RpcError, event, method,
+    DocInfo, DocSaveResult, DocSaved, EngineFailed, EngineRestored, ErrorCode, RpcError, event,
+    method,
 };
 use magpdf_ipc::shm::ShmError;
 use serde_json::{Value, json};
@@ -97,14 +100,33 @@ impl Shell {
             *docs = restored;
         }
     }
+
+    /// 文档存好了：另存为之后路径和文件名是新的，界面重新加载时要按新的接回来。
+    fn saved(&self, saved: &DocSaved) {
+        if let Ok(mut docs) = self.docs.lock()
+            && let Some(doc) = docs.iter_mut().find(|doc| doc.doc_id == saved.doc_id)
+        {
+            doc.path.clone_from(&saved.path);
+            doc.title.clone_from(&saved.title);
+        }
+    }
 }
 
-/// 界面能不能直接调这个方法。
+/// 界面能不能直接调这个方法（参数另查，见 [`check_params`]）。
 fn forwardable(name: &str) -> bool {
     !(name.starts_with("session.")
         || name.starts_with("bench.")
         || name == method::DOC_OPEN
         || name == method::TILE_FETCH)
+}
+
+/// 界面发来的参数里不能带路径：`doc.save` 只能存回打开的文件，另存为走 [`save_document_as`]（对话框由主进程弹）。
+fn check_params(name: &str, params: &Value) -> Result<(), RpcError> {
+    if name == method::DOC_SAVE && params.get("path").is_some() {
+        return Err(ErrorCode::InvalidArgument
+            .error_with("界面不能指定保存的路径，另存为要走主进程的对话框"));
+    }
+    Ok(())
 }
 
 /// 文档类请求：原样转给引擎，原样把结果或错误带回来。
@@ -118,6 +140,7 @@ async fn engine_request(
         return Err(ErrorCode::Protocol.error_with(format!("界面不能直接调用 {method}")));
     }
     let params = params.unwrap_or_else(|| json!({}));
+    check_params(&method, &params)?;
     // 只为了记账看一眼 doc.close 的 docId，别的字段不碰。
     let closing = (method == method::DOC_CLOSE)
         .then(|| params.get("docId").and_then(Value::as_u64))
@@ -145,6 +168,44 @@ async fn open_document_dialog(
         Some(file) => shell.open(file.path()).await.map(Some),
         None => Ok(None),
     }
+}
+
+/// 弹“另存为”对话框（系统对话框自己会问要不要覆盖已有的文件）；用户选好了就让引擎完整重写到那里，取消返回 `null`。
+/// 没写扩展名时补上 `.pdf`。
+#[tauri::command]
+async fn save_document_as(
+    window: WebviewWindow,
+    shell: State<'_, Shell>,
+    doc_id: u32,
+) -> Result<Option<DocSaveResult>, RpcError> {
+    let current = shell.docs().into_iter().find(|doc| doc.doc_id == doc_id);
+    let mut dialog = rfd::AsyncFileDialog::new()
+        .set_title("另存为")
+        .add_filter("PDF 文档", &["pdf"])
+        .set_parent(&window);
+    if let Some(current) = &current {
+        dialog = dialog.set_file_name(&current.title);
+        if let Some(dir) = Path::new(&current.path).parent() {
+            dialog = dialog.set_directory(dir);
+        }
+    }
+    let Some(file) = dialog.save_file().await else {
+        return Ok(None);
+    };
+    let mut path = file.path().to_path_buf();
+    if path.extension().is_none() {
+        path.set_extension("pdf");
+    }
+    let value = shell
+        .supervisor
+        .request(
+            method::DOC_SAVE,
+            json!({ "docId": doc_id, "mode": "full", "path": path.to_string_lossy() }),
+        )
+        .await?;
+    let saved: DocSaveResult = serde_json::from_value(value)
+        .map_err(|e| ErrorCode::Internal.error_with(format!("doc.save 的返回值看不懂：{e}")))?;
+    Ok(Some(saved))
 }
 
 /// 已经开着的文档。界面启动（或重新加载）时调一次。
@@ -330,6 +391,11 @@ async fn forward_events(app: AppHandle, mut events: UnboundedReceiver<HostEvent>
                 if method == event::RENDER_TILE_READY {
                     push_tile(&app.state::<Shell>(), &mut params);
                 }
+                if method == event::DOC_SAVED
+                    && let Ok(saved) = serde_json::from_value::<DocSaved>(params.clone())
+                {
+                    app.state::<Shell>().saved(&saved);
+                }
                 (method, params)
             }
             HostEvent::Restarting => (event::ENGINE_RESTARTING.to_owned(), json!({})),
@@ -506,6 +572,7 @@ pub fn run(open_paths: Vec<PathBuf>) -> Result<()> {
         .invoke_handler(tauri::generate_handler![
             engine_request,
             open_document_dialog,
+            save_document_as,
             open_documents,
             recoverable_documents,
             recover_documents,
@@ -561,6 +628,17 @@ mod tests {
         ] {
             assert!(!forwardable(blocked), "{blocked}");
         }
+    }
+
+    #[test]
+    fn the_webview_may_save_but_not_choose_where() {
+        assert!(forwardable("doc.save"));
+        assert!(check_params("doc.save", &json!({ "docId": 1 })).is_ok());
+        assert!(check_params("doc.save", &json!({ "docId": 1, "mode": "full" })).is_ok());
+        let error = check_params("doc.save", &json!({ "docId": 1, "path": "C:\\x.pdf" }))
+            .expect_err("界面不能指定路径");
+        assert_eq!(error.code, ErrorCode::InvalidArgument.code());
+        assert!(check_params("edit.delete", &json!({ "path": "x" })).is_ok());
     }
 
     #[test]

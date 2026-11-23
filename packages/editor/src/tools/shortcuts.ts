@@ -29,6 +29,7 @@ export type CommandId =
   | 'file.new'
   | 'file.open'
   | 'file.save'
+  | 'file.saveAs'
   | 'file.print'
   | 'file.close'
   | 'window.togglePanels'
@@ -65,6 +66,7 @@ export const defaultShortcuts: readonly Shortcut[] = [
   { combo: 'Ctrl+N', command: 'file.new' },
   { combo: 'Ctrl+O', command: 'file.open' },
   { combo: 'Ctrl+S', command: 'file.save' },
+  { combo: 'Ctrl+Shift+S', command: 'file.saveAs' },
   { combo: 'Ctrl+P', command: 'file.print' },
   { combo: 'Ctrl+W', command: 'file.close' },
   { combo: 'Tab', command: 'window.togglePanels' },

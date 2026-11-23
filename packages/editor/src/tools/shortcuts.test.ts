@@ -39,6 +39,13 @@ describe('快捷键映射', () => {
     expect(defaultShortcutMap.resolve(key('Tab'))).toBe('window.togglePanels');
   });
 
+  it('《交互设计》第 8 节的保存、另存为', () => {
+    expect(defaultShortcutMap.resolve(key('s', { ctrlKey: true }))).toBe('file.save');
+    expect(defaultShortcutMap.resolve(key('S', { ctrlKey: true, shiftKey: true }))).toBe(
+      'file.saveAs',
+    );
+  });
+
   it('v1.0 的 7 个工具键都能映射到工具命令', () => {
     for (const tool of v1Tools) {
       expect(defaultShortcutMap.resolve(key(tool.key.toLowerCase()))).toBe(`tool.${tool.id}`);

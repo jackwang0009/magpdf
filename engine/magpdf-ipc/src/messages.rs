@@ -166,6 +166,8 @@ error_codes! {
     PasswordWrong = 2003, "E_PASSWORD_WRONG", "密码错误";
     FileDamaged = 2004, "E_FILE_DAMAGED", "文件损坏，自动修复也失败";
     Unsupported = 2005, "E_UNSUPPORTED", "不支持的文件";
+    WriteFailed = 2007, "E_WRITE_FAILED", "写文件失败";
+    SignedFullSave = 2008, "E_SIGNED_FULL_SAVE", "已签名的文档不能完整重写";
     VersionConflict = 3001, "E_VERSION_CONFLICT", "文档已经被别的操作修改";
     ObjectNotFound = 3002, "E_OBJECT_NOT_FOUND", "对象不存在";
     PageOverlayOnly = 3004, "E_PAGE_OVERLAY_ONLY", "页面保真校验未通过，只能叠加内容";
@@ -204,6 +206,7 @@ names! {
         SESSION_SHUTDOWN = "session.shutdown";
         DOC_OPEN = "doc.open";
         DOC_CLOSE = "doc.close";
+        DOC_SAVE = "doc.save";
         DOC_SNAPSHOT = "doc.snapshot";
         OBJ_LIST = "obj.list";
         OBJ_HIT_TEST = "obj.hitTest";
@@ -232,6 +235,8 @@ names! {
     pub mod event {
         /// 修改命令、撤销或重做成功之后，文档变了。
         DOC_CHANGED = "doc.changed";
+        /// 保存完了，参数见 [`DocSaved`]。
+        DOC_SAVED = "doc.saved";
         /// 瓦片的像素已写入共享内存，可以取回。
         RENDER_TILE_READY = "render.tileReady";
         /// 一页的保真校验有了结论，参数见 [`FidelityResult`]。
@@ -325,6 +330,60 @@ pub struct DocInfo {
 
 /// `doc.open` 的返回值。
 pub type DocOpenResult = DocInfo;
+
+/// 保存方式（《接口协议》6.1、方案 9.1）。原型只做了完整重写。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum SaveMode {
+    /// 增量保存。原型还没有做，请求会被拒绝。
+    Incremental,
+    /// 完整重写，去掉没有引用的对象。
+    Full,
+}
+
+/// `doc.save` 的参数。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct DocSaveParams {
+    pub doc_id: u32,
+    /// 省略时按 `full`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<SaveMode>,
+    /// 另存为的目标；省略时存回打开的文件。只有主进程能给（另存为的对话框由主进程弹），界面发来的
+    /// 请求带了它，主进程按参数不合法拒绝。存好之后文档的路径换成它。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+}
+
+/// `doc.save` 的返回值。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct DocSaveResult {
+    /// 存到了哪里。
+    pub path: String,
+    /// 文件名，界面的标签页用。
+    pub title: String,
+    /// 写出的字节数。
+    pub bytes: u64,
+    /// 去掉的没有引用的对象个数。
+    pub dropped: u32,
+}
+
+/// `doc.saved` 事件的参数（《接口协议》第 7 节）。另存为之后 `path`、`title` 是新的。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct DocSaved {
+    pub doc_id: u32,
+    pub path: String,
+    pub title: String,
+    pub mode: SaveMode,
+    /// 存的是第几版：界面拿它和自己知道的版本比，存完之后又改过的话仍然算没保存。
+    pub version: u32,
+}
 
 /// `doc.snapshot` 的参数（《接口协议》6.1）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

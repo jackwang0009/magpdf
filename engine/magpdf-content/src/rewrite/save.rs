@@ -496,8 +496,72 @@ fn content_stream(doc: &PdfDocument, original: u32, data: &[u8], compress: bool)
 /// 完整重写：把现存的对象照抄到一份新文件里（旧版本的字节、失效的对象都不带；流不重新压缩）。
 /// 只用来和增量更新比体积。
 pub fn save_full_rewrite(doc: &PdfDocument) -> Vec<u8> {
+    write_full(doc, |_| true).0
+}
+
+/// [`save_reachable`] 的结果。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompactedDocument {
+    pub bytes: Vec<u8>,
+    /// 写出的对象个数。
+    pub kept: usize,
+    /// 还在交叉引用表里、但从 trailer 顺着引用找不到而没有写的对象个数。
+    pub dropped: usize,
+}
+
+/// 完整重写，只带从 trailer 的 `/Root`、`/Info`、`/Encrypt` 顺着间接引用找得到的对象（方案 9.1
+/// “删除无用对象”）。对象号、代号不变，字符串和流的字节原样照抄，所以加密的文件照样解得开。
+///
+/// 用在 PDFium 完整存盘的结果上：PDFium 把文档里所有的对象都写出去，包括已经没有引用的——改过参数的
+/// 组件原来那一版、生成器从资源字典里摘掉的字体和图像——不去掉的话，旧内容留在文件里。
+pub fn save_reachable(doc: &PdfDocument) -> CompactedDocument {
+    let reachable = reachable_objects(doc);
+    let (bytes, kept, dropped) = write_full(doc, |number| reachable.contains(&number));
+    CompactedDocument {
+        bytes,
+        kept,
+        dropped,
+    }
+}
+
+/// 从 trailer 的 `/Root`、`/Info`、`/Encrypt` 出发，顺着间接引用找得到的对象号。不递归，嵌套再深也不会爆栈。
+pub fn reachable_objects(doc: &PdfDocument) -> BTreeSet<u32> {
+    let mut seen = BTreeSet::new();
+    let mut pending: Vec<u32> = Vec::new();
+    let trailer = doc.trailer_dict();
+    let push_refs = |root: &PdfObject, pending: &mut Vec<u32>| {
+        let mut inner: Vec<&PdfObject> = vec![root];
+        while let Some(object) = inner.pop() {
+            match object {
+                PdfObject::Ref(number, _) => pending.push(*number),
+                PdfObject::Array(items) => inner.extend(items.iter()),
+                PdfObject::Dict(dict) => inner.extend(dict.iter().map(|(_, v)| v)),
+                PdfObject::Stream(stream) => inner.extend(stream.dict.iter().map(|(_, v)| v)),
+                _ => {}
+            }
+        }
+    };
+    for key in [&b"Root"[..], b"Info", b"Encrypt"] {
+        if let Some(value) = trailer.get(key) {
+            push_refs(value, &mut pending);
+        }
+    }
+    while let Some(number) = pending.pop() {
+        if !seen.insert(number) {
+            continue;
+        }
+        if let Some(object) = doc.object(number) {
+            push_refs(&object, &mut pending);
+        }
+    }
+    seen
+}
+
+/// 照抄 `keep` 认可的现存对象，写成一份只有一节交叉引用表的新文件。返回（字节，写了几个，跳过几个）。
+fn write_full(doc: &PdfDocument, keep: impl Fn(u32) -> bool) -> (Vec<u8>, usize, usize) {
     let mut out = b"%PDF-1.7\n%\xE2\xE3\xCF\xD3\n".to_vec();
     let mut offsets: BTreeMap<u32, (usize, u16)> = BTreeMap::new();
+    let mut skipped = 0;
     for (number, generation, location) in doc.live_entries() {
         let Some(object) = doc.object(number) else {
             continue;
@@ -509,6 +573,10 @@ pub fn save_full_rewrite(doc: &PdfDocument) -> Vec<u8> {
                 Some(b"ObjStm" | b"XRef")
             )
         {
+            continue;
+        }
+        if !keep(number) {
+            skipped += 1;
             continue;
         }
         let generation = match location {
@@ -541,7 +609,7 @@ pub fn save_full_rewrite(doc: &PdfDocument) -> Vec<u8> {
     out.extend_from_slice(b"trailer\n");
     write_object(&mut out, &PdfObject::Dict(trailer));
     out.extend_from_slice(format!("\nstartxref\n{xref}\n%%EOF\n").as_bytes());
-    out
+    (out, offsets.len(), skipped)
 }
 
 #[cfg(test)]
@@ -562,6 +630,41 @@ mod tests {
             index,
             segments: segments.iter().map(|s| s.map(<[u8]>::to_vec)).collect(),
         }
+    }
+
+    /// 没有引用的对象（这里是 6、7 号：7 号只被同样没人引用的 6 号引用）不写；引用得到的照抄，
+    /// 对象号、代号不变；`/Info`、`/Encrypt` 引用的也算。
+    #[test]
+    fn save_reachable_drops_objects_nothing_refers_to() {
+        let raw = build(
+            &[
+                (1, CATALOG),
+                (2, PAGES),
+                (3, PAGE),
+                (4, STREAM),
+                (5, "<< /Producer (test) >>"),
+                (6, "<< /Orphan 7 0 R >>"),
+                (7, "<< /Length 6 >>\nstream\nsecret\nendstream"),
+                (8, "<< /Filter /Standard /V 1 /R 2 /O (o) /U (u) /P -4 >>"),
+            ],
+            "/Info 5 0 R /Encrypt 8 0 R",
+        );
+        let doc = PdfDocument::load(raw).unwrap();
+        assert_eq!(reachable_objects(&doc), BTreeSet::from([1, 2, 3, 4, 5, 8]));
+        let compacted = save_reachable(&doc);
+        assert_eq!((compacted.kept, compacted.dropped), (6, 2));
+        assert!(!compacted.bytes.windows(6).any(|w| w == b"secret"));
+        let reread = PdfDocument::load(compacted.bytes).unwrap();
+        assert!(reread.has_object(4) && reread.has_object(8));
+        assert!(!reread.has_object(6) && !reread.has_object(7));
+        assert_eq!(
+            reread.trailer_dict().get(b"Info"),
+            Some(&PdfObject::Ref(5, 0))
+        );
+        assert_eq!(
+            reread.trailer_dict().get(b"Encrypt"),
+            Some(&PdfObject::Ref(8, 0))
+        );
     }
 
     /// 重新打开，读出每一页拼接后的内容。

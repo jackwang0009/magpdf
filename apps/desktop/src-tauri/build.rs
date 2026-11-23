@@ -7,6 +7,7 @@ fn main() {
         tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new().commands(&[
             "engine_request",
             "open_document_dialog",
+            "save_document_as",
             "open_documents",
             "recoverable_documents",
             "recover_documents",

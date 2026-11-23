@@ -5,6 +5,9 @@ import type {
   CompUpdateParams,
   DocChanged,
   DocInfo,
+  DocSaveParams,
+  DocSaveResult,
+  DocSaved,
   DocSnapshot,
   DocSnapshotParams,
   EditDeleteParams,
@@ -59,7 +62,7 @@ export const FAKE_OVERLAY_REASON = '重新生成内容流后页面的画面变�
 
 interface FakeDocument {
   readonly docId: number;
-  readonly path: string;
+  path: string;
   version: number;
   readonly pages: FakePage[];
   /** 撤销栈：每一步记下受影响的页，以及怎么撤、怎么重做 */
@@ -176,6 +179,8 @@ export class FakeEngine {
         return this.transform(params as EditTransformParams);
       case METHOD.EDIT_DELETE:
         return this.remove(params as EditDeleteParams);
+      case METHOD.DOC_SAVE:
+        return this.save(params as DocSaveParams);
       case METHOD.COMP_PLACE:
         return this.place(params as CompPlaceParams);
       case METHOD.COMP_UPDATE:
@@ -309,6 +314,31 @@ export class FakeEngine {
         for (const [index, objects] of before) document.pages[index]!.objects = [...objects];
       },
     });
+  }
+
+  /** 下一次保存报这个错（测试用）。 */
+  saveError: RpcError | null = null;
+
+  /** 保存：记下存的是第几版，另存为时换路径；先推 `doc.saved` 再应答，和真引擎一样。 */
+  save(params: DocSaveParams): DocSaveResult {
+    const document = this.document(params.docId);
+    if (this.saveError) {
+      const error = this.saveError;
+      this.saveError = null;
+      throw error;
+    }
+    const path = params.path ?? document.path;
+    document.path = path;
+    const title = path.split('\\').pop() ?? '';
+    const saved: DocSaved = {
+      docId: document.docId,
+      path,
+      title,
+      mode: 'full',
+      version: document.version,
+    };
+    this.transport.emit(EVENT.DOC_SAVED, saved);
+    return { path, title, bytes: 1000, dropped: 0 };
   }
 
   /** 置入组件：只能叠加内容的页也能放。条码按 100 pt 宽算，左上角在 `at`。 */

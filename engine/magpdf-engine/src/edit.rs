@@ -274,6 +274,11 @@ impl<'lib> Session<'lib> {
         Ok(session)
     }
 
+    /// 记下打开文档时用的口令（文档是别处打开好交进来的时候）。保真校验的副本、保存后的自检要用同一口令重新打开。
+    pub fn remember_password(&mut self, password: Option<&str>) {
+        self.password = password.map(str::to_owned);
+    }
+
     /// 空文档，用来建测试页或以后的“新建”。
     pub fn create(lib: &'lib Library) -> Result<Self> {
         Ok(Self::from_document(lib, Document::create(lib)?))
@@ -592,6 +597,11 @@ impl<'lib> Session<'lib> {
         self.trim();
         self.version += 1;
         Ok((id, log.finish(self.version)))
+    }
+
+    /// 完整重写成一份新文件的字节（方案 9.1，见 [`crate::save`]）。不改文档，撤销记录照旧。
+    pub fn save_full(&self) -> std::result::Result<crate::save::Saved, crate::save::SaveError> {
+        crate::save::full_save(self.lib, &self.doc, self.password.as_deref())
     }
 
     /// 组件现在的参数。

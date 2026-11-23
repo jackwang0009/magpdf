@@ -10,4 +10,7 @@ mod plan;
 mod save;
 
 pub use plan::{EditSet, EditTarget, PageRewrite, RewriteError, plan_page};
-pub use save::{PageUpdate, SavedDocument, save_full_rewrite, save_incremental};
+pub use save::{
+    CompactedDocument, PageUpdate, SavedDocument, reachable_objects, save_full_rewrite,
+    save_incremental, save_reachable,
+};

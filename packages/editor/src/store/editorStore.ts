@@ -58,6 +58,8 @@ export interface EditorState {
   readonly collapsedPanels: readonly PanelId[];
   /** 在组件面板里点了、等着在页面上点一下放下去的组件；没有时为 null */
   readonly placing: PlaceableComponent | null;
+  /** 状态栏上的一句结果（如“已保存”，《交互设计》第 9 节），过几秒自己消失；没有时为 null */
+  readonly statusMessage: { readonly text: string; readonly at: number } | null;
 
   openDocument(snapshot: DocumentSnapshot, options?: { activate?: boolean }): void;
   /**
@@ -78,6 +80,7 @@ export interface EditorState {
   /** 模拟文档：改组件参数。 */
   updateComponent(id: string, objectId: string, values: Partial<ComponentValues>): void;
   setPlacing(kind: PlaceableComponent | null): void;
+  setStatusMessage(text: string | null): void;
   setTool(tool: ToolId): void;
   setToolOptions(options: Partial<ToolOptions>): void;
   setPointer(pointer: PointerInfo | null): void;
@@ -163,6 +166,7 @@ export function createEditorStore(): EditorStore {
       panelsHidden: false,
       collapsedPanels: STARTER_PANELS,
       placing: null,
+      statusMessage: null,
 
       openDocument(snapshot, options) {
         const state = get();
@@ -288,6 +292,10 @@ export function createEditorStore(): EditorStore {
 
       setPlacing(kind) {
         if (get().placing !== kind) set({ placing: kind });
+      },
+
+      setStatusMessage(text) {
+        set({ statusMessage: text === null ? null : { text, at: Date.now() } });
       },
 
       setTool(tool) {

@@ -36,10 +36,11 @@ export function MenuBar({ workspace, showRulers, showFrameStats }: MenuBarProps)
   const commands = useShellCommands();
   const [open, setOpen] = useState<string | null>(null);
   const barRef = useRef<HTMLElement>(null);
-  // 撤销记录在引擎里：只有引擎打开的文档能撤销，模拟文档没有
+  // 撤销记录在引擎里：只有引擎打开的文档能撤销、能保存，模拟文档不能
   const host = useEditorHost();
   const activeDocumentId = useEditorStore((s) => s.activeDocumentId);
   const canUndo = Boolean(activeDocumentId && host?.documentEditor(activeDocumentId));
+  const canSave = canUndo && Boolean(host?.saveDocument);
 
   const menus: Menu[] = [
     {
@@ -54,8 +55,8 @@ export function MenuBar({ workspace, showRulers, showFrameStats }: MenuBarProps)
         { id: 'open', label: t.menuItems.open, command: 'file.open' },
         { id: 'close', label: t.menuItems.close, action: 'closeDocument', command: 'file.close' },
         { id: 'sep2', label: '', separator: true },
-        { id: 'save', label: t.menuItems.save, disabled: true },
-        { id: 'saveAs', label: t.menuItems.saveAs, disabled: true },
+        { id: 'save', label: t.menuItems.save, command: 'file.save', disabled: !canSave },
+        { id: 'saveAs', label: t.menuItems.saveAs, command: 'file.saveAs', disabled: !canSave },
         { id: 'print', label: t.menuItems.print, disabled: true },
         { id: 'sep3', label: '', separator: true },
         { id: 'exit', label: t.menuItems.exit, disabled: true },

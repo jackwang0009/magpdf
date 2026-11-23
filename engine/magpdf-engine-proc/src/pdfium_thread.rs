@@ -12,6 +12,7 @@ use std::collections::{HashSet, VecDeque};
 use anyhow::{Context, Result};
 use magpdf_engine::component::{ComponentKind, ComponentSpec};
 use magpdf_engine::edit::{Change, EditError, HitMode, ObjectId, ObjectSummary, Session};
+use magpdf_engine::save::{SaveError, write_replacing};
 use magpdf_ipc::messages::DocInfo;
 use pdfium_sys::{
     Bitmap, Document, LayerFilter, Library, Matrix, PageSurface, PixelRect, RenderFlags,
@@ -38,6 +39,8 @@ pub enum EngineError {
     VersionConflict { current: u64, base: u64 },
     #[error(transparent)]
     Edit(#[from] EditError),
+    #[error(transparent)]
+    Save(#[from] SaveError),
 }
 
 /// 一条修改文档的操作。
@@ -210,7 +213,26 @@ pub enum Job {
         page_ids: Vec<u32>,
         reply: Reply<()>,
     },
+    /// 完整重写保存到 `path`（`None` 时存回打开的文件）。成功后文档的路径换成存到的地方。
+    Save {
+        doc_id: u32,
+        path: Option<String>,
+        reply: Reply<SaveOutcome>,
+    },
     Shutdown,
+}
+
+/// 保存的结果。
+#[derive(Debug, Clone)]
+pub struct SaveOutcome {
+    /// 保存之前文档的路径（另存为时和 `path` 不同）。
+    pub previous_path: String,
+    pub path: String,
+    pub title: String,
+    /// 存的是第几版。
+    pub version: u64,
+    pub bytes: u64,
+    pub dropped: usize,
 }
 
 /// PDFium 线程的句柄。
@@ -437,6 +459,20 @@ impl EngineHandle {
         .await
     }
 
+    /// 完整重写保存，`path` 为 `None` 时存回打开的文件。
+    pub async fn save(
+        &self,
+        doc_id: u32,
+        path: Option<String>,
+    ) -> std::result::Result<SaveOutcome, EngineError> {
+        self.ask(|reply| Job::Save {
+            doc_id,
+            path,
+            reply,
+        })
+        .await
+    }
+
     /// 马上校验这几页的保真度。结论不在返回值里，而是每页一条 [`Notice::Fidelity`]。
     pub async fn check_fidelity(
         &self,
@@ -559,6 +595,13 @@ impl PdfiumState {
             } => {
                 let _ = reply.send(self.check_fidelity(doc_id, &page_ids));
             }
+            Job::Save {
+                doc_id,
+                path,
+                reply,
+            } => {
+                let _ = reply.send(self.save(doc_id, path));
+            }
             Job::Shutdown => {}
         }
     }
@@ -643,19 +686,39 @@ impl PdfiumState {
         )?;
         let doc_id = self.next_doc_id;
         self.next_doc_id += 1;
-        let title = std::path::Path::new(&path)
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| path.clone());
+        let title = title_of(&path);
+        let mut session = Session::from_document(self.lib, doc);
+        session.remember_password(password);
         let entry = OpenDoc {
             doc_id,
             path,
             title,
-            session: Session::from_document(self.lib, doc),
+            session,
         };
         let info = info(&entry);
         self.docs.push(entry);
         Ok(info)
+    }
+
+    fn save(
+        &mut self,
+        doc_id: u32,
+        path: Option<String>,
+    ) -> std::result::Result<SaveOutcome, EngineError> {
+        let d = self.find_mut(doc_id)?;
+        let target = path.unwrap_or_else(|| d.path.clone());
+        let saved = d.session.save_full()?;
+        write_replacing(std::path::Path::new(&target), &saved.bytes).map_err(SaveError::Io)?;
+        let previous_path = std::mem::replace(&mut d.path, target);
+        d.title = title_of(&d.path);
+        Ok(SaveOutcome {
+            previous_path,
+            path: d.path.clone(),
+            title: d.title.clone(),
+            version: d.session.version(),
+            bytes: saved.bytes.len() as u64,
+            dropped: saved.dropped,
+        })
     }
 
     fn find(&self, doc_id: u32) -> std::result::Result<&OpenDoc, EngineError> {
@@ -861,6 +924,13 @@ struct OpenDoc {
     path: String,
     title: String,
     session: Session<'static>,
+}
+
+/// 标签页上显示的文件名。
+fn title_of(path: &str) -> String {
+    std::path::Path::new(path)
+        .file_name()
+        .map_or_else(|| path.to_owned(), |n| n.to_string_lossy().into_owned())
 }
 
 fn info(d: &OpenDoc) -> DocInfo {

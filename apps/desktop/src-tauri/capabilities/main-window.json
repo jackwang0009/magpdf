@@ -8,6 +8,7 @@
     "core:event:allow-unlisten",
     "allow-engine-request",
     "allow-open-document-dialog",
+    "allow-save-document-as",
     "allow-open-documents",
     "allow-recoverable-documents",
     "allow-recover-documents",

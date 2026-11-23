@@ -5,6 +5,7 @@
 pub mod component;
 pub mod edit;
 pub mod roundtrip;
+pub mod save;
 
 /// 同一进程只能有一个 PDFium `Library`。所有用到它的测试都先拿这把锁。
 #[cfg(test)]

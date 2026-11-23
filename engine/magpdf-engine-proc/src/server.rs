@@ -13,16 +13,18 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use magpdf_engine::component::{ComponentKind, ComponentProblem};
 use magpdf_engine::edit::{Change, EditError, HitMode, ObjectId, ObjectSummary};
+use magpdf_engine::save::SaveError;
 use magpdf_ipc::frame::{self, Incoming};
 use magpdf_ipc::messages::{
     self, BenchEngineParams, Check, CheckSeverity, Color, ColorSpace, CompPlaceParams,
     CompPlaceResult, CompUpdateParams, ComponentInfo, ComponentValues, DocChanged, DocCloseParams,
-    DocInfo, DocOpenParams, DocSnapshot, DocSnapshotParams, EchoParams, EditDeleteParams,
-    EditResult, EditSetStyleParams, EditTransformParams, ErrorCode, Fidelity, FidelityCheckParams,
-    FidelityResult, HelloParams, HelloResult, HistoryParams, JsonValue, LayerMode, OBJ_LIST_MAX,
-    ObjHitTestParams, ObjListParams, PageChange, PageInfo, PingParams, RenderTilesParams,
-    RenderTilesResult, Request, RequestId, Response, RoundtripParams, RoundtripResult, RpcError,
-    StallParams, TileCoord, TileFetchParams, TileFetchResult, method,
+    DocInfo, DocOpenParams, DocSaveParams, DocSaveResult, DocSaved, DocSnapshot, DocSnapshotParams,
+    EchoParams, EditDeleteParams, EditResult, EditSetStyleParams, EditTransformParams, ErrorCode,
+    Fidelity, FidelityCheckParams, FidelityResult, HelloParams, HelloResult, HistoryParams,
+    JsonValue, LayerMode, OBJ_LIST_MAX, ObjHitTestParams, ObjListParams, PageChange, PageInfo,
+    PingParams, RenderTilesParams, RenderTilesResult, Request, RequestId, Response,
+    RoundtripParams, RoundtripResult, RpcError, SaveMode, StallParams, TileCoord, TileFetchParams,
+    TileFetchResult, method,
 };
 use magpdf_ipc::shm::{self, Layout, MappedRegion};
 use magpdf_ipc::{PROTOCOL_VERSION, pipe, pump};
@@ -471,6 +473,46 @@ async fn handle_request(
                 let _ = recovery.save();
             }
             Ok(Some(frame::response_ok(id, &())))
+        }
+        method::DOC_SAVE => {
+            let p: DocSaveParams = decode(params)?;
+            if p.mode == Some(SaveMode::Incremental) {
+                return Err(ErrorCode::InvalidArgument
+                    .error_with("原型还不能增量保存，只能完整重写（mode: full）"));
+            }
+            let saved = engine
+                .engine
+                .save(p.doc_id, p.path)
+                .await
+                .map_err(map_engine_error)?;
+            if saved.path != saved.previous_path {
+                let keep_old = engine.doc_paths.lock().is_ok_and(|mut paths| {
+                    paths.insert(p.doc_id, saved.path.clone());
+                    paths.values().any(|other| *other == saved.previous_path)
+                });
+                if let Ok(mut recovery) = engine.recovery.lock() {
+                    recovery.rename(&saved.previous_path, &saved.path, keep_old);
+                    let _ = recovery.save();
+                }
+            }
+            engine.event_to(
+                out,
+                messages::event::DOC_SAVED,
+                &DocSaved {
+                    doc_id: p.doc_id,
+                    path: saved.path.clone(),
+                    title: saved.title.clone(),
+                    mode: SaveMode::Full,
+                    version: wire_version(saved.version),
+                },
+            );
+            let result = DocSaveResult {
+                path: saved.path,
+                title: saved.title,
+                bytes: saved.bytes,
+                dropped: u32::try_from(saved.dropped).unwrap_or(u32::MAX),
+            };
+            Ok(Some(frame::response_ok(id, &result)))
         }
         method::DOC_SNAPSHOT => {
             let p: DocSnapshotParams = decode(params)?;
@@ -973,6 +1015,12 @@ fn map_engine_error(e: crate::pdfium_thread::EngineError) -> RpcError {
     if let EngineError::Edit(EditError::Component(problem)) = &e {
         return comp_invalid(problem);
     }
+    if let EngineError::Save(SaveError::Io(io)) = &e {
+        // 给用户看的说法放在 message 里（界面直接显示），原始的系统错误放在 detail 里
+        let mut error = RpcError::new(ErrorCode::WriteFailed, write_failure(io));
+        error.data = ErrorCode::WriteFailed.error_with(io.to_string()).data;
+        return error;
+    }
     let code = match &e {
         EngineError::NoDocument { .. } | EngineError::NoPage { .. } => ErrorCode::InvalidArgument,
         EngineError::Open {
@@ -982,6 +1030,9 @@ fn map_engine_error(e: crate::pdfium_thread::EngineError) -> RpcError {
         EngineError::Render(_) => ErrorCode::Internal,
         EngineError::VersionConflict { .. } => ErrorCode::VersionConflict,
         EngineError::Edit(edit) => edit_error_code(edit),
+        EngineError::Save(SaveError::Signed) => ErrorCode::SignedFullSave,
+        EngineError::Save(SaveError::Io(_)) => ErrorCode::WriteFailed,
+        EngineError::Save(SaveError::Pdfium(_) | SaveError::SelfCheck) => ErrorCode::Internal,
     };
     code.error_with(e.to_string())
 }
@@ -999,6 +1050,22 @@ fn edit_error_code(error: &EditError) -> ErrorCode {
         | EditError::NotComponent(_) => ErrorCode::InvalidArgument,
         EditError::Component(_) => ErrorCode::CompInvalid,
         EditError::Pdfium(_) | EditError::NoFill => ErrorCode::Internal,
+    }
+}
+
+/// 写文件失败的原因，按《交互设计》第 9 节的写法给用户看（不含路径）。
+fn write_failure(error: &std::io::Error) -> String {
+    // Windows 的 ERROR_SHARING_VIOLATION、ERROR_LOCK_VIOLATION
+    if matches!(error.raw_os_error(), Some(32 | 33)) {
+        return "文件正被其他程序占用。请关闭该程序后重试，或另存为新文件".to_owned();
+    }
+    match error.kind() {
+        std::io::ErrorKind::PermissionDenied => {
+            "没有写入权限，或者文件正被其他程序占用。请另存为新文件".to_owned()
+        }
+        std::io::ErrorKind::NotFound => "保存的位置不存在".to_owned(),
+        std::io::ErrorKind::StorageFull => "磁盘空间不足".to_owned(),
+        _ => format!("写文件失败：{error}"),
     }
 }
 

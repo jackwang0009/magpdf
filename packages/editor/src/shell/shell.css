@@ -246,6 +246,9 @@
 .mg-status-pointer {
   font-family: var(--mg-mono-font-family);
 }
+.mg-status-message {
+  color: var(--mg-success);
+}
 
 /* ---- 工具栏（顶部横排，在 .mg-topbar 行内） ---- */
 .mg-toolbar {

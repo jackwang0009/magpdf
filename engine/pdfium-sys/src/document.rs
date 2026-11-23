@@ -111,7 +111,8 @@ impl<'lib> Document<'lib> {
         Self::load_shared(lib, Arc::new(data), password)
     }
 
-    fn load_shared(
+    /// 从别人也拿着的一块数据打开，不复制（比如保存时先打开写出来的字节自检，再把同一块字节写进文件）。
+    pub fn load_shared(
         _lib: &'lib Library,
         data: Arc<Vec<u8>>,
         password: Option<&str>,
@@ -203,6 +204,13 @@ impl<'lib> Document<'lib> {
     pub fn page_count(&self) -> usize {
         // SAFETY: handle 有效。
         let n = unsafe { raw::FPDF_GetPageCount(self.handle) };
+        usize::try_from(n).unwrap_or(0)
+    }
+
+    /// 文档里的数字签名个数（`FPDF_GetSignatureCount`：表单里值为签名字典的签名域）。完整重写会让签名失效（方案 9.2）。
+    pub fn signature_count(&self) -> usize {
+        // SAFETY: handle 有效。
+        let n = unsafe { raw::FPDF_GetSignatureCount(self.handle) };
         usize::try_from(n).unwrap_or(0)
     }
 

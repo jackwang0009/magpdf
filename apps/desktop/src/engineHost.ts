@@ -1,7 +1,7 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { EngineSession, editorStore } from '@magpdf/editor';
 import type { RecoverableDocument } from '@magpdf/editor';
-import type { DocInfo } from '@magpdf/protocol';
+import type { DocInfo, DocSaveResult } from '@magpdf/protocol';
 import { TauriTransport } from './tauriTransport';
 
 /**
@@ -23,6 +23,7 @@ export function createEngineHost(): EngineSession | null {
     listDocuments: () => invoke<DocInfo[]>('open_documents'),
     recoverableDocuments: () => invoke<RecoverableDocument[]>('recoverable_documents'),
     recoverDocuments: (ids) => invoke<DocInfo[]>('recover_documents', { ids }),
+    saveDocumentAs: (docId) => invoke<DocSaveResult | null>('save_document_as', { docId }),
   });
   session.attach().catch((error: unknown) => console.error('接上已打开的文档失败', error));
   return session;

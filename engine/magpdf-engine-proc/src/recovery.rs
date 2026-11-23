@@ -81,6 +81,21 @@ impl RecoveryFile {
         self.state.docs.retain(|d| d.path != path);
     }
 
+    /// 文档另存到了 `to`：以后恢复的是新文件，视图照旧。`keep_old` 为真时（同一个文件还开着别的 docId）
+    /// 原来那一条也留着。
+    pub fn rename(&mut self, from: &str, to: &str, keep_old: bool) {
+        let Some(old) = self.state.docs.iter().find(|d| d.path == from).cloned() else {
+            return;
+        };
+        if !keep_old {
+            self.remove(from);
+        }
+        self.upsert(DocRecovery {
+            path: to.to_owned(),
+            ..old
+        });
+    }
+
     /// 落盘：写临时文件后替换，避免写到一半被杀留下半个文件。
     pub fn save(&mut self) -> Result<(), RecoveryError> {
         self.state.revision += 1;

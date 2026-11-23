@@ -878,6 +878,130 @@ async fn components_are_placed_listed_updated_and_undone_over_the_pipe() {
     assert_eq!(restored, before);
 }
 
+/// 保存（《接口协议》6.1 `doc.save`，原型只有完整重写）：存回原文件、另存为、事件、恢复文件跟着换路径、出错。
+#[tokio::test]
+async fn documents_are_saved_in_place_and_saved_as_a_new_file() {
+    let dir = std::env::temp_dir().join(format!("magpdf-save-e2e-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let original = dir.join("提单.pdf");
+    std::fs::copy(sample("freight-bl-composite.pdf"), &original).unwrap();
+    let before = std::fs::read(&original).unwrap();
+    let path = original.to_string_lossy().into_owned();
+
+    let mut engine = Engine::start(None).await;
+    engine.hello().await;
+    let doc = engine.call(method::DOC_OPEN, json!({ "path": path })).await;
+    let doc_id = doc["docId"].as_u64().unwrap();
+    let objects = engine.objects(doc_id).await.len();
+    let placed = engine
+        .call(
+            method::COMP_PLACE,
+            json!({
+                "docId": doc_id, "baseVersion": 0, "pageId": 0,
+                "type": "code128", "params": { "content": "BL-0001" }, "at": [100, 700],
+            }),
+        )
+        .await;
+    let comp_id = placed["compId"].as_u64().unwrap();
+    engine.event(event::DOC_CHANGED).await;
+
+    // 存回原文件
+    let saved = engine
+        .call(method::DOC_SAVE, json!({ "docId": doc_id }))
+        .await;
+    assert_eq!(saved["path"], path);
+    assert_eq!(saved["title"], "提单.pdf");
+    let (_, event) = engine.event(event::DOC_SAVED).await;
+    assert_eq!(
+        event,
+        json!({ "docId": doc_id, "path": path, "title": "提单.pdf", "mode": "full", "version": 1 })
+    );
+    let on_disk = std::fs::read(&original).unwrap();
+    assert_ne!(on_disk, before);
+    assert_eq!(saved["bytes"], on_disk.len());
+    let names: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    assert_eq!(names.len(), 1, "不留临时文件：{names:?}");
+
+    // 存出来的文件再打开一份：组件在，参数在
+    let reopened = engine.call(method::DOC_OPEN, json!({ "path": path })).await;
+    let again = engine.objects(reopened["docId"].as_u64().unwrap()).await;
+    assert_eq!(again.len(), objects + 1);
+    assert_eq!(
+        again.last().unwrap()["comp"]["params"]["content"],
+        "BL-0001"
+    );
+
+    // 改参数之后另存为：新文件里是新内容，原文件不动；文档的路径换成新的，恢复文件也跟着换
+    engine
+        .edit(
+            method::COMP_UPDATE,
+            json!({ "docId": doc_id, "baseVersion": 1, "compId": comp_id, "params": { "content": "BL-0002" } }),
+        )
+        .await;
+    let copy = dir.join("提单-改.pdf").to_string_lossy().into_owned();
+    let saved = engine
+        .call(
+            method::DOC_SAVE,
+            json!({ "docId": doc_id, "mode": "full", "path": copy }),
+        )
+        .await;
+    assert_eq!(
+        (&saved["path"], &saved["title"]),
+        (&json!(copy), &json!("提单-改.pdf"))
+    );
+    let (_, event) = engine.event(event::DOC_SAVED).await;
+    assert_eq!(
+        (&event["path"], &event["version"]),
+        (&json!(copy), &json!(2))
+    );
+    assert_eq!(
+        std::fs::read(&original).unwrap(),
+        on_disk,
+        "另存为不动原文件"
+    );
+    let copied = engine.call(method::DOC_OPEN, json!({ "path": copy })).await;
+    let in_copy = engine.objects(copied["docId"].as_u64().unwrap()).await;
+    assert_eq!(
+        in_copy.last().unwrap()["comp"]["params"]["content"],
+        "BL-0002"
+    );
+    let recovered: Vec<_> = engine.recovery_state()["docs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["path"].as_str().unwrap().to_owned())
+        .collect();
+    assert!(recovered.contains(&copy), "{recovered:?}");
+
+    // 增量保存还没有做；存不进去的地方报 E_WRITE_FAILED，原因可以直接显示
+    let incremental = engine
+        .call_err(
+            method::DOC_SAVE,
+            json!({ "docId": doc_id, "mode": "incremental" }),
+        )
+        .await;
+    assert_eq!(incremental["code"], ErrorCode::InvalidArgument.code());
+    let nowhere = dir
+        .join("没有这个目录")
+        .join("a.pdf")
+        .to_string_lossy()
+        .into_owned();
+    let failed = engine
+        .call_err(
+            method::DOC_SAVE,
+            json!({ "docId": doc_id, "path": nowhere }),
+        )
+        .await;
+    assert_eq!(failed["code"], ErrorCode::WriteFailed.code(), "{failed}");
+    assert_eq!(failed["message"], "保存的位置不存在");
+
+    drop(engine);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 impl Engine {
     /// 已经读到、还没被取走的 `fidelity.result` 有几条。
     fn buffered_fidelity_results(&self) -> usize {

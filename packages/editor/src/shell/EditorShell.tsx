@@ -240,6 +240,13 @@ export function EditorShell({
         case 'file.close':
           closeActiveDocument();
           return true;
+        case 'file.save':
+        case 'file.saveAs': {
+          // 模拟文档存不了；按键照样算处理过，免得落到 WebView2 自己的“保存网页”上
+          const id = store.getState().activeDocumentId;
+          if (id && host?.saveDocument) void host.saveDocument(id, command === 'file.saveAs');
+          return true;
+        }
         default:
           break;
       }

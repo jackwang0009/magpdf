@@ -6,6 +6,9 @@ import type {
   DocChanged,
   DocCloseParams,
   DocInfo,
+  DocSaveParams,
+  DocSaveResult,
+  DocSaved,
   DocSnapshot,
   DocSnapshotParams,
   EditDeleteParams,
@@ -64,6 +67,11 @@ export interface EngineSessionOptions {
   readonly recoverableDocuments?: () => Promise<readonly RecoverableDocument[]>;
   /** 重新打开选中的那几份，返回打开了的；之后主进程不再报可恢复的文档。 */
   readonly recoverDocuments?: (ids: readonly string[]) => Promise<readonly DocInfo[]>;
+  /**
+   * 另存为：主进程弹对话框，让引擎存到用户选的地方；用户取消时返回 null。路径由主进程经手，界面不传路径。
+   * 不给就没有另存为。
+   */
+  readonly saveDocumentAs?: (docId: number) => Promise<DocSaveResult | null>;
 }
 
 /** 一页在界面这边的记录。 */
@@ -85,8 +93,9 @@ interface EnginePage {
 interface EngineDocument {
   /** 界面里的文档 id。引擎重启后 `docId` 会变，它不变 */
   readonly id: string;
-  readonly path: string;
-  readonly title: string;
+  /** 另存为之后换成新的 */
+  path: string;
+  title: string;
   /** 引擎里的文档编号；引擎重启期间是 null */
   docId: number | null;
   /** 引擎里这份文档的版本号（界面知道的最新值），修改命令的 `baseVersion` 用它 */
@@ -180,6 +189,46 @@ export class EngineSession implements EditorHost {
 
   documentEditor(documentId: string): DocumentEditor | undefined {
     return this.documents.get(documentId)?.editor;
+  }
+
+  /**
+   * 保存（方案 9.1；原型只有完整重写）。排在这份文档的修改命令后面，等它们都有了结果再存。另存为时主进程弹对话框。
+   * 成功了状态栏写“已保存”，文档的路径、标题、“已修改”标记随 `doc.saved` 更新；失败弹提示。不会拒绝。
+   */
+  saveDocument(documentId: string, saveAs: boolean): Promise<void> {
+    const document = this.documents.get(documentId);
+    const saveDocumentAs = this.options.saveDocumentAs;
+    if (!document || (saveAs && !saveDocumentAs)) return Promise.resolve();
+    const done = new Promise<void>((resolve) => {
+      this.enqueue(document, [], async () => {
+        try {
+          const docId = document.docId;
+          if (docId === null) {
+            const restarting: RpcError = {
+              code: ERROR_CODE.E_ENGINE_RESTARTED,
+              message: '处理过程中引擎重启',
+            };
+            throw restarting;
+          }
+          const params: DocSaveParams = { docId };
+          const result = saveAs
+            ? await saveDocumentAs!(docId)
+            : await this.transport.request<DocSaveResult>(METHOD.DOC_SAVE, params);
+          // 另存为时用户取消了
+          if (!result) return;
+          this.store.getState().setStatusMessage(format(t.host.saved, { name: result.title }));
+        } catch (error) {
+          const reason =
+            isRpcError(error) && error.code === ERROR_CODE.E_SIGNED_FULL_SAVE
+              ? t.host.signedNoSave
+              : describeError(error);
+          this.notify('error', format(t.host.saveFailed, { name: document.title, reason }));
+        } finally {
+          resolve();
+        }
+      });
+    });
+    return done;
   }
 
   onNotice(listener: (notice: HostNotice) => void): () => void {
@@ -669,6 +718,9 @@ export class EngineSession implements EditorHost {
       case EVENT.FIDELITY_RESULT:
         this.onFidelityResult(event.params as FidelityResult);
         break;
+      case EVENT.DOC_SAVED:
+        this.onDocumentSaved(event.params as DocSaved);
+        break;
       case EVENT.ENGINE_RESTARTING:
         // 旧的 docId 全部作废，等 engine.restored 给新的（《接口协议》5.1）
         for (const document of this.documents.values()) document.docId = null;
@@ -720,6 +772,22 @@ export class EngineSession implements EditorHost {
       const page = document.pages[index];
       if (page && (page.loaded || page.loading !== 0)) void this.loadPage(document, index);
     }
+  }
+
+  /**
+   * 存好了：另存为之后路径和标题是新的。存的正是界面知道的最新一版时去掉“已修改”标记；存的时候又改过的话
+   * 仍然算没保存。
+   */
+  private onDocumentSaved(saved: DocSaved): void {
+    const document = this.find(saved.docId);
+    if (!document) return;
+    document.path = saved.path;
+    document.title = saved.title;
+    this.mutate(document, (snapshot) => ({
+      ...snapshot,
+      name: saved.title,
+      dirty: document.version > saved.version,
+    }));
   }
 
   /** 一页的保真校验有了结论（方案 2.3）。 */

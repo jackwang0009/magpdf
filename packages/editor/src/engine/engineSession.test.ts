@@ -1,11 +1,12 @@
-import { EVENT, METHOD, OBJ_LIST_MAX } from '@magpdf/protocol';
+import { ERROR_CODE, EVENT, METHOD, OBJ_LIST_MAX } from '@magpdf/protocol';
 import type { DocInfo, EditTransformParams } from '@magpdf/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { rectToRectMatrix, translationMatrix } from '../document/pageSpace';
-import { t } from '../i18n';
+import { format, t } from '../i18n';
 import type { HostNotice } from '../shell/editorHost';
 import { createEditorStore } from '../store/editorStore';
 import { EngineSession } from './engineSession';
+import type { EngineSessionOptions } from './engineSession';
 import { FAKE_OVERLAY_REASON, FakeEngine } from './fakeEngine';
 import type { FakeObject, FakePage } from './fakeEngine';
 
@@ -50,7 +51,7 @@ function fourPages(): FakePage[] {
   ];
 }
 
-function setup() {
+function setup(extra: Partial<EngineSessionOptions> = {}) {
   const engine = new FakeEngine();
   const store = createEditorStore();
   /** 主进程知道的、已经开着的文档 */
@@ -65,6 +66,7 @@ function setup() {
         ? Promise.reject(dialog.result)
         : Promise.resolve(dialog.result as DocInfo | null),
     listDocuments: () => Promise.resolve(open),
+    ...extra,
   });
   const notices: HostNotice[] = [];
   session.onNotice((notice) => notices.push(notice));
@@ -86,8 +88,8 @@ async function flush(): Promise<void> {
 }
 
 /** 接进一份四页的文档，等前两页的对象到齐。 */
-async function attached() {
-  const context = setup();
+async function attached(extra: Partial<EngineSessionOptions> = {}) {
+  const context = setup(extra);
   context.open.push(context.engine.open('提单.pdf', fourPages()));
   await context.session.attach();
   await flush();
@@ -730,6 +732,84 @@ describe('EngineSession：组件（P0 原型）', () => {
     await flush();
     expect(objects(0).map((o) => o.id)).toEqual(['p0-1', 'p0-2', 'p0-3']);
     expect(store.getState().documents['engine-1']!.selection).toEqual([]);
+  });
+});
+
+describe('EngineSession：保存', () => {
+  it('等在途的修改有了结果再存；存完去掉“已修改”标记，状态栏写“已保存”', async () => {
+    const { engine, editor, session, store, snapshot } = await attached();
+    editor.transformObjects([{ page: 0, ids: ['p0-2'], matrix: translationMatrix(10, 0) }]);
+    const saving = session.saveDocument('engine-1', false);
+    await saving;
+    await flush();
+    expect(engine.transport.sent(METHOD.DOC_SAVE)).toEqual([{ docId: 1 }]);
+    // 存的时候那条修改已经做完了：存的是第 1 版
+    expect(engine.version(1)).toBe(1);
+    expect(snapshot()).toMatchObject({ dirty: false, version: 1, name: '提单.pdf' });
+    expect(store.getState().statusMessage?.text).toBe(format(t.host.saved, { name: '提单.pdf' }));
+
+    // 存的那一版比界面知道的旧（存完又改过）：仍然算没保存
+    editor.transformObjects([{ page: 0, ids: ['p0-2'], matrix: translationMatrix(10, 0) }]);
+    await flush();
+    engine.transport.emit(EVENT.DOC_SAVED, {
+      docId: 1,
+      path: 'C:\\docs\\提单.pdf',
+      title: '提单.pdf',
+      mode: 'full',
+      version: 1,
+    });
+    expect(snapshot().dirty).toBe(true);
+  });
+
+  it('另存为：对话框是主进程的，取消什么也不做；存好之后标签页换成新文件名', async () => {
+    const answer: { path: string | null } = { path: null };
+    const saveDocumentAs = vi.fn((docId: number) =>
+      Promise.resolve(
+        answer.path === null
+          ? null
+          : context.engine.save({ docId, mode: 'full', path: answer.path }),
+      ),
+    );
+    const context = await attached({ saveDocumentAs });
+    const { session, snapshot, store, notices } = context;
+    await session.saveDocument('engine-1', true);
+    expect(saveDocumentAs).toHaveBeenCalledWith(1);
+    expect(snapshot().name).toBe('提单.pdf');
+    expect(store.getState().statusMessage).toBeNull();
+
+    answer.path = 'C:\\docs\\提单-改.pdf';
+    await session.saveDocument('engine-1', true);
+    await flush();
+    expect(snapshot()).toMatchObject({ name: '提单-改.pdf', dirty: false });
+    expect(store.getState().statusMessage?.text).toBe(
+      format(t.host.saved, { name: '提单-改.pdf' }),
+    );
+    expect(notices).toEqual([]);
+  });
+
+  it('存不进去：弹提示说原因；已签名的文档说明为什么不能存', async () => {
+    const { engine, editor, session, snapshot, notices } = await attached();
+    editor.deleteObjects(['p0-3']);
+    await flush();
+    engine.saveError = {
+      code: ERROR_CODE.E_WRITE_FAILED,
+      message: '文件正被其他程序占用。请关闭该程序后重试，或另存为新文件',
+    };
+    await session.saveDocument('engine-1', false);
+    expect(notices).toEqual([
+      {
+        kind: 'error',
+        message: format(t.host.saveFailed, {
+          name: '提单.pdf',
+          reason: '文件正被其他程序占用。请关闭该程序后重试，或另存为新文件',
+        }),
+      },
+    ]);
+    expect(snapshot().dirty).toBe(true);
+
+    engine.saveError = { code: ERROR_CODE.E_SIGNED_FULL_SAVE, message: '已签名的文档不能完整重写' };
+    await session.saveDocument('engine-1', false);
+    expect(notices[1]!.message).toContain(t.host.signedNoSave);
   });
 });
 

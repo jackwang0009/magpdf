@@ -1,9 +1,13 @@
+import { useEffect } from 'react';
 import { componentName } from '../document/components';
 import { format, t } from '../i18n';
 import { activeDocument, useEditorStore } from '../store/editorStore';
 import { ptToMm } from '../geometry';
 import { formatMs } from '../canvas/frameStats';
 import { useShellCommands } from './shellContext';
+
+/** 状态栏上的结果提示留多久（ms）。 */
+const STATUS_MESSAGE_MS = 4000;
 
 /** 状态栏 22px：页码、页面尺寸、光标坐标（mm）、选区数量、帧时间（开发开关）。 */
 export function StatusBar() {
@@ -14,6 +18,14 @@ export function StatusBar() {
   const stats = useEditorStore((s) => s.frameStats);
   const running = useEditorStore((s) => s.benchmarkRunning);
   const placing = useEditorStore((s) => s.placing);
+  const statusMessage = useEditorStore((s) => s.statusMessage);
+  const setStatusMessage = useEditorStore((s) => s.setStatusMessage);
+  // 结果提示（“已保存”）留几秒就消失
+  useEffect(() => {
+    if (!statusMessage) return undefined;
+    const timer = setTimeout(() => setStatusMessage(null), STATUS_MESSAGE_MS);
+    return () => clearTimeout(timer);
+  }, [statusMessage, setStatusMessage]);
 
   const pageIndex = doc?.currentPage ?? 0;
   const page = doc?.snapshot.pages[pageIndex];
@@ -56,6 +68,11 @@ export function StatusBar() {
           : t.documents.none}
       </span>
       <span className="mg-status-grow" />
+      {statusMessage ? (
+        <span className="mg-status-message" role="status">
+          {statusMessage.text}
+        </span>
+      ) : null}
       {selectionText ? <span>{selectionText}</span> : null}
       {pointer ? (
         <span className="mg-status-pointer">
