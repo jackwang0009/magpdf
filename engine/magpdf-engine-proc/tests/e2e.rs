@@ -49,6 +49,11 @@ impl Drop for Engine {
 impl Engine {
     /// 启动引擎并连上管道。`recovery` 为 `None` 时用一个本测试独有的恢复文件。
     async fn start(recovery: Option<PathBuf>) -> Self {
+        Self::start_with(recovery, &[]).await
+    }
+
+    /// 同上，另给引擎进程设几个环境变量。
+    async fn start_with(recovery: Option<PathBuf>, envs: &[(&str, &str)]) -> Self {
         let token = pipe::random_token(8).unwrap();
         let pipe_name = pipe::pipe_name(std::process::id(), &token);
         let session = format!("e2e-{}-{token}", std::process::id());
@@ -59,6 +64,7 @@ impl Engine {
             .arg("--recovery")
             .arg(&recovery)
             .env("MAGPDF_LOG", "warn")
+            .envs(envs.iter().copied())
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::inherit())
@@ -1293,6 +1299,99 @@ async fn a_new_engine_reopens_documents_from_the_recovery_file() {
     let doc_id = restored[0]["docId"].as_u64().unwrap();
     let (_, ready) = second.render_tile(doc_id, 1.0, 0, 0).await;
     assert_eq!(ready["docId"], doc_id);
+}
+
+/// 自动备份（方案 9.3）：有没保存的修改的文档，空闲时过一个间隔就完整写一份备份，记进恢复文件；
+/// 引擎崩溃后重启从备份打开（没保存的修改还在，路径仍是原文件，标成没保存），原文件一直没动；
+/// 存好之后备份作废、文件删掉。
+#[tokio::test]
+async fn unsaved_changes_survive_an_engine_crash_through_the_automatic_backup() {
+    let dir = std::env::temp_dir().join(format!(
+        "magpdf-backup-e2e-{}-{}",
+        std::process::id(),
+        pipe::random_token(6).unwrap()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let original = dir.join("提单.pdf");
+    std::fs::copy(sample("freight-bl-composite.pdf"), &original).unwrap();
+    let before = std::fs::read(&original).unwrap();
+    let path = original.to_string_lossy().into_owned();
+    let recovery = dir.join("session-e2e.json");
+
+    let mut first = Engine::start_with(
+        Some(recovery.clone()),
+        &[("MAGPDF_RECOVERY_INTERVAL_MS", "200")],
+    )
+    .await;
+    first.hello().await;
+    let doc = first.call(method::DOC_OPEN, json!({ "path": path })).await;
+    let doc_id = doc["docId"].as_u64().unwrap();
+    assert_eq!(doc["unsaved"], false);
+    first
+        .call(
+            method::COMP_PLACE,
+            json!({
+                "docId": doc_id, "baseVersion": 0, "pageId": 0,
+                "type": "code128", "params": { "content": "BACKUP-1" }, "at": [100, 700],
+            }),
+        )
+        .await;
+    first.event(event::DOC_CHANGED).await;
+    // 等自动备份写好、记进恢复文件
+    let started = Instant::now();
+    let snapshot = loop {
+        let state = first.recovery_state();
+        if let Some(file) = state["docs"][0]["snapshot"].as_str()
+            && std::path::Path::new(file).is_file()
+        {
+            break file.to_owned();
+        }
+        assert!(
+            started.elapsed() < STEP_TIMEOUT,
+            "自动备份没有写出来：{state}"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    assert!(
+        snapshot.starts_with(&*dir.to_string_lossy()),
+        "备份放在恢复文件旁边：{snapshot}"
+    );
+
+    // 引擎崩溃：恢复文件和备份留下，原文件没动
+    first.child.kill().unwrap();
+    first.child.wait().unwrap();
+    first.recovery = PathBuf::new();
+    drop(first);
+    assert_eq!(std::fs::read(&original).unwrap(), before);
+
+    let mut second = Engine::start(Some(recovery.clone())).await;
+    let hello = second.hello().await;
+    let restored = &hello["restored"][0];
+    assert_eq!(
+        (&restored["path"], &restored["unsaved"]),
+        (&json!(path), &json!(true)),
+        "{hello}"
+    );
+    let doc_id = restored["docId"].as_u64().unwrap();
+    let objects = second.objects(doc_id).await;
+    assert_eq!(
+        objects.last().unwrap()["comp"]["params"]["content"],
+        "BACKUP-1"
+    );
+
+    // 存好了：存回原文件，备份作废
+    second
+        .call(method::DOC_SAVE, json!({ "docId": doc_id }))
+        .await;
+    assert_ne!(std::fs::read(&original).unwrap(), before);
+    assert!(second.recovery_state()["docs"][0].get("snapshot").is_none());
+    assert!(
+        !std::path::Path::new(&snapshot).exists(),
+        "存好之后备份删掉了"
+    );
+
+    drop(second);
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[tokio::test]

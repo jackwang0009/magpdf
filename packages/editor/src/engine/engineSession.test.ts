@@ -245,7 +245,8 @@ describe('EngineSession：打开、翻页、关闭', () => {
 
     const engine = new FakeEngine();
     const store = createEditorStore();
-    const reopened = engine.open('提单.pdf', [plainPage(20)]);
+    // 从自动备份重新打开的：一打开就有没保存的修改
+    const reopened = engine.open('提单.pdf', [plainPage(20)], true);
     const asked: (readonly string[])[] = [];
     const session = new EngineSession({
       transport: engine.transport,
@@ -254,8 +255,8 @@ describe('EngineSession：打开、翻页、关闭', () => {
       listDocuments: () => Promise.resolve([]),
       recoverableDocuments: () =>
         Promise.resolve([
-          { id: '0', name: '提单.pdf', modifiedMs: 1 },
-          { id: '1', name: '合同.pdf', modifiedMs: 2 },
+          { id: '0', name: '提单.pdf', modifiedMs: 1, unsaved: true },
+          { id: '1', name: '合同.pdf', modifiedMs: 2, unsaved: false },
         ]),
       recoverDocuments: (ids) => {
         asked.push(ids);
@@ -267,6 +268,7 @@ describe('EngineSession：打开、翻页、关闭', () => {
     await flush();
     expect(asked).toEqual([['0']]);
     expect(store.getState().documentOrder).toEqual(['engine-1']);
+    expect(store.getState().documents['engine-1']!.snapshot.dirty).toBe(true);
     await session.recovery!.resolve([]);
     expect(asked).toEqual([['0'], []]);
     expect(store.getState().documentOrder).toEqual(['engine-1']);
@@ -732,6 +734,23 @@ describe('EngineSession：组件（P0 原型）', () => {
     await flush();
     expect(objects(0).map((o) => o.id)).toEqual(['p0-1', 'p0-2', 'p0-3']);
     expect(store.getState().documents['engine-1']!.selection).toEqual([]);
+  });
+});
+
+describe('EngineSession：自动备份（方案 9.3）', () => {
+  it('引擎重启后从自动备份打开：标成没保存，提示说修改从备份里恢复了', async () => {
+    const { engine, editor, notices, snapshot } = await attached();
+    editor.deleteObjects(['p0-3']);
+    await flush();
+    engine.transport.emit(EVENT.ENGINE_RESTARTING, {});
+    const restored = engine.restart([{ name: '提单.pdf', pages: fourPages(), unsaved: true }]);
+    engine.transport.emit(EVENT.ENGINE_RESTORED, {
+      docIds: restored.map((d) => d.docId),
+      docs: restored,
+    });
+    await flush();
+    expect(snapshot()).toMatchObject({ dirty: true, name: '提单.pdf' });
+    expect(notices).toEqual([{ kind: 'info', message: t.host.engineRestoredFromBackup }]);
   });
 });
 

@@ -32,7 +32,7 @@ use pdfium_sys::Matrix;
 use tokio::net::windows::named_pipe::NamedPipeServer;
 use tokio::sync::mpsc;
 
-use crate::pdfium_thread::{EditOp, EngineHandle, Layer, Notice, PageFidelity};
+use crate::pdfium_thread::{EditOp, EngineHandle, Layer, Notice, PageFidelity, SnapshotConfig};
 use crate::recovery::{DocRecovery, RecoveryFile};
 use crate::slots::{SlotTable, TileKey};
 
@@ -172,11 +172,15 @@ impl Engine {
         let mut recovery = RecoveryFile::load(&recovery_path);
         // 共享内存由引擎创建（引擎重启时沿用同一会话的映射）。
         let region = shm::create(&config.session, Layout::new(config.slots))?;
-        let (engine, notices) = EngineHandle::spawn()?;
-        // 恢复：重新打开恢复文件里的文档。
+        let (engine, notices) = EngineHandle::spawn(Some(snapshot_config(&recovery_path)))?;
+        // 恢复：重新打开恢复文件里的文档。有自动备份的读备份（没保存的修改还在），路径仍记原来的。
         let mut restored = Vec::new();
         for (index, doc) in recovery.state().docs.clone().iter().enumerate() {
-            match engine.open_blocking(&doc.path) {
+            let snapshot = doc
+                .snapshot
+                .as_deref()
+                .filter(|file| std::path::Path::new(file).is_file());
+            match engine.open_blocking(&doc.path, snapshot) {
                 Ok(info) => restored.push(info),
                 // 日志里不写文件路径（《工程规范》4）。
                 Err(e) => tracing::warn!("恢复文件里的第 {} 份文档打不开：{e}", index + 1),
@@ -206,6 +210,59 @@ impl Engine {
             pdfium_revision: format!("pdfium {}", pdfium_sys::Library::linked_version()),
             test_hooks: config.test_hooks,
         })
+    }
+}
+
+/// 自动备份（方案 9.3）写在恢复文件旁边，文件名以恢复文件的名字开头（`session-<PID>-…pdf`），
+/// 主进程退出、用户答复了恢复对话框时按恢复文件里记的路径删掉。间隔默认 2 分钟，
+/// 环境变量 `MAGPDF_RECOVERY_INTERVAL_MS` 可以改（测试用）。
+fn snapshot_config(recovery_path: &std::path::Path) -> SnapshotConfig {
+    const DEFAULT_INTERVAL: Duration = Duration::from_secs(120);
+    let interval = std::env::var("MAGPDF_RECOVERY_INTERVAL_MS")
+        .ok()
+        .and_then(|ms| ms.parse().ok())
+        .map_or(DEFAULT_INTERVAL, Duration::from_millis);
+    SnapshotConfig {
+        dir: recovery_path
+            .parent()
+            .map_or_else(|| PathBuf::from("."), std::path::Path::to_path_buf),
+        prefix: recovery_path
+            .file_stem()
+            .map_or_else(|| "magpdf".to_owned(), |s| s.to_string_lossy().into_owned()),
+        interval,
+    }
+}
+
+/// 自动备份写好了：记进恢复文件，删掉这份文档上一份备份。
+fn record_snapshot(engine: &Engine, doc_id: u32, file: &std::path::Path) {
+    let Some(path) = engine
+        .doc_paths
+        .lock()
+        .ok()
+        .and_then(|paths| paths.get(&doc_id).cloned())
+    else {
+        // 文档已经关了：备份没用了
+        let _ = std::fs::remove_file(file);
+        return;
+    };
+    let file = file.to_string_lossy().into_owned();
+    if let Ok(mut recovery) = engine.recovery.lock() {
+        if let Some(old) = recovery.set_snapshot(&path, file.clone())
+            && old != file
+        {
+            let _ = std::fs::remove_file(old);
+        }
+        let _ = recovery.save();
+    }
+}
+
+/// 这份文档的自动备份作废了（存好了、关掉了）：从恢复文件里去掉，删掉文件。
+fn drop_snapshot(engine: &Engine, path: &str) {
+    if let Ok(mut recovery) = engine.recovery.lock()
+        && let Some(file) = recovery.take_snapshot(path)
+    {
+        let _ = std::fs::remove_file(file);
+        let _ = recovery.save();
     }
 }
 
@@ -263,8 +320,13 @@ async fn serve_connection(engine: Arc<Engine>, conn: NamedPipeServer) {
     let notices = engine.notices.lock().ok().and_then(|mut n| n.take());
     let forwarder = notices.map(|mut notices| {
         let out = out_tx.clone();
+        let engine = engine.clone();
         tokio::spawn(async move {
             while let Some(notice) = notices.recv().await {
+                if let Notice::Snapshot { doc_id, file, .. } = &notice {
+                    record_snapshot(&engine, *doc_id, file);
+                    continue;
+                }
                 if let Some(event) = notice_event(notice)
                     && out.send(event).is_err()
                 {
@@ -370,6 +432,8 @@ fn notice_event(notice: Notice) -> Option<Outgoing> {
             frame::json_value(&result)
                 .map(|value| Outgoing::Event(messages::event::FIDELITY_RESULT.to_owned(), value))
         }
+        // 不发事件，记进恢复文件（见 serve_connection）
+        Notice::Snapshot { .. } => None,
     }
 }
 
@@ -428,7 +492,7 @@ async fn handle_request(
             let p: DocOpenParams = decode(params)?;
             let info = engine
                 .engine
-                .open(p.path.clone(), p.password)
+                .open(p.path.clone(), p.password, p.snapshot.clone())
                 .await
                 .map_err(map_engine_error)?;
             if let Ok(mut paths) = engine.doc_paths.lock() {
@@ -441,6 +505,8 @@ async fn handle_request(
                     scale: 1.0,
                     origin_x: 0,
                     origin_y: 0,
+                    // 从上次留下的自动备份打开的：这次的备份写出来之前，再崩溃也还能从它恢复
+                    snapshot: p.snapshot,
                 });
                 let _ = recovery.save();
             }
@@ -467,10 +533,12 @@ async fn handle_request(
             });
             if let Some(path) = path
                 && !still_open
-                && let Ok(mut recovery) = engine.recovery.lock()
             {
-                recovery.remove(&path);
-                let _ = recovery.save();
+                drop_snapshot(engine, &path);
+                if let Ok(mut recovery) = engine.recovery.lock() {
+                    recovery.remove(&path);
+                    let _ = recovery.save();
+                }
             }
             Ok(Some(frame::response_ok(id, &())))
         }
@@ -495,6 +563,8 @@ async fn handle_request(
                     let _ = recovery.save();
                 }
             }
+            // 存好了：没保存的修改的自动备份作废
+            drop_snapshot(engine, &saved.path);
             engine.event_to(
                 out,
                 messages::event::DOC_SAVED,
@@ -803,6 +873,8 @@ fn record_view(engine: &Engine, p: &RenderTilesParams) {
         scale: p.scale,
         origin_x: first.x,
         origin_y: first.y,
+        // 只换视图：upsert 保留原来记的自动备份
+        snapshot: None,
     };
     if let Ok(mut recovery) = engine.recovery.lock() {
         recovery.upsert(doc);

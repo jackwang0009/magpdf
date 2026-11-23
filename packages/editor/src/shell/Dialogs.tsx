@@ -38,6 +38,7 @@ export function RecoveryDialog({ documents, onResolve }: RecoveryDialogProps) {
               <th />
               <th>{t.recovery.name}</th>
               <th>{t.recovery.modified}</th>
+              <th>{t.recovery.unsaved}</th>
             </tr>
           </thead>
           <tbody>
@@ -53,6 +54,7 @@ export function RecoveryDialog({ documents, onResolve }: RecoveryDialogProps) {
                 </td>
                 <td>{doc.name}</td>
                 <td>{doc.modifiedMs ? new Date(doc.modifiedMs).toLocaleString('zh-CN') : ''}</td>
+                <td>{doc.unsaved ? t.recovery.backup : t.recovery.noBackup}</td>
               </tr>
             ))}
           </tbody>

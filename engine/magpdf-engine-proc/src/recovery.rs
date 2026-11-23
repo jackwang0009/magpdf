@@ -4,8 +4,9 @@
 //! 文件后替换）。崩溃或被杀后重启，引擎读回它，重新打开文档，并通过 `session.hello` 的返回值告诉主进程
 //! 恢复了哪些文档；界面收到 `engine.restored` 后重新取瓦片。
 //!
-//! 真实实现只写相对原文件新增的增量部分（`FPDF_SaveAsCopy` + `FPDF_INCREMENTAL`）。P0 原型没有编辑
-//! 命令，所以只需记住文件路径与视图。
+//! 有没保存的修改的文档，PDFium 线程空闲时每隔一段时间把它完整写一份自动备份（`snapshot`，见
+//! `pdfium_thread::SnapshotConfig`），记在这里；重启时从备份打开。方案 9.3 说的是只写相对原文件新增的
+//! 增量部分，原型用的是完整重写（增量保存还没有做，V06 报告第 15、17 节）。
 
 use std::path::{Path, PathBuf};
 
@@ -30,6 +31,9 @@ pub struct DocRecovery {
     /// 视口的左上角在整页像素网格上的位置（与最后一次 `render.tiles` 一致）。
     pub origin_x: u32,
     pub origin_y: u32,
+    /// 没保存的修改的自动备份（完整的 PDF 文件，方案 9.3）。重新打开时读它，路径仍记作 `path`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot: Option<String>,
 }
 
 /// 恢复文件的内容。
@@ -67,13 +71,32 @@ impl RecoveryFile {
         &self.state
     }
 
-    /// 记录（或更新）一个文档。
-    pub fn upsert(&mut self, doc: DocRecovery) {
+    /// 记录（或更新）一个文档。只更新视图时（`doc.snapshot` 为空）原来记的自动备份留着。
+    pub fn upsert(&mut self, mut doc: DocRecovery) {
         if let Some(existing) = self.state.docs.iter_mut().find(|d| d.path == doc.path) {
+            if doc.snapshot.is_none() {
+                doc.snapshot = existing.snapshot.take();
+            }
             *existing = doc;
         } else {
             self.state.docs.push(doc);
         }
+    }
+
+    /// 记下这份文档新的自动备份，返回换下来的旧备份（调用方删掉它）。文档不在记录里时什么也不做。
+    pub fn set_snapshot(&mut self, path: &str, snapshot: String) -> Option<String> {
+        let doc = self.state.docs.iter_mut().find(|d| d.path == path)?;
+        doc.snapshot.replace(snapshot)
+    }
+
+    /// 去掉这份文档的自动备份（存好了、关掉了），返回原来记的（调用方删掉它）。
+    pub fn take_snapshot(&mut self, path: &str) -> Option<String> {
+        self.state
+            .docs
+            .iter_mut()
+            .find(|d| d.path == path)?
+            .snapshot
+            .take()
     }
 
     /// 文档关闭后不再需要恢复它。
@@ -125,20 +148,40 @@ mod tests {
             scale: 1.0,
             origin_x: 0,
             origin_y: 0,
+            snapshot: None,
         });
         file.save().unwrap();
+        assert_eq!(
+            file.set_snapshot(r"C:\samples\a.pdf", "b1.pdf".into()),
+            None
+        );
         file.upsert(DocRecovery {
             path: r"C:\samples\a.pdf".into(),
             page_id: 1,
             scale: 2.0,
             origin_x: 512,
             origin_y: 0,
+            snapshot: None,
         });
         file.save().unwrap();
-        let reloaded = RecoveryFile::load(&path);
+        let mut reloaded = RecoveryFile::load(&path);
         assert_eq!(reloaded.state().docs.len(), 1);
         assert_eq!(reloaded.state().docs[0].page_id, 1);
+        assert_eq!(
+            reloaded.state().docs[0].snapshot.as_deref(),
+            Some("b1.pdf"),
+            "只换视图时自动备份留着"
+        );
         assert_eq!(reloaded.state().revision, 2);
+        assert_eq!(
+            reloaded.set_snapshot(r"C:\samples\a.pdf", "b2.pdf".into()),
+            Some("b1.pdf".into())
+        );
+        assert_eq!(
+            reloaded.take_snapshot(r"C:\samples\a.pdf"),
+            Some("b2.pdf".into())
+        );
+        assert_eq!(reloaded.state().docs[0].snapshot, None);
         let _ = std::fs::remove_dir_all(dir);
     }
 }

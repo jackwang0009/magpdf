@@ -301,7 +301,7 @@ export class EngineSession implements EditorHost {
     };
     // 先登记再放进 store：画布一挂载就会来要瓦片来源和修改入口
     this.documents.set(id, document);
-    this.store.getState().openDocument(this.blankSnapshot(id, info.title, snapshot));
+    this.store.getState().openDocument(this.blankSnapshot(id, info.title, snapshot, info.unsaved));
     this.ensureAround(document, 0);
   }
 
@@ -310,12 +310,20 @@ export class EngineSession implements EditorHost {
     return this.transport.request<DocSnapshot>(METHOD.DOC_SNAPSHOT, params);
   }
 
-  /** 只有页面、还没有对象的快照。每一页都取一个新的修订号，画布据此把旧瓦片全部换掉。 */
-  private blankSnapshot(id: string, name: string, snapshot: DocSnapshot): DocumentSnapshot {
+  /**
+   * 只有页面、还没有对象的快照。每一页都取一个新的修订号，画布据此把旧瓦片全部换掉。`unsaved`：从自动备份
+   * 恢复的文档一打开就有没保存的修改（方案 9.3）。
+   */
+  private blankSnapshot(
+    id: string,
+    name: string,
+    snapshot: DocSnapshot,
+    unsaved: boolean,
+  ): DocumentSnapshot {
     return {
       id,
       name,
-      dirty: false,
+      dirty: unsaved,
       version: snapshot.version,
       pages: [...snapshot.pages]
         .sort((a, b) => a.index - b.index)
@@ -813,6 +821,7 @@ export class EngineSession implements EditorHost {
   /** 新引擎就绪了：按路径把手里的文档和新的 `docId` 对上，重新载入；对不上的关掉。 */
   private async onRestored(restored: EngineRestored): Promise<void> {
     const lost: string[] = [];
+    let fromBackup = false;
     for (const document of [...this.documents.values()]) {
       const match = restored.docs.find((info) => samePath(info.path, document.path));
       if (!match) {
@@ -827,9 +836,13 @@ export class EngineSession implements EditorHost {
         document.docId = match.docId;
         document.version = snapshot.version;
         document.pages = pagesOf(snapshot);
+        fromBackup ||= match.unsaved;
         this.store
           .getState()
-          .updateSnapshot(document.id, this.blankSnapshot(document.id, document.title, snapshot));
+          .updateSnapshot(
+            document.id,
+            this.blankSnapshot(document.id, document.title, snapshot, match.unsaved),
+          );
         const currentPage = this.store.getState().documents[document.id]?.currentPage ?? 0;
         this.ensureAround(document, currentPage);
       } catch (error) {
@@ -839,7 +852,7 @@ export class EngineSession implements EditorHost {
       }
     }
     if (this.disposed) return;
-    this.notify('info', t.host.engineRestored);
+    this.notify('info', fromBackup ? t.host.engineRestoredFromBackup : t.host.engineRestored);
     for (const name of lost) {
       this.notify('error', format(t.host.documentNotRestored, { name }));
     }

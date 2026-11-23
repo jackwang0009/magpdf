@@ -311,6 +311,10 @@ pub struct DocOpenParams {
     pub path: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub password: Option<String>,
+    /// 从这份自动备份打开（方案 9.3：上次没有正常退出时没保存的修改），文档的路径仍记作 `path`，
+    /// 保存时存回 `path`。只有主进程用（恢复上次的文档时）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot: Option<String>,
 }
 
 /// 文档信息（《接口协议》5.3 的子集）。
@@ -326,6 +330,9 @@ pub struct DocInfo {
     /// 第一页在缩放 1.0 下的尺寸（pt）。
     pub page_width: f32,
     pub page_height: f32,
+    /// 有没保存的修改：从自动备份恢复的文档打开时就是这样（方案 9.3）；界面重新加载之后接回来的文档也看它。
+    #[serde(default)]
+    pub unsaved: bool,
 }
 
 /// `doc.open` 的返回值。

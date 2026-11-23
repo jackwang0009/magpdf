@@ -4,8 +4,10 @@
 //! 结束、崩溃或者断电时它会留下来。下次启动时把这些文件找出来，列出当时开着的文档，用户选了之后重新打开，
 //! 不管选不选都把文件删掉。还在运行的 MagPDF（另一个窗口）的恢复文件不算。
 //!
-//! 现在的恢复文件只记了开着哪些文档、看到哪一页（引擎还不把没保存的修改写进去），所以“恢复”是重新打开
-//! 磁盘上的文件，没保存的修改恢复不了。界面上要照实说。
+//! 有没保存的修改的文档，引擎每隔一段时间把它完整写一份自动备份（`session-<PID>-…pdf`，记在恢复文件里）。
+//! 有备份的从备份重新打开（没保存的修改最多丢最近一个间隔的），没有的重新打开磁盘上的文件。
+//! 重新打开了的那几份备份不删：它们记进了这一次运行的恢复文件，这次的备份写出来、存好或者关掉时才删；
+//! 别的备份（没选的、恢复文件里没记上的）答复之后就删。
 
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -22,8 +24,12 @@ pub struct RecoverableDocument {
     pub name: String,
     /// 恢复文件最后一次写入的时间，Unix 毫秒
     pub modified_ms: u64,
+    /// 有没保存的修改的自动备份：从它重新打开，修改还在
+    pub unsaved: bool,
     #[serde(skip)]
     pub path: PathBuf,
+    #[serde(skip)]
+    pub snapshot: Option<PathBuf>,
 }
 
 /// 启动时找到的、上次留下的恢复文件和里面的文档。
@@ -31,6 +37,8 @@ pub struct RecoverableDocument {
 pub struct Leftover {
     pub files: Vec<PathBuf>,
     pub documents: Vec<RecoverableDocument>,
+    /// 这些会话留下的全部自动备份（恢复文件里记的，加上以会话名开头、没来得及记上的）。
+    pub snapshots: Vec<PathBuf>,
 }
 
 /// 找 `dir` 里别的会话留下的恢复文件。`current` 是本次运行自己的那一份；`alive` 判断某个 PID 是不是一个
@@ -62,7 +70,14 @@ pub fn scan(dir: &Path, current: &Path, alive: impl Fn(u32) -> bool) -> Leftover
     }
     found.sort_by_key(|(_, modified)| std::cmp::Reverse(*modified));
     for (file, modified) in found {
-        for doc in documents_in(&file) {
+        leftover.snapshots.extend(stray_snapshots(&file));
+        for (doc, snapshot) in documents_in(&file) {
+            let snapshot = snapshot.filter(|s| s.is_file());
+            if let Some(snapshot) = &snapshot
+                && !leftover.snapshots.contains(snapshot)
+            {
+                leftover.snapshots.push(snapshot.clone());
+            }
             let known = leftover
                 .documents
                 .iter()
@@ -77,12 +92,35 @@ pub fn scan(dir: &Path, current: &Path, alive: impl Fn(u32) -> bool) -> Leftover
                 id: leftover.documents.len().to_string(),
                 name,
                 modified_ms: modified,
+                unsaved: snapshot.is_some(),
                 path: doc,
+                snapshot,
             });
         }
         leftover.files.push(file);
     }
     leftover
+}
+
+/// 和恢复文件 `session-<PID>.json` 同目录、以 `session-<PID>-` 开头的 `.pdf`：那一次运行写的自动备份。
+pub fn stray_snapshots(file: &Path) -> Vec<PathBuf> {
+    let (Some(dir), Some(stem)) = (file.parent(), file.file_stem().and_then(|s| s.to_str())) else {
+        return Vec::new();
+    };
+    let prefix = format!("{stem}-");
+    std::fs::read_dir(dir)
+        .map(|entries| {
+            entries
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| {
+                    p.file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(|n| n.starts_with(&prefix) && n.ends_with(".pdf"))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// `session-<PID>.json` 里的 PID。
@@ -94,8 +132,8 @@ fn session_pid(path: &Path) -> Option<u32> {
         .ok()
 }
 
-/// 恢复文件里记的文档路径。读不了、格式不对的当作没有文档（文件照样删）。
-fn documents_in(file: &Path) -> Vec<PathBuf> {
+/// 恢复文件里记的文档路径和它的自动备份。读不了、格式不对的当作没有文档（文件照样删）。
+pub fn documents_in(file: &Path) -> Vec<(PathBuf, Option<PathBuf>)> {
     let Some(state) = std::fs::read(file)
         .ok()
         .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
@@ -106,7 +144,10 @@ fn documents_in(file: &Path) -> Vec<PathBuf> {
         .as_array()
         .map(|docs| {
             docs.iter()
-                .filter_map(|doc| doc["path"].as_str().map(PathBuf::from))
+                .filter_map(|doc| {
+                    let path = PathBuf::from(doc["path"].as_str()?);
+                    Some((path, doc["snapshot"].as_str().map(PathBuf::from)))
+                })
                 .collect()
         })
         .unwrap_or_default()
@@ -200,6 +241,41 @@ mod tests {
             "坏掉的文件也要删"
         );
         assert!(!found.files.contains(&dir.join("notes.json")));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn automatic_backups_are_listed_and_collected_for_cleanup() {
+        let dir = std::env::temp_dir().join(format!("magpdf-leftover-bk-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let a = dir.join("a.pdf");
+        let b = dir.join("b.pdf");
+        std::fs::write(&a, b"%PDF").unwrap();
+        std::fs::write(&b, b"%PDF").unwrap();
+        let backup = dir.join("session-7-900-doc1.pdf");
+        let stray = dir.join("session-7-900-doc2.pdf");
+        std::fs::write(&backup, b"%PDF").unwrap();
+        std::fs::write(&stray, b"%PDF").unwrap();
+        let docs = serde_json::json!({ "docs": [
+            { "path": a.to_string_lossy(), "snapshot": backup.to_string_lossy() },
+            { "path": b.to_string_lossy(), "snapshot": dir.join("session-7-900-doc9.pdf").to_string_lossy() },
+        ]});
+        std::fs::write(
+            dir.join("session-7.json"),
+            serde_json::to_vec(&docs).unwrap(),
+        )
+        .unwrap();
+
+        let found = scan(&dir, &dir.join("session-1.json"), |_| false);
+        let by_name = |name: &str| found.documents.iter().find(|d| d.name == name).unwrap();
+        assert!(by_name("a.pdf").unsaved);
+        assert_eq!(by_name("a.pdf").snapshot.as_deref(), Some(backup.as_path()));
+        assert!(
+            !by_name("b.pdf").unsaved,
+            "记的备份已经没了：只能打开磁盘上的"
+        );
+        assert!(found.snapshots.contains(&backup) && found.snapshots.contains(&stray));
         let _ = std::fs::remove_dir_all(dir);
     }
 

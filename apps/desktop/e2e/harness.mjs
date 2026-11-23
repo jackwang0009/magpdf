@@ -119,6 +119,7 @@ export function requestWindowClose(appPid) {
 /**
  * 起桌面程序，命令行打开 `files`（最后一份是活动文档）。数据目录和 WebView2 的用户目录放在一个新建的临时目录里，
  * 用完由 `cleanUp` 删掉；给了 `options.scratch` 就接着用那一个（同一份数据目录再起一次，崩溃恢复要用）。
+ * `options.env` 里的环境变量另外加给程序（引擎进程也继承）。
  * 返回子进程、调试端口、临时目录和启动的时刻（`Date.now()`）。
  */
 export async function launchApp(appBin, files, options = {}) {
@@ -132,6 +133,7 @@ export async function launchApp(appBin, files, options = {}) {
       MAGPDF_DATA_DIR: join(scratch, 'data'),
       WEBVIEW2_USER_DATA_FOLDER: join(scratch, 'webview'),
       MAGPDF_LOG: 'warn',
+      ...options.env,
     },
     stdio: ['ignore', 'ignore', 'inherit'],
   });

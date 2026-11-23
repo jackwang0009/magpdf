@@ -75,6 +75,11 @@ struct Shell {
 impl Shell {
     /// 让引擎打开一份文档。同一个文件已经开着就直接返回它，不开第二份。
     async fn open(&self, path: &Path) -> Result<DocInfo, RpcError> {
+        self.open_from(path, None).await
+    }
+
+    /// 同上；`snapshot` 有值时读那份自动备份（上次没保存的修改），路径仍记作 `path`。
+    async fn open_from(&self, path: &Path, snapshot: Option<&Path>) -> Result<DocInfo, RpcError> {
         let path = path.to_string_lossy().into_owned();
         if let Some(open) = self
             .docs()
@@ -83,10 +88,11 @@ impl Shell {
         {
             return Ok(open);
         }
-        let value = self
-            .supervisor
-            .request(method::DOC_OPEN, json!({ "path": path }))
-            .await?;
+        let mut params = json!({ "path": path });
+        if let Some(snapshot) = snapshot {
+            params["snapshot"] = json!(snapshot.to_string_lossy());
+        }
+        let value = self.supervisor.request(method::DOC_OPEN, params).await?;
         let info: DocInfo = serde_json::from_value(value)
             .map_err(|e| ErrorCode::Internal.error_with(format!("doc.open 的返回值看不懂：{e}")))?;
         if let Ok(mut docs) = self.docs.lock() {
@@ -296,11 +302,23 @@ async fn recover_documents(
         .map(|mut leftover| std::mem::take(&mut *leftover))
         .unwrap_or_default();
     let mut opened = Vec::new();
+    // 从备份重新打开了的：备份记进了这一次的恢复文件，留着
+    let mut kept: Vec<&Path> = Vec::new();
     for doc in leftover.documents.iter().filter(|d| ids.contains(&d.id)) {
-        match shell.open(&doc.path).await {
-            Ok(info) => opened.push(info),
+        match shell.open_from(&doc.path, doc.snapshot.as_deref()).await {
+            Ok(info) => {
+                kept.extend(doc.snapshot.as_deref());
+                opened.push(info);
+            }
             Err(error) => tracing::warn!("上次开着的文档没能重新打开：{error}"),
         }
+    }
+    for snapshot in leftover
+        .snapshots
+        .iter()
+        .filter(|s| !kept.contains(&s.as_path()))
+    {
+        let _ = std::fs::remove_file(snapshot);
     }
     for file in &leftover.files {
         let _ = std::fs::remove_file(file);
@@ -656,6 +674,14 @@ pub fn run(open_paths: Vec<PathBuf>) -> Result<()> {
         if let RunEvent::Exit = run_event {
             let shell = app.state::<Shell>();
             tauri::async_runtime::block_on(shell.supervisor.shutdown());
+            // 正常退出：恢复文件和自动备份都不要了（关窗前已经问过要不要保存）
+            for snapshot in leftover::documents_in(&shell.recovery)
+                .into_iter()
+                .filter_map(|(_, snapshot)| snapshot)
+                .chain(leftover::stray_snapshots(&shell.recovery))
+            {
+                let _ = std::fs::remove_file(snapshot);
+            }
             let _ = std::fs::remove_file(&shell.recovery);
         }
     });

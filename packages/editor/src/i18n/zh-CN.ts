@@ -322,6 +322,8 @@ export const zhCN = {
     saveFailed: '无法保存“{name}”：{reason}',
     signedNoSave: '本文档已签名。完整重写会让签名失效，增量保存还没有做，现在不能保存。',
     engineRestored: '引擎出了问题，已经自动重新启动，文档也重新载入了。撤销记录已清空。',
+    engineRestoredFromBackup:
+      '引擎出了问题，已经自动重新启动。没保存的修改从自动备份里恢复了，最近 2 分钟内的修改可能没有恢复。撤销记录已清空。',
     documentNotRestored: '“{name}”没能重新载入，已经关闭。',
     engineFailed: '引擎没能重新启动：{reason}。请重新打开 MagPDF。',
   },
@@ -338,9 +340,12 @@ export const zhCN = {
   recovery: {
     title: '上次没有正常退出',
     message:
-      'MagPDF 上次没有正常退出。下面这些文档当时开着，要重新打开吗？重新打开的是磁盘上保存过的样子，当时没保存的修改恢复不了。',
+      'MagPDF 上次没有正常退出。下面这些文档当时开着，要重新打开吗？有自动备份的，当时没保存的修改会一起恢复（最近 2 分钟内的修改可能没有）；没有的，重新打开的是磁盘上保存过的样子。',
     name: '文件',
     modified: '上次修改时间',
+    unsaved: '没保存的修改',
+    backup: '有自动备份',
+    noBackup: '—',
     reopen: '重新打开选中的',
     discard: '都不要',
     failed: '上次开着的文档没能重新打开：{reason}',

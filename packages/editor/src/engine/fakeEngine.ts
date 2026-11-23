@@ -63,6 +63,8 @@ export const FAKE_OVERLAY_REASON = '重新生成内容流后页面的画面变�
 interface FakeDocument {
   readonly docId: number;
   path: string;
+  /** 从自动备份恢复的（有没保存的修改） */
+  unsaved?: boolean;
   version: number;
   readonly pages: FakePage[];
   /** 撤销栈：每一步记下受影响的页，以及怎么撤、怎么重做 */
@@ -88,12 +90,13 @@ export class FakeEngine {
   }
 
   /** 打开一份文档，返回主进程会交给界面的 `DocInfo`。 */
-  open(name: string, pages: readonly FakePage[]): DocInfo {
+  open(name: string, pages: readonly FakePage[], unsaved = false): DocInfo {
     const docId = this.nextDocId++;
     const path = `C:\\docs\\${name}`;
     this.documents.set(docId, {
       docId,
       path,
+      unsaved,
       version: 0,
       pages: pages.map((page) => ({ ...page, objects: page.objects.map((o) => ({ ...o })) })),
       undo: [],
@@ -113,16 +116,22 @@ export class FakeEngine {
       pageCount: document.pages.length,
       pageWidth: first?.width ?? 0,
       pageHeight: first?.height ?? 0,
+      unsaved: document.unsaved ?? false,
     };
   }
 
   /** 引擎被换掉了：旧文档全部作废，按原样重新打开 `keep` 里的那些（`docId` 是新的，修改和撤销记录都没了）。 */
   restart(
-    keep: readonly { readonly name: string; readonly pages: readonly FakePage[] }[],
+    keep: readonly {
+      readonly name: string;
+      readonly pages: readonly FakePage[];
+      /** 从自动备份重新打开的（真引擎恢复文件里有备份时） */
+      readonly unsaved?: boolean;
+    }[],
   ): DocInfo[] {
     this.documents.clear();
     this.nextDocId += 10;
-    return keep.map(({ name, pages }) => this.open(name, pages));
+    return keep.map(({ name, pages, unsaved }) => this.open(name, pages, unsaved));
   }
 
   page(docId: number, pageId: number): FakePage {

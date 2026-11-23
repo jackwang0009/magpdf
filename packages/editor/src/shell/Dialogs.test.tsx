@@ -33,8 +33,8 @@ function render(onResolve: (ids: readonly string[]) => void): HTMLDivElement {
     root!.render(
       <RecoveryDialog
         documents={[
-          { id: '0', name: '提单.pdf', modifiedMs: Date.UTC(2026, 10, 19, 1, 2) },
-          { id: '1', name: '合同.pdf', modifiedMs: 0 },
+          { id: '0', name: '提单.pdf', modifiedMs: Date.UTC(2026, 10, 19, 1, 2), unsaved: true },
+          { id: '1', name: '合同.pdf', modifiedMs: 0, unsaved: false },
         ]}
         onResolve={onResolve}
       />,
@@ -54,6 +54,11 @@ describe('崩溃恢复对话框', () => {
     const answers: (readonly string[])[] = [];
     const view = render((ids) => answers.push(ids));
     expect(view.textContent).toContain(t.recovery.message);
+    // 有自动备份的标出来：没保存的修改能一起恢复
+    const marks = [...view.querySelectorAll('tbody tr')].map(
+      (row) => row.lastElementChild?.textContent,
+    );
+    expect(marks).toEqual([t.recovery.backup, t.recovery.noBackup]);
     const boxes = [...view.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')];
     expect(boxes.map((b) => [b.getAttribute('aria-label'), b.checked])).toEqual([
       ['提单.pdf', true],

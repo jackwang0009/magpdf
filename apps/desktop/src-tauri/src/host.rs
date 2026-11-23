@@ -310,6 +310,7 @@ impl Host {
             &DocOpenParams {
                 path: path.to_string_lossy().into_owned(),
                 password: None,
+                snapshot: None,
             },
         )
         .await

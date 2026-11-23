@@ -7,4 +7,8 @@ export type DocInfo = { docId: number, path: string, title: string, version: num
 /**
  * 第一页在缩放 1.0 下的尺寸（pt）。
  */
-pageWidth: number, pageHeight: number, };
+pageWidth: number, pageHeight: number, 
+/**
+ * 有没保存的修改：从自动备份恢复的文档打开时就是这样（方案 9.3）；界面重新加载之后接回来的文档也看它。
+ */
+unsaved: boolean, };

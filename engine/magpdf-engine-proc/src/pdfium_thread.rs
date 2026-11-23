@@ -8,6 +8,8 @@
 //! 做完一页就回头看有没有新任务。结论经 [`Notice`] 告诉通信线程。
 
 use std::collections::{HashSet, VecDeque};
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use magpdf_engine::component::{ComponentKind, ComponentSpec};
@@ -113,8 +115,8 @@ impl PageFidelity {
     }
 }
 
-/// PDFium 线程主动告诉通信线程的事，通信线程转成事件发给主进程。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// PDFium 线程主动告诉通信线程的事，通信线程转成事件发给主进程（自动备份是记进恢复文件）。
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Notice {
     /// 一页的保真校验有了结论。状态不会是 `Pending`。
     Fidelity {
@@ -122,6 +124,32 @@ pub enum Notice {
         page_id: u32,
         fidelity: PageFidelity,
     },
+    /// 把一份有没保存的修改的文档完整写成了自动备份（方案 9.3）。`version` 是备份的那一版。
+    Snapshot {
+        doc_id: u32,
+        file: PathBuf,
+        version: u64,
+    },
+}
+
+/// 自动备份（方案 9.3）：有没保存的修改的文档，空闲时每隔 `interval` 完整写一份到 `dir` 下，
+/// 文件名是 `<prefix>-<引擎进程号>-doc<docId>.pdf`。带上进程号：引擎重启后文档编号是新分配的，
+/// 不能覆盖上一个引擎留下、还没恢复的备份。
+#[derive(Debug, Clone)]
+pub struct SnapshotConfig {
+    pub dir: PathBuf,
+    pub prefix: String,
+    pub interval: Duration,
+}
+
+impl SnapshotConfig {
+    fn file(&self, doc_id: u32) -> PathBuf {
+        self.dir.join(format!(
+            "{}-{}-doc{doc_id}.pdf",
+            self.prefix,
+            std::process::id()
+        ))
+    }
 }
 
 /// `doc.snapshot` 里一页的信息。
@@ -149,9 +177,11 @@ type Reply<T> = oneshot::Sender<std::result::Result<T, EngineError>>;
 
 /// 对 PDFium 线程的请求。
 pub enum Job {
+    /// 打开文档。`snapshot` 有值时读的是那份自动备份，文档的路径仍记作 `path`（保存时存回 `path`）。
     Open {
         path: String,
         password: Option<String>,
+        snapshot: Option<String>,
         reply: Reply<DocInfo>,
     },
     /// 渲染一块瓦片，返回 512×512 BGRA 和渲染时的文档版本号。`layer` 有值时只画页面的那一层。
@@ -238,13 +268,17 @@ pub struct SaveOutcome {
 /// PDFium 线程的句柄。
 #[derive(Debug, Clone)]
 pub struct EngineHandle {
-    tx: mpsc::UnboundedSender<Job>,
+    tx: std::sync::mpsc::Sender<Job>,
 }
 
 impl EngineHandle {
     /// 启动专用线程并等 PDFium 初始化完成。另一个返回值是线程主动发出来的通知（[`Notice`]）。
-    pub fn spawn() -> Result<(Self, mpsc::UnboundedReceiver<Notice>)> {
-        let (tx, mut rx) = mpsc::unbounded_channel::<Job>();
+    /// 起 PDFium 线程。`snapshots` 为 `None` 时不做自动备份。
+    pub fn spawn(
+        snapshots: Option<SnapshotConfig>,
+    ) -> Result<(Self, mpsc::UnboundedReceiver<Notice>)> {
+        // 用标准库的通道：空闲时要能等到下一次自动备份的时刻（recv_timeout）
+        let (tx, rx) = std::sync::mpsc::channel::<Job>();
         let (notices, notices_rx) = mpsc::unbounded_channel::<Notice>();
         let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<()>>();
         std::thread::Builder::new()
@@ -270,18 +304,35 @@ impl EngineHandle {
                     notices,
                     background: VecDeque::new(),
                     queued: HashSet::new(),
+                    snapshots,
                 };
                 // 专用线程里同步取任务；通信线程不依赖这条线程的响应速度来处理心跳。
                 loop {
                     let job = match rx.try_recv() {
                         Ok(job) => job,
-                        Err(mpsc::error::TryRecvError::Disconnected) => break,
-                        Err(mpsc::error::TryRecvError::Empty) => {
+                        Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
+                        Err(std::sync::mpsc::TryRecvError::Empty) => {
                             // 队列空了：做一项后台工作，做完马上回头看有没有新任务。
                             if state.background_step() {
                                 continue;
                             }
-                            match rx.blocking_recv() {
+                            // 没事可做：等新任务，有自动备份要做的话最多等到那个时刻
+                            let next = match state.next_snapshot_due() {
+                                Some(due) => {
+                                    let wait = due.saturating_duration_since(Instant::now());
+                                    match rx.recv_timeout(wait) {
+                                        Ok(job) => Some(job),
+                                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                                            continue;
+                                        }
+                                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                                            None
+                                        }
+                                    }
+                                }
+                                None => rx.recv().ok(),
+                            };
+                            match next {
                                 Some(job) => job,
                                 None => break,
                             }
@@ -336,14 +387,17 @@ impl EngineHandle {
         .await
     }
 
+    /// 打开文档；`snapshot` 有值时读那份自动备份，路径仍记作 `path`。
     pub async fn open(
         &self,
         path: String,
         password: Option<String>,
+        snapshot: Option<String>,
     ) -> std::result::Result<DocInfo, EngineError> {
         self.ask(|reply| Job::Open {
             path,
             password,
+            snapshot,
             reply,
         })
         .await
@@ -353,11 +407,16 @@ impl EngineHandle {
     ///
     /// 可能在 tokio 运行时里被调用（`server::run` → `Engine::start`），因此不能直接
     /// `blocking_recv`；有运行时时用 `block_in_place` 包一层。
-    pub fn open_blocking(&self, path: &str) -> std::result::Result<DocInfo, EngineError> {
+    pub fn open_blocking(
+        &self,
+        path: &str,
+        snapshot: Option<&str>,
+    ) -> std::result::Result<DocInfo, EngineError> {
         let (reply, rx) = oneshot::channel();
         self.send(Job::Open {
             path: path.to_owned(),
             password: None,
+            snapshot: snapshot.map(str::to_owned),
             reply,
         })?;
         let recv = if tokio::runtime::Handle::try_current().is_ok() {
@@ -501,6 +560,8 @@ struct PdfiumState {
     background: VecDeque<(u32, usize)>,
     /// 进过 `background` 的页。每页只排一次：校验出错（没有结论）的页不会每渲染一块瓦片就再排一次。
     queued: HashSet<(u32, usize)>,
+    /// 自动备份；`None` 时不做。
+    snapshots: Option<SnapshotConfig>,
 }
 
 impl PdfiumState {
@@ -509,9 +570,10 @@ impl PdfiumState {
             Job::Open {
                 path,
                 password,
+                snapshot,
                 reply,
             } => {
-                let _ = reply.send(self.open(path, password.as_deref()));
+                let _ = reply.send(self.open(path, password.as_deref(), snapshot.as_deref()));
             }
             Job::RenderTile {
                 doc_id,
@@ -586,6 +648,14 @@ impl PdfiumState {
                 let outcome = self.edit(doc_id, base_version, op);
                 // 修改命令会先校验它碰到的页；刚得出的结论（不管命令成没成）也要让界面知道。
                 self.report_new_verdicts(doc_id);
+                // 从这一刻起有没保存的修改：过一个备份间隔就写自动备份
+                if outcome.is_ok()
+                    && let Ok(d) = self.find_mut(doc_id)
+                    && d.unsaved()
+                    && d.dirty_since.is_none()
+                {
+                    d.dirty_since = Some(Instant::now());
+                }
                 let _ = reply.send(outcome);
             }
             Job::CheckFidelity {
@@ -623,7 +693,64 @@ impl PdfiumState {
             self.report_new_verdicts(doc_id);
             return true;
         }
-        false
+        self.snapshot_step()
+    }
+
+    /// 最早一份该写自动备份的时刻：有没保存的修改、备份的不是现在这一版的文档，从变脏（或者上次备份）起
+    /// 过一个间隔。没有要备份的文档时为 `None`。
+    fn next_snapshot_due(&self) -> Option<Instant> {
+        let interval = self.snapshots.as_ref()?.interval;
+        self.docs
+            .iter()
+            .filter(|d| d.unsaved() && d.snapshot_version != Some(d.session.version()))
+            .filter_map(|d| {
+                let since = d.dirty_since?;
+                let from = d.last_snapshot.map_or(since, |last| last.max(since));
+                Some(from + interval)
+            })
+            .min()
+    }
+
+    /// 到时候了的话写一份自动备份（一次一份）。写不成（已签名、磁盘满）记日志，下个间隔再试。
+    fn snapshot_step(&mut self) -> bool {
+        let Some(config) = self.snapshots.clone() else {
+            return false;
+        };
+        let now = Instant::now();
+        let Some(index) = self.docs.iter().position(|d| {
+            d.unsaved()
+                && d.snapshot_version != Some(d.session.version())
+                && d.dirty_since.is_some_and(|since| {
+                    d.last_snapshot.map_or(since, |last| last.max(since)) + config.interval <= now
+                })
+        }) else {
+            return false;
+        };
+        let d = &mut self.docs[index];
+        d.last_snapshot = Some(now);
+        let file = config.file(d.doc_id);
+        let written = d
+            .session
+            .save_full()
+            .map_err(|e| e.to_string())
+            .and_then(|saved| {
+                std::fs::create_dir_all(&config.dir).map_err(|e| e.to_string())?;
+                write_replacing(&file, &saved.bytes).map_err(|e| e.to_string())
+            });
+        match written {
+            Ok(()) => {
+                let version = d.session.version();
+                d.snapshot_version = Some(version);
+                let _ = self.notices.send(Notice::Snapshot {
+                    doc_id: d.doc_id,
+                    file,
+                    version,
+                });
+            }
+            // 日志里不写路径和文档内容（《工程规范》4）
+            Err(error) => tracing::warn!("自动备份没有写成：{error}"),
+        }
+        true
     }
 
     /// 页面显示过了（渲染过瓦片）：还没有校验结论的话，排到后台去校验。
@@ -677,8 +804,10 @@ impl PdfiumState {
         &mut self,
         path: String,
         password: Option<&str>,
+        snapshot: Option<&str>,
     ) -> std::result::Result<DocInfo, EngineError> {
-        let doc = Document::load_file(self.lib, std::path::Path::new(&path), password).map_err(
+        let source = snapshot.unwrap_or(&path);
+        let doc = Document::load_file(self.lib, std::path::Path::new(source), password).map_err(
             |error| EngineError::Open {
                 error,
                 with_password: password.is_some(),
@@ -689,10 +818,16 @@ impl PdfiumState {
         let title = title_of(&path);
         let mut session = Session::from_document(self.lib, doc);
         session.remember_password(password);
+        let from_snapshot = snapshot.is_some();
         let entry = OpenDoc {
             doc_id,
             path,
             title,
+            // 从自动备份打开的：和磁盘上的文件不一样，算没保存；备份里就是现在这一版，不用马上再备份
+            saved_version: (!from_snapshot).then_some(session.version()),
+            dirty_since: from_snapshot.then(Instant::now),
+            snapshot_version: from_snapshot.then_some(session.version()),
+            last_snapshot: None,
             session,
         };
         let info = info(&entry);
@@ -711,6 +846,10 @@ impl PdfiumState {
         write_replacing(std::path::Path::new(&target), &saved.bytes).map_err(SaveError::Io)?;
         let previous_path = std::mem::replace(&mut d.path, target);
         d.title = title_of(&d.path);
+        // 存好了：没有没保存的修改，自动备份作废（文件由通信线程删）
+        d.saved_version = Some(d.session.version());
+        d.dirty_since = None;
+        d.snapshot_version = None;
         Ok(SaveOutcome {
             previous_path,
             path: d.path.clone(),
@@ -924,6 +1063,21 @@ struct OpenDoc {
     path: String,
     title: String,
     session: Session<'static>,
+    /// 和磁盘上的文件一样的那一版；从自动备份打开、还没保存过时为 `None`。
+    saved_version: Option<u64>,
+    /// 从什么时候起有没保存的修改。
+    dirty_since: Option<Instant>,
+    /// 自动备份里是哪一版。
+    snapshot_version: Option<u64>,
+    /// 上次写（或者试着写）自动备份的时刻。
+    last_snapshot: Option<Instant>,
+}
+
+impl OpenDoc {
+    /// 有没有没保存的修改（撤销回保存时的那一版也算没有）。
+    fn unsaved(&self) -> bool {
+        self.saved_version != Some(self.session.version())
+    }
 }
 
 /// 标签页上显示的文件名。
@@ -948,5 +1102,6 @@ fn info(d: &OpenDoc) -> DocInfo {
         page_count: u32::try_from(doc.page_count()).unwrap_or(0),
         page_width,
         page_height,
+        unsaved: d.unsaved(),
     }
 }

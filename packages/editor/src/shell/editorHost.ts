@@ -39,6 +39,8 @@ export interface RecoverableDocument {
   readonly name: string;
   /** 上次修改的时间，Unix 毫秒 */
   readonly modifiedMs: number;
+  /** 有没保存的修改的自动备份：重新打开时修改一起恢复（方案 9.3） */
+  readonly unsaved: boolean;
 }
 
 export interface RecoveryHost {
