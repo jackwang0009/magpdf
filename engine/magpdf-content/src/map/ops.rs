@@ -7,11 +7,15 @@
 //!   生效那一刻的变换矩阵）、`OP`、`op`、`OPM`、`TK`、`FL`、`RI`，ExtGState 里其余的条目按值比；
 //!   描边的对象和表单另外比线宽、线帽、接头、斜接限制、虚线；
 //! - 文字状态：`Tc`、`Tw`、渲染模式、字体（原来的字体找不到时不算），以及字号 × 水平缩放 × `Tm` × CTM 的
-//!   线性部分。`Tz` 折算进 `Tm`、`TL`/`Ts` 折算进位置的不算差异。
+//!   线性部分。`Tz` 折算进 `Tm`、`TL`/`Ts` 折算进位置的不算差异；
+//! - 剪切：生效的路径剪切（规则和路径构造操作符）、文字剪切（每组里的字体、字号、字节、渲染模式）。
+//!   和 `ops_diff.py` 不同的一处：重写之后路径剪切只是按顺序少了几条的不算差异（PDFium 解析时去掉的
+//!   多余矩形剪切，见 [`clip_paths_kept`]）。
 //!
 //! 对象按下标一一对应（两边都是 [`super::map_page`] 的结果，下标就是 PDFium 的页面对象索引）。
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use super::{Detail, MappedObject, Matrix, PageMap};
 
@@ -51,6 +55,26 @@ pub struct OpParams {
     pub rise: f64,
     /// 字体写成 `子类型:BaseFont`，资源里没有时是 `Missing`。
     pub font: String,
+    /// 生效的路径剪切，按设置的先后（`q`/`Q` 跟着保存恢复）。几千个对象共用同一份，所以放在 `Arc` 里。
+    pub clip_paths: Arc<Vec<ClipPath>>,
+    /// 生效的文字剪切：每个 `BT … ET` 里剪切模式的文字合成一组。
+    pub clip_texts: Arc<Vec<Vec<ClipText>>>,
+}
+
+/// 一条路径剪切：`W`（非零）或 `W*`（奇偶），和到 `W` 为止的路径构造操作符（操作符名、操作数）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClipPath {
+    pub even_odd: bool,
+    pub ops: Vec<(&'static str, Vec<f64>)>,
+}
+
+/// 文字剪切里的一次显示：字体、字号、字节、渲染模式（`ops_diff.py` 还比文字矩阵，这里没有记行矩阵，不比）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClipText {
+    pub font: String,
+    pub size: f64,
+    pub data: Vec<u8>,
+    pub render_mode: i32,
 }
 
 impl Default for OpParams {
@@ -79,21 +103,24 @@ impl Default for OpParams {
             leading: 0.0,
             rise: 0.0,
             font: String::new(),
+            clip_paths: Arc::new(Vec::new()),
+            clip_texts: Arc::new(Vec::new()),
         }
     }
 }
 
-/// 一页重写前后的操作符级差异，三类各有几处（一个对象的一项算一处）。
+/// 一页重写前后的操作符级差异，四类各有几处（一个对象的一项算一处）。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct OpDiff {
     pub color: usize,
     pub gs: usize,
     pub text: usize,
+    pub clip: usize,
 }
 
 impl OpDiff {
     pub fn is_empty(&self) -> bool {
-        self.color == 0 && self.gs == 0 && self.text == 0
+        self.color == 0 && self.gs == 0 && self.text == 0 && self.clip == 0
     }
 }
 
@@ -131,6 +158,32 @@ fn close_matrix(a: &Matrix, b: &Matrix) -> bool {
     ]
     .iter()
     .all(|(x, y)| close(*x, *y))
+}
+
+fn same_clip_path(x: &ClipPath, y: &ClipPath) -> bool {
+    x.even_odd == y.even_odd
+        && x.ops.len() == y.ops.len()
+        && x.ops.iter().zip(&y.ops).all(|((na, va), (nb, vb))| {
+            na == nb
+                && va.len() == vb.len()
+                && va
+                    .iter()
+                    .zip(vb)
+                    .all(|(p, q)| (p - q).abs() <= DASH_TOLERANCE)
+        })
+}
+
+/// 重写之后的路径剪切 `after` 有没有保住原来的 `before`：一样，或者只是按顺序少了几条。
+///
+/// 只少了几条不算差异：PDFium 解析时会去掉包得住对象的单个矩形剪切（`CPDF_ContentParser::CheckClip`），
+/// 内存里的对象本来就没有这条剪切，重写之后内容流里也就没有了，画面一样，编辑器里看到的也是没有剪切的
+/// 样子（2026-11-23 定的口径；`ops_diff.py` 把这种情况也算作差异）。剪切的规则或路径变了、多出来的，才算。
+fn clip_paths_kept(before: &[ClipPath], after: &[ClipPath]) -> bool {
+    if before.len() == after.len() {
+        return before.iter().zip(after).all(|(x, y)| same_clip_path(x, y));
+    }
+    let mut rest = before.iter();
+    after.len() < before.len() && after.iter().all(|y| rest.any(|x| same_clip_path(x, y)))
 }
 
 /// 画这个对象要用描边的那一套参数（`ops_diff.py` 里记 `line` 的事件）。
@@ -190,6 +243,23 @@ fn compare_objects(a: &MappedObject, b: &MappedObject, diff: &mut OpDiff) {
         diff.gs += line.iter().filter(|same| !**same).count();
     }
 
+    let same_paths = clip_paths_kept(&pa.clip_paths, &pb.clip_paths);
+    let same_texts = pa.clip_texts.len() == pb.clip_texts.len()
+        && pa
+            .clip_texts
+            .iter()
+            .zip(pb.clip_texts.iter())
+            .all(|(x, y)| {
+                x.len() == y.len()
+                    && x.iter().zip(y).all(|(p, q)| {
+                        p.font == q.font
+                            && (p.size - q.size).abs() <= DASH_TOLERANCE
+                            && p.data == q.data
+                            && p.render_mode == q.render_mode
+                    })
+            });
+    diff.clip += usize::from(!same_paths) + usize::from(!same_texts);
+
     if let (Detail::Text(ta), Detail::Text(tb)) = (&a.detail, &b.detail) {
         let text = [
             close(pa.char_spacing, pb.char_spacing),
@@ -248,6 +318,66 @@ mod tests {
             diff(b"0.5 g 0 0 1 1 re f", b"0.5 0.5 0.5 rg 0 0 1 1 re f").map(|d| d.color),
             Some(1)
         );
+    }
+
+    #[test]
+    fn clips_are_compared_by_rule_operators_and_text() {
+        assert_eq!(
+            diff(b"0 0 10 10 re W n 0 0 1 1 re f", b"0 0 1 1 re f"),
+            Some(OpDiff::default()),
+            "只是少了剪切（PDFium 解析时去掉的多余矩形）不算"
+        );
+        assert_eq!(
+            diff(
+                b"0 0 10 10 re W n 2 2 5 5 re W n 0 0 1 1 re f",
+                b"0 0 10 10 re W n 0 0 1 1 re f"
+            ),
+            Some(OpDiff::default()),
+            "按顺序少了一条也不算"
+        );
+        assert_eq!(
+            diff(
+                b"0 0 10 10 re W n 0 0 1 1 re f",
+                b"0 0 20 10 re W n 0 0 1 1 re f"
+            )
+            .map(|d| d.clip),
+            Some(1),
+            "剪切的路径变了"
+        );
+        assert_eq!(
+            diff(b"0 0 1 1 re f", b"0 0 10 10 re W n 0 0 1 1 re f").map(|d| d.clip),
+            Some(1),
+            "多出来一条剪切"
+        );
+        assert_eq!(
+            diff(
+                b"q 0 0 10 10 re W n 0 0 1 1 re f Q",
+                b"q 0 0 10 10.001 re W n 0 0 1 1 re f Q"
+            ),
+            Some(OpDiff::default()),
+            "容差之内"
+        );
+        assert_eq!(
+            diff(
+                b"0 0 10 10 re W n 0 0 1 1 re f",
+                b"0 0 10 10 re W* n 0 0 1 1 re f"
+            )
+            .map(|d| d.clip),
+            Some(1),
+            "规则变了"
+        );
+        assert_eq!(
+            diff(b"q 0 0 10 10 re W n Q 0 0 1 1 re f", b"0 0 1 1 re f"),
+            Some(OpDiff::default()),
+            "Q 之后剪切就没了"
+        );
+        let text_clip = b"BT /F1 10 Tf 7 Tr (ab) Tj ET 0 0 1 1 re f";
+        assert_eq!(
+            diff(text_clip, b"BT /F1 10 Tf 7 Tr (ac) Tj ET 0 0 1 1 re f").map(|d| d.clip),
+            Some(1),
+            "文字剪切的字不一样"
+        );
+        assert_eq!(diff(text_clip, text_clip), Some(OpDiff::default()));
     }
 
     #[test]

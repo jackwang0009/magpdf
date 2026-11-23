@@ -26,16 +26,16 @@
 
 use std::collections::VecDeque;
 use std::ops::Range;
+use std::sync::Arc;
 
-use super::ops::OpParams;
+use super::ops::{ClipPath, ClipText, OpParams};
 use super::resources::{FontLookup, GsParam, Resources, XObjectKind};
 use super::{
     CLIP_SLACK, Detail, FillHistory, FillRule, ImageDetail, MappedObject, Matrix, ObjKind,
     PathDetail, Rect, ShadingGroup, ShowKind, TextDetail, Unmatched,
 };
 use crate::content::inline::{InlineOutcome, dict_int, handle_begin_image};
-use crate::content::parser::dict_get;
-use crate::content::parser::{Element, Number, Obj, StreamParser, name_decode};
+use crate::content::parser::{Element, Number, Obj, StreamParser, dict_get, name_decode};
 
 /// `kParamBufSize`。
 const PARAM_BUF: usize = 16;
@@ -215,6 +215,12 @@ struct Interp<'r> {
     in_text: bool,
     /// 这个文字块里有剪切模式的文字，`ET` 时并入剪切。
     clip_texts: bool,
+    /// 正在构造的路径的操作符（名字、操作数），操作符级比对的剪切一项用。路径画完或者 `n` 时清空。
+    path_ops: Vec<(&'static str, Vec<f64>)>,
+    /// `W`/`W*` 记下、等这条路径画完时生效的剪切（`ops_diff.py` 在 `W` 时就记，路径自己也算在剪切里）。
+    pending_clip: Option<ClipPath>,
+    /// 这个文字块里剪切模式的文字，`ET` 时合成一组文字剪切（操作符级比对用）。
+    bt_clip_texts: Vec<ClipText>,
     objects: Vec<MappedObject>,
     operators: usize,
 }
@@ -230,6 +236,9 @@ pub(super) fn interpret(data: &[u8], resources: &dyn Resources) -> Outcome {
         path: PathState::default(),
         in_text: false,
         clip_texts: false,
+        path_ops: Vec::new(),
+        pending_clip: None,
+        bt_clip_texts: Vec::new(),
         objects: Vec::new(),
         operators: 0,
     };
@@ -392,6 +401,7 @@ impl Interp<'_> {
             b"m" => {
                 if count == 2 {
                     let (x, y) = self.point(0);
+                    self.record_path_op("m", &[x, y]);
                     self.add_path_point(x, y, PointKind::Move, operands);
                     self.parse_path_object(parser);
                 }
@@ -399,16 +409,21 @@ impl Interp<'_> {
             b"l" => {
                 if count == 2 {
                     let (x, y) = self.point(0);
+                    self.record_path_op("l", &[x, y]);
                     self.add_path_point(x, y, PointKind::Line, operands);
                 }
             }
             b"c" => {
+                let values: Vec<f32> = (0..6).rev().map(|i| self.number(i)).collect();
+                self.record_path_op("c", &values);
                 for index in [4, 2, 0] {
                     let (x, y) = self.point(index);
                     self.add_path_point(x, y, PointKind::Bezier, operands);
                 }
             }
             b"v" => {
+                let values: Vec<f32> = (0..4).rev().map(|i| self.number(i)).collect();
+                self.record_path_op("v", &values);
                 let (cx, cy) = self.path.current;
                 self.add_path_point(cx, cy, PointKind::Bezier, operands);
                 for index in [2, 0] {
@@ -417,12 +432,17 @@ impl Interp<'_> {
                 }
             }
             b"y" => {
+                let values: Vec<f32> = (0..4).rev().map(|i| self.number(i)).collect();
+                self.record_path_op("y", &values);
                 for index in [2, 0, 0] {
                     let (x, y) = self.point(index);
                     self.add_path_point(x, y, PointKind::Bezier, operands);
                 }
             }
-            b"h" => self.close_path(),
+            b"h" => {
+                self.record_path_op("h", &[]);
+                self.close_path();
+            }
             b"re" => {
                 let (x, y, w, h) = (
                     self.number(3),
@@ -430,6 +450,7 @@ impl Interp<'_> {
                     self.number(1),
                     self.number(0),
                 );
+                self.record_path_op("re", &[x, y, w, h]);
                 self.add_path_rect(x, y, w, h, operands);
             }
             b"W" | b"W*" => {
@@ -437,6 +458,10 @@ impl Interp<'_> {
                 if !self.path.points.is_empty() {
                     self.path.clips_in_span += 1;
                 }
+                self.pending_clip = Some(ClipPath {
+                    even_odd: op == b"W*",
+                    ops: self.path_ops.clone(),
+                });
             }
 
             // ---- 路径绘制 ----
@@ -568,6 +593,7 @@ impl Interp<'_> {
                 self.state.tm = Matrix::IDENTITY;
                 self.line_reset();
                 self.in_text = true;
+                self.bt_clip_texts.clear();
             }
             b"ET" => {
                 if self.clip_texts {
@@ -576,6 +602,11 @@ impl Interp<'_> {
                         self.state.text_clip = true;
                     }
                     self.clip_texts = false;
+                }
+                // 操作符级比对的文字剪切，照 `ops_diff.py`：看的是 `ET` 时的渲染模式。
+                let texts = std::mem::take(&mut self.bt_clip_texts);
+                if (4..=7).contains(&self.state.render_mode) && !texts.is_empty() {
+                    Arc::make_mut(&mut self.state.params.clip_texts).push(texts);
                 }
                 self.in_text = false;
             }
@@ -782,20 +813,24 @@ impl Interp<'_> {
                     let [p0, p1, p2, p3, p4, p5] = params;
                     match parser.word() {
                         b"m" => {
+                            self.record_path_op("m", &[p0, p1]);
                             self.add_path_point(p0, p1, PointKind::Move, operands);
                             true
                         }
                         b"l" => {
+                            self.record_path_op("l", &[p0, p1]);
                             self.add_path_point(p0, p1, PointKind::Line, operands);
                             true
                         }
                         b"c" => {
+                            self.record_path_op("c", &[p0, p1, p2, p3, p4, p5]);
                             self.add_path_point(p0, p1, PointKind::Bezier, operands);
                             self.add_path_point(p2, p3, PointKind::Bezier, operands);
                             self.add_path_point(p4, p5, PointKind::Bezier, operands);
                             true
                         }
                         b"v" => {
+                            self.record_path_op("v", &[p0, p1, p2, p3]);
                             let (cx, cy) = self.path.current;
                             self.add_path_point(cx, cy, PointKind::Bezier, operands);
                             self.add_path_point(p0, p1, PointKind::Bezier, operands);
@@ -803,16 +838,19 @@ impl Interp<'_> {
                             true
                         }
                         b"y" => {
+                            self.record_path_op("y", &[p0, p1, p2, p3]);
                             self.add_path_point(p0, p1, PointKind::Bezier, operands);
                             self.add_path_point(p2, p3, PointKind::Bezier, operands);
                             self.add_path_point(p2, p3, PointKind::Bezier, operands);
                             true
                         }
                         b"h" => {
+                            self.record_path_op("h", &[]);
                             self.close_path();
                             true
                         }
                         b"re" => {
+                            self.record_path_op("re", &[p0, p1, p2, p3]);
                             self.add_path_rect(p0, p1, p2, p3, operands);
                             true
                         }
@@ -832,8 +870,21 @@ impl Interp<'_> {
         }
     }
 
+    /// 记一个路径构造操作符（操作数按 `ops_diff.py` 的写法保留 4 位小数）。
+    fn record_path_op(&mut self, name: &'static str, values: &[f32]) {
+        let values = values
+            .iter()
+            .map(|v| (f64::from(*v) * 10_000.0).round() / 10_000.0)
+            .collect();
+        self.path_ops.push((name, values));
+    }
+
     /// `AddPathObject`：绘制操作符和 `n` 都走这里。
     fn add_path_object(&mut self, fill: FillRule, stroke: bool, op: Range<usize>, operands: usize) {
+        self.path_ops.clear();
+        if let Some(clip) = self.pending_clip.take() {
+            Arc::make_mut(&mut self.state.params.clip_paths).push(clip);
+        }
         let mut points = std::mem::take(&mut self.path.points);
         let clip = self.path.clip.take();
         let span_start = self.path.span_start.take();
@@ -1075,8 +1126,8 @@ impl Interp<'_> {
 
     /// `Handle_ShowText`（`'`、`"` 先换行再走这里）。
     fn show_string(&mut self, kind: ShowKind, op: Range<usize>, operands: usize) {
-        let non_empty = !self.string(0).is_empty();
-        self.show(kind, non_empty, op, operands);
+        let data = self.string(0);
+        self.show(kind, data, op, operands);
     }
 
     /// `Handle_ShowText_Positioning`。
@@ -1085,13 +1136,29 @@ impl Interp<'_> {
         else {
             return;
         };
-        let non_empty = items
+        let data: Vec<u8> = items
             .iter()
-            .any(|item| matches!(item, Obj::Str(s) if !s.is_empty()));
-        self.show(ShowKind::ShowArray, non_empty, op, operands);
+            .filter_map(|item| match item {
+                Obj::Str(s) => Some(s.as_slice()),
+                _ => None,
+            })
+            .flatten()
+            .copied()
+            .collect();
+        self.show(ShowKind::ShowArray, data, op, operands);
     }
 
-    fn show(&mut self, kind: ShowKind, non_empty: bool, op: Range<usize>, operands: usize) {
+    /// `data` 是这一次显示的全部字节（`TJ` 把各段字符串接起来）。
+    fn show(&mut self, kind: ShowKind, data: Vec<u8>, op: Range<usize>, operands: usize) {
+        let non_empty = !data.is_empty();
+        if non_empty && (4..=7).contains(&self.state.render_mode) {
+            self.bt_clip_texts.push(ClipText {
+                font: self.state.params.font.clone(),
+                size: (f64::from(self.state.font_size) * 10_000.0).round() / 10_000.0,
+                data,
+                render_mode: self.state.render_mode,
+            });
+        }
         let at_line_start = self.state.at_line_start;
         if matches!(kind, ShowKind::Show | ShowKind::ShowArray)
             && let Some(previous) = self.state.last_show

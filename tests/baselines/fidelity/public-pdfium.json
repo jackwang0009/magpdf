@@ -2,9 +2,9 @@
  "format": 1,
  "kind": "magpdf-fidelity-baseline",
  "meta": {
-  "cli_sha256": "917495e7af6f60ec0d1d7d1cebdaa83751324233b3127bafbadf60f90191728d",
-  "commit": "17cc424a50f57d7ddd3e8947c0412dab8e98ceb4",
-  "generated": "2026-11-19T17:44:44+08:00",
+  "cli_sha256": "0b297a6c83f88c01608fc85fa38c71686ac2c585077170f8c9865dcc47c27cfe",
+  "commit": "17d61436c6cc666cba78e5b1db1d1a3876928077",
+  "generated": "2026-11-23T10:11:58+08:00",
   "machine": "JACK",
   "pdfium_dll_sha256": "71a3e63e6ab8f5746a0fc9de9bc3d0c0dc07eb60990dfd37d9db7fc891821943",
   "pdfium_version": "159.0.8138.0"
@@ -371,7 +371,7 @@
   ]},
   {"path": "bug_644.pdf", "status": "error", "error": "打开文档失败：Password", "pages": []},
   {"path": "bug_650.pdf", "status": "ok", "pages": [
-   {"page": 1, "editable": true}
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的剪切变了"}
   ]},
   {"path": "bug_664284.pdf", "status": "ok", "pages": [
    {"page": 1, "editable": false, "reason": "重新生成内容流后对象的颜色空间变了"}
@@ -643,7 +643,7 @@
    {"page": 1, "editable": true}
   ]},
   {"path": "latin_extended.pdf", "status": "ok", "pages": [
-   {"page": 1, "editable": true}
+   {"page": 1, "editable": false, "reason": "重新生成内容流后对象的剪切变了"}
   ]},
   {"path": "launch_action.pdf", "status": "ok", "pages": [
    {"page": 1, "editable": true}

@@ -117,6 +117,8 @@ pwsh scripts/nightly-roundtrip.ps1 -PublicPdfium <目录> -BaselineDir tests/out
 
 现在入库的两份是 2026-11-19 在开发机上用 `17cc424` 的命令行工具配原版预编译库生成的：自制样本 61 份 70 页，能改 6 页；
 PDFium 公开测试集 346 份 388 页，能改 183 页，31 份文件不是 `ok`（打不开的、有一页加载不了的，另有 `bad_page_type.pdf` 让 PDFium 自己崩溃）。
+2026-11-23 保真校验加上剪切比对，`public-pdfium.json` 按第 1 条换了：`bug_650.pdf`、`latin_extended.pdf` 第 1 页从能改变成
+“重新生成内容流后对象的剪切变了”，现在能改 181 页（V06 报告 12.2）；自制样本没有变。
 
 ## 其他
 

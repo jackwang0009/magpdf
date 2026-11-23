@@ -31,6 +31,7 @@ struct PageResult {
     color: usize,
     gs: usize,
     text: usize,
+    clip: usize,
 }
 
 pub fn run(args: &OpsDiffArgs) -> Result<()> {
@@ -55,6 +56,7 @@ pub fn run(args: &OpsDiffArgs) -> Result<()> {
                 color: d.color,
                 gs: d.gs,
                 text: d.text,
+                clip: d.clip,
             }
         })
         .collect();
